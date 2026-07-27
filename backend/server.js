@@ -1,4 +1,6 @@
-import "dotenv/config";
+import dotenv from "dotenv";
+import path from "path";
+import { fileURLToPath } from "url";
 import express from "express";
 import cors from "cors";
 import apiRoutes from "./src/routes/api.js";
@@ -8,6 +10,10 @@ import { startPriceRefreshInterval } from "./src/modelPrices.js";
 import { getCreditConfig } from "./src/credits.js";
 import { syncConfigToEnv } from "./src/services/configService.js";
 import { startReminderScheduler } from "./src/services/reminderService.js";
+
+// Always load backend/.env (PM2 may start with a different cwd)
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+dotenv.config({ path: path.join(__dirname, ".env") });
 
 const app = express();
 const PORT = process.env.PORT || 4000;
