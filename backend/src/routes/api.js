@@ -18,6 +18,7 @@ import { getWallet, topUpWallet } from "../services/walletService.js";
 import { setPendingReviews, runReminderSweep } from "../services/reminderService.js";
 import { getCreditConfig } from "../credits.js";
 import { getPriceCacheStats, getAllModelPrices } from "../modelPrices.js";
+import { analyzeSite } from "../services/siteAnalyzer.js";
 import prisma from "../db.js";
 
 const router = Router();
@@ -37,6 +38,24 @@ router.post("/leads", async (req, res) => {
     const result = await createLead({ ...req.body, source: req.body.source || "contact" });
     if (!result.ok) return res.status(400).json(result);
     res.status(201).json({ ok: true, message: "Thank you — we will contact you soon." });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/** Root domain → crawl sitemap/pages → extract primary & secondary keywords */
+router.post("/site/analyze", async (req, res) => {
+  try {
+    const { domain, email } = req.body;
+    if (email) {
+      const user = await prisma.user.findUnique({ where: { email: String(email).trim().toLowerCase() } });
+      if (!user || !isFullyVerified(user)) {
+        return res.status(403).json({ error: "Verification required" });
+      }
+    }
+    const result = await analyzeSite(domain);
+    if (!result.ok) return res.status(400).json(result);
+    res.json(result);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

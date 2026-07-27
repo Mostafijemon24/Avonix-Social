@@ -134,6 +134,22 @@ export const api = {
       body: JSON.stringify(payload),
     }),
 
+  analyzeSite: (payload: { domain: string; email?: string }) =>
+    request<{
+      ok: boolean;
+      domain: string;
+      urlCount: number;
+      pagesAnalyzed: number;
+      sampleUrls: string[];
+      primaryKeyword: string;
+      secondaryKeywords: string[];
+      location: string;
+      address: string;
+      needsLocation: boolean;
+      method: string;
+      error?: string;
+    }>("/site/analyze", { method: "POST", body: JSON.stringify(payload) }),
+
   subscribe: (payload: {
     email: string;
     plan: string;
