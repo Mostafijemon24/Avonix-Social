@@ -22,6 +22,7 @@ export const api = {
       email: string;
       phone: string;
       next: string;
+      delivery?: { email?: string; sms?: string };
     }>("/auth/register", { method: "POST", body: JSON.stringify(payload) }),
 
   verify: (payload: { email: string; emailCode: string; phoneCode: string }) =>

@@ -95,14 +95,25 @@ export function RegisterFlow() {
     const em = (form.get("email") as string).trim().toLowerCase();
     setEmail(em);
     try {
-      await api.register({
+      const result = await api.register({
         email: em,
         phone: form.get("phone") as string,
         name: form.get("name") as string,
         company: (form.get("company") as string) || undefined,
       });
       setStep("verify");
-      showToast("Verification codes sent to your email and phone.", "success");
+      const emailStatus = result.delivery?.email;
+      const smsStatus = result.delivery?.sms;
+      if (emailStatus === "sent" && smsStatus === "sent") {
+        showToast("Codes sent to your email and US phone.", "success");
+      } else if (emailStatus === "failed" || smsStatus === "failed") {
+        showToast(
+          "Could not deliver OTP. Check email/SMS settings or try again.",
+          "error"
+        );
+      } else {
+        showToast("Verification codes sent (check email & SMS).", "success");
+      }
     } catch (err: unknown) {
       showToast(
         err && typeof err === "object" && "error" in err
@@ -216,7 +227,16 @@ export function RegisterFlow() {
           <form onSubmit={handleRegister} className="space-y-3 text-xs">
             <Field label="Full Name" name="name" required />
             <Field label="Work Email" name="email" type="email" defaultValue={email} required />
-            <Field label="Mobile Phone" name="phone" type="tel" placeholder="+1..." required />
+            <Field
+              label="US Mobile Phone"
+              name="phone"
+              type="tel"
+              placeholder="+1 555 123 4567"
+              required
+            />
+            <p className="text-[10px] text-slate-500 -mt-1">
+              US number only. Format: +1 followed by 10 digits. SMS OTP will be sent here.
+            </p>
             <Field label="Company (optional)" name="company" />
             <button
               type="submit"

@@ -3,7 +3,7 @@
  */
 import crypto from "crypto";
 import prisma from "../db.js";
-import { notifyUser } from "./notifyService.js";
+import { sendRegistrationOtps, normalizeUsPhone } from "./notifyService.js";
 
 const OTP_TTL_MS = 10 * 60 * 1000; // 10 minutes
 const IS_PRODUCTION = process.env.NODE_ENV === "production";
@@ -22,13 +22,16 @@ function generateOtp() {
 
 export async function startRegistration({ email, phone, name, company }) {
   const normalizedEmail = (email || "").trim().toLowerCase();
-  const normalizedPhone = (phone || "").replace(/\s+/g, "");
+  const normalizedPhone = normalizeUsPhone(phone);
 
   if (!normalizedEmail.includes("@")) {
     return { ok: false, error: "Valid email required" };
   }
-  if (!normalizedPhone || normalizedPhone.length < 8) {
-    return { ok: false, error: "Valid phone number required" };
+  if (!normalizedPhone) {
+    return {
+      ok: false,
+      error: "Valid US phone required. Format: +1XXXXXXXXXX (10 digits after +1)",
+    };
   }
 
   let user = await prisma.user.findUnique({
@@ -96,15 +99,20 @@ export async function startRegistration({ email, phone, name, company }) {
     ],
   });
 
-  // Dispatch OTPs (demo logs codes when providers unset)
-  await notifyUser(user.id, {
-    type: "verify",
-    title: "Your Avonix Social email verification code",
-    body: `Your email verification code is: ${emailCode}. Valid for 10 minutes.`,
-  });
+  const delivery = await sendRegistrationOtps(user, { emailCode, phoneCode });
+
   if (!IS_PRODUCTION) {
     console.log(`[OTP email→${normalizedEmail}] ${emailCode}`);
     console.log(`[OTP sms→${normalizedPhone}] ${phoneCode}`);
+  }
+
+  if (IS_PRODUCTION) {
+    console.log("[OTP delivery]", {
+      email: delivery.email?.status,
+      sms: delivery.sms?.status,
+      emailError: delivery.email?.error || null,
+      smsError: delivery.sms?.error || null,
+    });
   }
 
   return {
@@ -113,6 +121,10 @@ export async function startRegistration({ email, phone, name, company }) {
     email: user.email,
     phone: user.phone,
     next: "verify_codes",
+    delivery: {
+      email: delivery.email?.status,
+      sms: delivery.sms?.status,
+    },
   };
 }
 

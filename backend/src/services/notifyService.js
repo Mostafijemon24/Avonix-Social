@@ -1,8 +1,8 @@
 /**
- * Multi-channel notifications: Email, WhatsApp, Telegram
- * Production: set SMTP / Twilio / TELEGRAM_BOT_TOKEN in ApiConfig or .env
- * Dev/demo: logs to NotificationLog with status "demo"
+ * Multi-channel notifications: Email (Hostinger SMTP), SMS (Twilio US), WhatsApp, Telegram
  */
+import nodemailer from "nodemailer";
+import twilio from "twilio";
 import prisma from "../db.js";
 import { getConfig } from "./configService.js";
 
@@ -12,7 +12,7 @@ export async function notifyUser(userId, { type, title, body }) {
 
   const results = [];
 
-  if (user.notifyEmail && user.email) {
+  if (user.notifyEmail !== false && user.email) {
     results.push(await sendEmail(user, { type, title, body }));
   }
   if (user.notifyWhatsapp && (user.whatsappNumber || user.phone)) {
@@ -22,12 +22,28 @@ export async function notifyUser(userId, { type, title, body }) {
     results.push(await sendTelegram(user, { type, title, body }));
   }
 
-  // Always ensure at least email channel attempt if prefs all off
   if (results.length === 0 && user.email) {
     results.push(await sendEmail(user, { type, title, body }));
   }
 
   return { ok: true, results };
+}
+
+/** Registration OTP: email + SMS separately */
+export async function sendRegistrationOtps(user, { emailCode, phoneCode }) {
+  const emailResult = await sendEmail(user, {
+    type: "verify",
+    title: "Avonix Social — Email verification code",
+    body: `Your email verification code is: ${emailCode}\n\nValid for 10 minutes. If you did not request this, ignore this email.`,
+  });
+
+  const smsResult = await sendSms(user.phone, {
+    type: "verify",
+    body: `Avonix Social code: ${phoneCode}. Valid 10 min.`,
+    userId: user.id,
+  });
+
+  return { email: emailResult, sms: smsResult };
 }
 
 async function logNotification(userId, channel, type, title, body, status) {
@@ -36,30 +52,125 @@ async function logNotification(userId, channel, type, title, body, status) {
   });
 }
 
-async function sendEmail(user, { type, title, body }) {
+async function getSmtpTransport() {
   const smtpUrl = await getConfig("SMTP_URL", process.env.SMTP_URL || "");
-  const from = await getConfig("SMTP_FROM", process.env.SMTP_FROM || "noreply@avonixsocial.com");
+  const host = await getConfig("SMTP_HOST", process.env.SMTP_HOST || "");
+  const port = Number(await getConfig("SMTP_PORT", process.env.SMTP_PORT || "465"));
+  const user = await getConfig("SMTP_USER", process.env.SMTP_USER || "");
+  const pass = await getConfig("SMTP_PASS", process.env.SMTP_PASS || "");
+
+  if (smtpUrl) {
+    return nodemailer.createTransport(smtpUrl);
+  }
+  if (host && user && pass) {
+    return nodemailer.createTransport({
+      host,
+      port,
+      secure: port === 465,
+      auth: { user, pass },
+    });
+  }
+  return null;
+}
+
+export async function sendEmail(user, { type, title, body }) {
+  const from =
+    (await getConfig("SMTP_FROM", process.env.SMTP_FROM || "")) ||
+    process.env.SMTP_USER ||
+    "noreply@avonixsocial.com";
 
   let status = "demo";
-  if (smtpUrl) {
+  let error = null;
+
+  const transport = await getSmtpTransport();
+  if (transport) {
     try {
-      // Optional: nodemailer when SMTP configured — for now mark as queued
+      await transport.sendMail({
+        from,
+        to: user.email,
+        subject: title,
+        text: body,
+        html: `<p style="font-family:sans-serif;font-size:15px;line-height:1.5;color:#111">${body.replace(/\n/g, "<br/>")}</p>`,
+      });
       status = "sent";
-      console.log(`[email→${user.email}] ${title}: ${body}`);
     } catch (err) {
       status = "failed";
-      console.error("Email send failed:", err.message);
+      error = err.message;
+      console.error(`[email FAILED→${user.email}]`, err.message);
     }
   } else {
     console.log(`[demo-email→${user.email}] ${title}: ${body}`);
   }
 
   await logNotification(user.id, "email", type, title, body, status);
-  return { channel: "email", status, to: user.email, from };
+  return { channel: "email", status, to: user.email, from, error };
+}
+
+/**
+ * Twilio SMS to US numbers (+1XXXXXXXXXX)
+ */
+export async function sendSms(phone, { type, body, userId }) {
+  const sid = await getConfig("TWILIO_ACCOUNT_SID", process.env.TWILIO_ACCOUNT_SID || "");
+  const token = await getConfig("TWILIO_AUTH_TOKEN", process.env.TWILIO_AUTH_TOKEN || "");
+  const from =
+    (await getConfig("TWILIO_SMS_FROM", process.env.TWILIO_SMS_FROM || "")) ||
+    (await getConfig("TWILIO_PHONE", process.env.TWILIO_PHONE || ""));
+
+  const to = normalizeUsPhone(phone);
+  let status = "demo";
+  let error = null;
+
+  if (sid && token && from && to) {
+    try {
+      const client = twilio(sid, token);
+      await client.messages.create({ from, to, body });
+      status = "sent";
+    } catch (err) {
+      status = "failed";
+      error = err.message;
+      console.error(`[sms FAILED→${to}]`, err.message);
+    }
+  } else {
+    console.log(`[demo-sms→${to || phone}] ${body}`);
+    if (!sid || !token || !from) {
+      error = "Twilio SMS not configured (TWILIO_ACCOUNT_SID / AUTH_TOKEN / SMS_FROM)";
+    } else if (!to) {
+      error = "Invalid US phone number. Use +1XXXXXXXXXX";
+    }
+  }
+
+  if (userId) {
+    await logNotification(userId, "sms", type, "SMS", body, status);
+  }
+  return { channel: "sms", status, to, from, error };
+}
+
+export function normalizeUsPhone(phone) {
+  if (!phone) return null;
+  const digits = String(phone).replace(/\D/g, "");
+
+  // Already +1 + 10 digits
+  if (String(phone).trim().startsWith("+1") && digits.length === 11 && digits.startsWith("1")) {
+    return `+${digits}`;
+  }
+  // 11 digits starting with 1
+  if (digits.length === 11 && digits.startsWith("1")) {
+    return `+${digits}`;
+  }
+  // 10-digit US local
+  if (digits.length === 10) {
+    return `+1${digits}`;
+  }
+  // International already with +
+  if (String(phone).trim().startsWith("+") && digits.length >= 10) {
+    return `+${digits}`;
+  }
+  return null;
 }
 
 async function sendWhatsApp(user, { type, title, body }) {
-  const to = user.whatsappNumber || user.phone;
+  const toRaw = user.whatsappNumber || user.phone;
+  const to = normalizeUsPhone(toRaw);
   const twilioSid = await getConfig("TWILIO_ACCOUNT_SID", process.env.TWILIO_ACCOUNT_SID || "");
   const twilioToken = await getConfig("TWILIO_AUTH_TOKEN", process.env.TWILIO_AUTH_TOKEN || "");
   const from = await getConfig("TWILIO_WHATSAPP_FROM", process.env.TWILIO_WHATSAPP_FROM || "");
@@ -67,14 +178,17 @@ async function sendWhatsApp(user, { type, title, body }) {
   let status = "demo";
   if (twilioSid && twilioToken && from && to) {
     try {
+      const client = twilio(twilioSid, twilioToken);
+      const waTo = to.startsWith("whatsapp:") ? to : `whatsapp:${to}`;
+      const waFrom = from.startsWith("whatsapp:") ? from : `whatsapp:${from}`;
+      await client.messages.create({ from: waFrom, to: waTo, body: `${title}\n\n${body}` });
       status = "sent";
-      console.log(`[whatsapp→${to}] ${title}: ${body}`);
     } catch (err) {
       status = "failed";
       console.error("WhatsApp send failed:", err.message);
     }
   } else {
-    console.log(`[demo-whatsapp→${to}] ${title}: ${body}`);
+    console.log(`[demo-whatsapp→${to || toRaw}] ${title}: ${body}`);
   }
 
   await logNotification(user.id, "whatsapp", type, title, body, status);
