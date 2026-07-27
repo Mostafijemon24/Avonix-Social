@@ -60,17 +60,22 @@ async function getSmtpTransport() {
   const pass = await getConfig("SMTP_PASS", process.env.SMTP_PASS || "");
 
   if (smtpUrl) {
-    return nodemailer.createTransport(smtpUrl);
+    return { transport: nodemailer.createTransport(smtpUrl), host: "smtpUrl", port, user };
   }
   if (host && user && pass) {
-    return nodemailer.createTransport({
+    return {
+      transport: nodemailer.createTransport({
+        host,
+        port,
+        secure: port === 465,
+        auth: { user, pass },
+      }),
       host,
       port,
-      secure: port === 465,
-      auth: { user, pass },
-    });
+      user,
+    };
   }
-  return null;
+  return { transport: null, host, port, user };
 }
 
 export async function sendEmail(user, { type, title, body }) {
@@ -82,7 +87,7 @@ export async function sendEmail(user, { type, title, body }) {
   let status = "demo";
   let error = null;
 
-  const transport = await getSmtpTransport();
+  const { transport, host, port, user: smtpUser } = await getSmtpTransport();
   if (transport) {
     try {
       await transport.sendMail({
@@ -93,13 +98,18 @@ export async function sendEmail(user, { type, title, body }) {
         html: `<p style="font-family:sans-serif;font-size:15px;line-height:1.5;color:#111">${body.replace(/\n/g, "<br/>")}</p>`,
       });
       status = "sent";
+      console.log(`[email SENT→${user.email}] via ${host}:${port} as ${smtpUser}`);
     } catch (err) {
       status = "failed";
       error = err.message;
-      console.error(`[email FAILED→${user.email}]`, err.message);
+      console.error(
+        `[email FAILED→${user.email}] host=${host} port=${port} user=${smtpUser} →`,
+        err.message
+      );
     }
   } else {
     console.log(`[demo-email→${user.email}] ${title}: ${body}`);
+    error = "SMTP not configured (SMTP_HOST / SMTP_USER / SMTP_PASS)";
   }
 
   await logNotification(user.id, "email", type, title, body, status);
