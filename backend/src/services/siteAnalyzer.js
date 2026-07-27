@@ -4,9 +4,9 @@
  */
 import { callOpenRouter } from "../openrouter.js";
 
-const FETCH_TIMEOUT_MS = 12000;
-const MAX_SITEMAP_URLS = 80;
-const MAX_PAGES_TO_FETCH = 12;
+const FETCH_TIMEOUT_MS = 8000;
+const MAX_SITEMAP_URLS = 60;
+const MAX_PAGES_TO_FETCH = 8;
 const USER_AGENT =
   "Mozilla/5.0 (compatible; AvonixSocialBot/1.0; +https://social.avonixai.com)";
 
@@ -258,16 +258,25 @@ export async function analyzeSite(domainInput) {
   ].slice(0, MAX_PAGES_TO_FETCH);
 
   const pages = [];
-  for (const url of prioritized) {
-    const html = await fetchText(url);
-    if (!html) continue;
-    const title = tagText(html, "title");
-    const h1 = tagText(html, "h1");
-    const h2s = allTagTexts(html, "h2");
-    const description =
-      metaContent(html, "description") || metaContent(html, "og:description");
-    const bodyText = stripHtml(html).slice(0, 8000);
-    pages.push({ url, title, h1, h2s, description, bodyText });
+  // Fetch pages in parallel batches (faster, avoids proxy timeouts)
+  for (let i = 0; i < prioritized.length; i += 4) {
+    const batch = prioritized.slice(i, i + 4);
+    const results = await Promise.all(
+      batch.map(async (url) => {
+        const html = await fetchText(url);
+        if (!html) return null;
+        return {
+          url,
+          title: tagText(html, "title"),
+          h1: tagText(html, "h1"),
+          h2s: allTagTexts(html, "h2"),
+          description:
+            metaContent(html, "description") || metaContent(html, "og:description"),
+          bodyText: stripHtml(html).slice(0, 8000),
+        };
+      })
+    );
+    for (const p of results) if (p) pages.push(p);
   }
 
   if (pages.length === 0) {

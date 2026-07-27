@@ -1,15 +1,29 @@
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000/api";
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
-    headers: { "Content-Type": "application/json", ...options?.headers },
-    ...options,
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}${path}`, {
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      ...options,
+    });
+  } catch {
+    throw { status: 0, error: `Cannot reach API (${API_BASE}). Is the backend running?` };
+  }
 
-  const data = await res.json();
+  const text = await res.text();
+  let data: Record<string, unknown> = {};
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch {
+    throw {
+      status: res.status,
+      error: `Invalid API response (${res.status}). Backend may be outdated — pull latest and restart avonix-api.`,
+    };
+  }
 
   if (!res.ok) {
-    throw { status: res.status, ...data };
+    throw { status: res.status, ...data, error: (data.error as string) || res.statusText };
   }
 
   return data as T;

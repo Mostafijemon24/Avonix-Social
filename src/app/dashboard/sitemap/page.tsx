@@ -5,7 +5,7 @@ import { useState } from "react";
 import { MapPin, Globe2, Sparkles } from "lucide-react";
 import { useToast } from "@/components/ui/Toast";
 import { useWorkspace } from "@/context/WorkspaceContext";
-import { api, isApiError } from "@/lib/api-client";
+import { api } from "@/lib/api-client";
 import { CreditCostBadge, InsufficientCreditsBanner } from "@/components/ui/CreditCostBadge";
 
 type Step = "domain" | "keywords" | "location";
@@ -43,17 +43,27 @@ export default function SitemapPage() {
 
     setLoading(true);
     try {
-      const spend = await api.spendFixed({
-        email: state.email,
-        action: "sitemap_parse",
-        metadata: { domain: domain.trim() },
-      });
-      applyApiCredits(spend.creditsLeft);
-
+      // Analyze first — only charge if it succeeds
       const result = await api.analyzeSite({
         domain: domain.trim(),
         email: state.email,
       });
+
+      if (!result.ok) {
+        showToast(result.error || "Site analysis failed.", "error");
+        return;
+      }
+
+      const spend = await api.spendFixed({
+        email: state.email,
+        action: "sitemap_parse",
+        metadata: {
+          domain: result.domain,
+          pagesAnalyzed: result.pagesAnalyzed,
+          urlCount: result.urlCount,
+        },
+      });
+      applyApiCredits(spend.creditsLeft);
 
       setPrimaryKeyword(result.primaryKeyword);
       setSecondaryText(result.secondaryKeywords.join(", "));
@@ -68,12 +78,16 @@ export default function SitemapPage() {
       setStep("keywords");
       await refreshState();
       showToast(
-        `Analyzed ${result.pagesAnalyzed} pages from ${result.urlCount} sitemap URLs. Review keywords, then add location.`,
+        `Analyzed ${result.pagesAnalyzed} pages (${result.urlCount} sitemap URLs). Review keywords, then add location.`,
         "success"
       );
     } catch (err) {
-      if (isApiError(err)) showToast(err.error, "error");
-      else showToast("Site analysis failed. Check the domain and try again.", "error");
+      const msg =
+        err && typeof err === "object" && "error" in err
+          ? String((err as { error: string }).error)
+          : "Site analysis failed. Check domain / API connection.";
+      showToast(msg, "error");
+      console.error("[analyzeSite]", err);
     } finally {
       setLoading(false);
     }

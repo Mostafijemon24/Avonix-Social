@@ -47,8 +47,13 @@ router.post("/leads", async (req, res) => {
 router.post("/site/analyze", async (req, res) => {
   try {
     const { domain, email } = req.body;
+    if (!domain || !String(domain).trim()) {
+      return res.status(400).json({ ok: false, error: "Domain is required, e.g. example.com" });
+    }
     if (email) {
-      const user = await prisma.user.findUnique({ where: { email: String(email).trim().toLowerCase() } });
+      const user = await prisma.user.findUnique({
+        where: { email: String(email).trim().toLowerCase() },
+      });
       if (!user || !isFullyVerified(user)) {
         return res.status(403).json({ error: "Verification required" });
       }
@@ -57,7 +62,8 @@ router.post("/site/analyze", async (req, res) => {
     if (!result.ok) return res.status(400).json(result);
     res.json(result);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error("[site/analyze]", err);
+    res.status(500).json({ ok: false, error: err.message || "Site analysis failed" });
   }
 });
 
