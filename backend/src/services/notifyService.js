@@ -107,7 +107,7 @@ export async function sendEmail(user, { type, title, body }) {
 }
 
 /**
- * Twilio SMS to US numbers (+1XXXXXXXXXX)
+ * Twilio SMS — any country E.164 number (+XXXXXXXXXXX)
  */
 export async function sendSms(phone, { type, body, userId }) {
   const sid = await getConfig("TWILIO_ACCOUNT_SID", process.env.TWILIO_ACCOUNT_SID || "");
@@ -116,7 +116,7 @@ export async function sendSms(phone, { type, body, userId }) {
     (await getConfig("TWILIO_SMS_FROM", process.env.TWILIO_SMS_FROM || "")) ||
     (await getConfig("TWILIO_PHONE", process.env.TWILIO_PHONE || ""));
 
-  const to = normalizeUsPhone(phone);
+  const to = normalizePhone(phone);
   let status = "demo";
   let error = null;
 
@@ -135,7 +135,7 @@ export async function sendSms(phone, { type, body, userId }) {
     if (!sid || !token || !from) {
       error = "Twilio SMS not configured (TWILIO_ACCOUNT_SID / AUTH_TOKEN / SMS_FROM)";
     } else if (!to) {
-      error = "Invalid US phone number. Use +1XXXXXXXXXX";
+      error = "Invalid phone number. Use international format with country code, e.g. +8801XXXXXXXXX or +1XXXXXXXXXX";
     }
   }
 
@@ -145,32 +145,56 @@ export async function sendSms(phone, { type, body, userId }) {
   return { channel: "sms", status, to, from, error };
 }
 
-export function normalizeUsPhone(phone) {
+/**
+ * Normalize to E.164 for any country.
+ * Accepts: +8801712345678, +15551234567, 01712345678 (BD local → +880), 5551234567 (US 10-digit → +1)
+ */
+export function normalizePhone(phone) {
   if (!phone) return null;
-  const digits = String(phone).replace(/\D/g, "");
+  const raw = String(phone).trim();
+  const digits = raw.replace(/\D/g, "");
 
-  // Already +1 + 10 digits
-  if (String(phone).trim().startsWith("+1") && digits.length === 11 && digits.startsWith("1")) {
+  if (!digits || digits.length < 8 || digits.length > 15) return null;
+
+  // Already has + country code
+  if (raw.startsWith("+") && digits.length >= 8 && digits.length <= 15) {
     return `+${digits}`;
   }
-  // 11 digits starting with 1
-  if (digits.length === 11 && digits.startsWith("1")) {
-    return `+${digits}`;
+
+  // Bangladesh local: 01XXXXXXXXX (11 digits)
+  if (digits.length === 11 && digits.startsWith("01")) {
+    return `+880${digits.slice(1)}`;
   }
-  // 10-digit US local
+  // Bangladesh without leading 0: 1XXXXXXXXX (10 digits) — ambiguous, treat as BD mobile if starts with 1 and length 10
+  // Prefer US for plain 10-digit (common Twilio default)
   if (digits.length === 10) {
     return `+1${digits}`;
   }
-  // International already with +
-  if (String(phone).trim().startsWith("+") && digits.length >= 10) {
+  // 11 digits starting with 1 → US
+  if (digits.length === 11 && digits.startsWith("1")) {
     return `+${digits}`;
   }
+  // 13 digits starting with 880 → BD
+  if (digits.startsWith("880") && digits.length >= 13) {
+    return `+${digits}`;
+  }
+
+  // Fallback: if looks like country code already (no +)
+  if (digits.length >= 11 && digits.length <= 15) {
+    return `+${digits}`;
+  }
+
   return null;
+}
+
+/** @deprecated use normalizePhone — kept for older imports */
+export function normalizeUsPhone(phone) {
+  return normalizePhone(phone);
 }
 
 async function sendWhatsApp(user, { type, title, body }) {
   const toRaw = user.whatsappNumber || user.phone;
-  const to = normalizeUsPhone(toRaw);
+  const to = normalizePhone(toRaw);
   const twilioSid = await getConfig("TWILIO_ACCOUNT_SID", process.env.TWILIO_ACCOUNT_SID || "");
   const twilioToken = await getConfig("TWILIO_AUTH_TOKEN", process.env.TWILIO_AUTH_TOKEN || "");
   const from = await getConfig("TWILIO_WHATSAPP_FROM", process.env.TWILIO_WHATSAPP_FROM || "");

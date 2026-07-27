@@ -3,7 +3,7 @@
  */
 import crypto from "crypto";
 import prisma from "../db.js";
-import { sendRegistrationOtps, normalizeUsPhone } from "./notifyService.js";
+import { sendRegistrationOtps, normalizePhone } from "./notifyService.js";
 
 const OTP_TTL_MS = 10 * 60 * 1000; // 10 minutes
 const IS_PRODUCTION = process.env.NODE_ENV === "production";
@@ -22,7 +22,7 @@ function generateOtp() {
 
 export async function startRegistration({ email, phone, name, company }) {
   const normalizedEmail = (email || "").trim().toLowerCase();
-  const normalizedPhone = normalizeUsPhone(phone);
+  const normalizedPhone = normalizePhone(phone);
 
   if (!normalizedEmail.includes("@")) {
     return { ok: false, error: "Valid email required" };
@@ -30,7 +30,7 @@ export async function startRegistration({ email, phone, name, company }) {
   if (!normalizedPhone) {
     return {
       ok: false,
-      error: "Valid US phone required. Format: +1XXXXXXXXXX (10 digits after +1)",
+      error: "Valid mobile required. Use country code, e.g. +8801XXXXXXXXX (BD) or +1XXXXXXXXXX (US)",
     };
   }
 

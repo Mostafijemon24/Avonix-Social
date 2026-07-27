@@ -105,7 +105,7 @@ export function RegisterFlow() {
       const emailStatus = result.delivery?.email;
       const smsStatus = result.delivery?.sms;
       if (emailStatus === "sent" && smsStatus === "sent") {
-        showToast("Codes sent to your email and US phone.", "success");
+        showToast("Codes sent to your email and phone.", "success");
       } else if (emailStatus === "failed" || smsStatus === "failed") {
         showToast(
           "Could not deliver OTP. Check email/SMS settings or try again.",
@@ -228,14 +228,14 @@ export function RegisterFlow() {
             <Field label="Full Name" name="name" required />
             <Field label="Work Email" name="email" type="email" defaultValue={email} required />
             <Field
-              label="US Mobile Phone"
+              label="Mobile Phone"
               name="phone"
               type="tel"
-              placeholder="+1 555 123 4567"
+              placeholder="+880 1712 345678"
               required
             />
             <p className="text-[10px] text-slate-500 -mt-1">
-              US number only. Format: +1 followed by 10 digits. SMS OTP will be sent here.
+              Any country. Include country code (e.g. +880… BD, +1… US, +44… UK). SMS OTP will be sent here.
             </p>
             <Field label="Company (optional)" name="company" />
             <button
