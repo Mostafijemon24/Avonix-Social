@@ -3,7 +3,7 @@ import { usdCostToCredits, getFixedCost } from "../credits.js";
 import { recordPayment } from "./adminService.js";
 import { callOpenRouter, extractUsage } from "../openrouter.js";
 import { ACTION_MODELS } from "../credits.js";
-import { getModelPricing } from "../modelPrices.js";
+import { getModelPricing, resolveAvailableModel } from "../modelPrices.js";
 import { assertNotFrozen, debitWalletForUsage } from "./walletService.js";
 import { stampActivity } from "./reminderService.js";
 import { isFullyVerified } from "./verifyService.js";
@@ -113,14 +113,15 @@ export async function generateContent({ email, action, prompt, model, metadata =
     };
   }
 
-  const selectedModel = model || ACTION_MODELS[action] || ACTION_MODELS.social_post;
+  const preferredModel = model || ACTION_MODELS[action] || ACTION_MODELS.social_post;
+  const selectedModel = resolveAvailableModel(preferredModel);
   const pricing = getModelPricing(selectedModel);
 
   if (!pricing) {
     return {
       ok: false,
       status: 400,
-      error: `Invalid or unsupported model: ${selectedModel}. Prices may still be loading.`,
+      error: `Invalid or unsupported model: ${preferredModel}. Prices may still be loading.`,
     };
   }
 

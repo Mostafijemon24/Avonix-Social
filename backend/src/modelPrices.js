@@ -12,20 +12,25 @@ let modelPrices = {};
 let lastFetched = null;
 
 const FALLBACK_PRICES = {
+  "google/gemini-2.5-flash": {
+    promptPrice: 0.0000003,
+    completionPrice: 0.0000025,
+    name: "Gemini 2.5 Flash",
+  },
   "google/gemini-2.0-flash-001": {
     promptPrice: 0.0000001,
     completionPrice: 0.0000004,
     name: "Gemini 2.0 Flash",
   },
-  "openai/gpt-4o": {
-    promptPrice: 0.0000025,
-    completionPrice: 0.00001,
-    name: "GPT-4o",
-  },
   "openai/gpt-4o-mini": {
     promptPrice: 0.00000015,
     completionPrice: 0.0000006,
     name: "GPT-4o Mini",
+  },
+  "openai/gpt-4o": {
+    promptPrice: 0.0000025,
+    completionPrice: 0.00001,
+    name: "GPT-4o",
   },
   "anthropic/claude-3.5-sonnet": {
     promptPrice: 0.000003,
@@ -82,7 +87,30 @@ export async function fetchModelPrices() {
 }
 
 export function getModelPricing(modelId) {
-  return modelPrices[modelId] ?? null;
+  if (modelPrices[modelId]) return modelPrices[modelId];
+  if (FALLBACK_PRICES[modelId]) return FALLBACK_PRICES[modelId];
+  return null;
+}
+
+/** Resolve a usable model id if the preferred one is missing from the live cache */
+export function resolveAvailableModel(preferred) {
+  if (preferred && getModelPricing(preferred)) return preferred;
+  const candidates = [
+    preferred,
+    process.env.DEFAULT_AI_MODEL,
+    "google/gemini-2.5-flash",
+    "openai/gpt-4o-mini",
+    "openai/gpt-4o",
+    "anthropic/claude-3-haiku",
+  ].filter(Boolean);
+
+  for (const id of candidates) {
+    if (getModelPricing(id)) return id;
+  }
+
+  // Last resort: first model in live cache
+  const first = Object.keys(modelPrices)[0];
+  return first || "openai/gpt-4o-mini";
 }
 
 export function getAllModelPrices() {

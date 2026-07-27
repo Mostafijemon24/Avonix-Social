@@ -21,9 +21,9 @@ export const FIXED_ACTION_COSTS = {
 
 /** Default OpenRouter models per action */
 export const ACTION_MODELS = {
-  social_post: "google/gemini-2.0-flash-001",
-  gbp_post: "google/gemini-2.0-flash-001",
-  review_reply: "google/gemini-2.0-flash-001",
+  social_post: process.env.DEFAULT_AI_MODEL || "google/gemini-2.5-flash",
+  gbp_post: process.env.DEFAULT_AI_MODEL || "google/gemini-2.5-flash",
+  review_reply: process.env.DEFAULT_AI_MODEL || "google/gemini-2.5-flash",
 };
 
 /**
