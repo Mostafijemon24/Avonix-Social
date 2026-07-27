@@ -107,42 +107,124 @@ export async function sendEmail(user, { type, title, body }) {
 }
 
 /**
- * Twilio SMS — any country E.164 number (+XXXXXXXXXXX)
+ * SMS via SignalWire (default/preferred) or Twilio
+ * Set SMS_PROVIDER=signalwire | twilio
  */
 export async function sendSms(phone, { type, body, userId }) {
+  const provider = (
+    (await getConfig("SMS_PROVIDER", process.env.SMS_PROVIDER || "")) ||
+    (process.env.SIGNALWIRE_PROJECT_ID ? "signalwire" : "twilio")
+  )
+    .toLowerCase()
+    .trim();
+
+  const to = normalizePhone(phone);
+  let status = "demo";
+  let error = null;
+  let from = "";
+
+  if (!to) {
+    error =
+      "Invalid phone number. Use country code, e.g. +8801XXXXXXXXX or +1XXXXXXXXXX";
+    console.log(`[demo-sms→${phone}] ${body}`);
+    if (userId) await logNotification(userId, "sms", type, "SMS", body, status);
+    return { channel: "sms", status, to: null, from, error, provider };
+  }
+
+  try {
+    if (provider === "signalwire") {
+      const result = await sendViaSignalWire(to, body);
+      status = result.status;
+      from = result.from;
+      error = result.error;
+    } else {
+      const result = await sendViaTwilio(to, body);
+      status = result.status;
+      from = result.from;
+      error = result.error;
+    }
+  } catch (err) {
+    status = "failed";
+    error = err.message;
+    console.error(`[sms FAILED→${to}]`, err.message);
+  }
+
+  if (status === "demo") {
+    console.log(`[demo-sms/${provider}→${to}] ${body}`);
+  }
+
+  if (userId) {
+    await logNotification(userId, "sms", type, "SMS", body, status);
+  }
+  return { channel: "sms", status, to, from, error, provider };
+}
+
+async function sendViaSignalWire(to, body) {
+  const projectId =
+    (await getConfig("SIGNALWIRE_PROJECT_ID", process.env.SIGNALWIRE_PROJECT_ID || "")) ||
+    process.env.SIGNALWIRE_PROJECT ||
+    "";
+  const apiToken = await getConfig(
+    "SIGNALWIRE_API_TOKEN",
+    process.env.SIGNALWIRE_API_TOKEN || ""
+  );
+  let space = await getConfig("SIGNALWIRE_SPACE_URL", process.env.SIGNALWIRE_SPACE_URL || "");
+  const from =
+    (await getConfig("SIGNALWIRE_SMS_FROM", process.env.SIGNALWIRE_SMS_FROM || "")) ||
+    (await getConfig("TWILIO_SMS_FROM", process.env.TWILIO_SMS_FROM || ""));
+
+  if (!projectId || !apiToken || !space || !from) {
+    return {
+      status: "demo",
+      from,
+      error:
+        "SignalWire not configured (SIGNALWIRE_PROJECT_ID / API_TOKEN / SPACE_URL / SMS_FROM)",
+    };
+  }
+
+  // Accept: avonix.signalwire.com or https://avonix.signalwire.com
+  space = space.replace(/^https?:\/\//, "").replace(/\/$/, "");
+
+  const url = `https://${space}/api/laml/2010-04-01/Accounts/${encodeURIComponent(projectId)}/Messages.json`;
+  const auth = Buffer.from(`${projectId}:${apiToken}`).toString("base64");
+  const form = new URLSearchParams({ To: to, From: from, Body: body });
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Basic ${auth}`,
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: form.toString(),
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    console.error(`[signalwire FAILED→${to}]`, res.status, text);
+    return { status: "failed", from, error: `SignalWire ${res.status}: ${text.slice(0, 200)}` };
+  }
+
+  return { status: "sent", from, error: null };
+}
+
+async function sendViaTwilio(to, body) {
   const sid = await getConfig("TWILIO_ACCOUNT_SID", process.env.TWILIO_ACCOUNT_SID || "");
   const token = await getConfig("TWILIO_AUTH_TOKEN", process.env.TWILIO_AUTH_TOKEN || "");
   const from =
     (await getConfig("TWILIO_SMS_FROM", process.env.TWILIO_SMS_FROM || "")) ||
     (await getConfig("TWILIO_PHONE", process.env.TWILIO_PHONE || ""));
 
-  const to = normalizePhone(phone);
-  let status = "demo";
-  let error = null;
-
-  if (sid && token && from && to) {
-    try {
-      const client = twilio(sid, token);
-      await client.messages.create({ from, to, body });
-      status = "sent";
-    } catch (err) {
-      status = "failed";
-      error = err.message;
-      console.error(`[sms FAILED→${to}]`, err.message);
-    }
-  } else {
-    console.log(`[demo-sms→${to || phone}] ${body}`);
-    if (!sid || !token || !from) {
-      error = "Twilio SMS not configured (TWILIO_ACCOUNT_SID / AUTH_TOKEN / SMS_FROM)";
-    } else if (!to) {
-      error = "Invalid phone number. Use international format with country code, e.g. +8801XXXXXXXXX or +1XXXXXXXXXX";
-    }
+  if (!sid || !token || !from) {
+    return {
+      status: "demo",
+      from,
+      error: "Twilio not configured (TWILIO_ACCOUNT_SID / AUTH_TOKEN / SMS_FROM)",
+    };
   }
 
-  if (userId) {
-    await logNotification(userId, "sms", type, "SMS", body, status);
-  }
-  return { channel: "sms", status, to, from, error };
+  const client = twilio(sid, token);
+  await client.messages.create({ from, to, body });
+  return { status: "sent", from, error: null };
 }
 
 /**
