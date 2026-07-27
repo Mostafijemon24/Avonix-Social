@@ -1,0 +1,48 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --color-orange: #ff6600;
+  --color-navy-950: #070d1d;
+  --color-navy-900: #0b132b;
+  --color-navy-800: #1c2541;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  font-family: var(--font-plus-jakarta), "Plus Jakarta Sans", sans-serif;
+}
+
+@layer utilities {
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  .custom-scrollbar::-webkit-scrollbar-track {
+    background: #070d1d;
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    background: #2a3759;
+    border-radius: 4px;
+  }
+
+  .glass-panel {
+    background: rgba(11, 19, 43, 0.85);
+    backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+  }
+
+  .glass-card {
+    background: rgba(28, 37, 65, 0.5);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    transition: border-color 0.2s ease;
+  }
+
+  .glass-card:hover {
+    border-color: rgba(255, 102, 0, 0.4);
+  }
+}

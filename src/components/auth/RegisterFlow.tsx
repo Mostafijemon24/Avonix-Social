@@ -1,0 +1,313 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import Link from "next/link";
+import { useToast } from "@/components/ui/Toast";
+import { useWorkspace } from "@/context/WorkspaceContext";
+import { api } from "@/lib/api-client";
+
+type Step = "signin" | "register" | "verify" | "card";
+
+function stepFromNext(next?: string): Step {
+  if (next === "verify_codes") return "verify";
+  if (next === "add_card") return "card";
+  return "signin";
+}
+
+export function RegisterFlow() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const { showToast } = useToast();
+  const { establishSession, refreshState } = useWorkspace();
+
+  const [step, setStep] = useState<Step>("signin");
+  const [loading, setLoading] = useState(false);
+  const [email, setEmail] = useState("");
+  const [initialized, setInitialized] = useState(false);
+
+  useEffect(() => {
+    const paramEmail = searchParams.get("email")?.trim().toLowerCase() || "";
+    const paramStep = searchParams.get("step") as Step | null;
+
+    if (paramEmail) setEmail(paramEmail);
+    if (paramStep && ["signin", "register", "verify", "card"].includes(paramStep)) {
+      setStep(paramStep);
+      setInitialized(true);
+      return;
+    }
+
+    if (paramEmail) {
+      api
+        .getAuthStatus(paramEmail)
+        .then((status) => {
+          if (status.fullyVerified) {
+            router.replace("/dashboard");
+            return;
+          }
+          setStep(stepFromNext(status.next));
+        })
+        .catch(() => setStep("register"))
+        .finally(() => setInitialized(true));
+      return;
+    }
+
+    setInitialized(true);
+  }, [searchParams, router]);
+
+  const finish = async (msg: string, userEmail: string) => {
+    await establishSession(userEmail);
+    await refreshState();
+    showToast(msg, "success");
+    router.push("/dashboard");
+  };
+
+  const handleSignIn = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    setLoading(true);
+    const form = new FormData(e.currentTarget);
+    const em = (form.get("email") as string).trim().toLowerCase();
+    setEmail(em);
+    try {
+      const { user } = await api.login(em);
+      await finish(`Welcome back! ${user.credits} credits available.`, em);
+    } catch (err: unknown) {
+      const payload =
+        err && typeof err === "object"
+          ? (err as { error?: string; next?: string; status?: number })
+          : {};
+      if (payload.status === 403 && payload.next) {
+        setStep(stepFromNext(payload.next));
+        showToast("Complete verification to access the dashboard.", "success");
+        return;
+      }
+      showToast(payload.error || "No verified account found. Register first.", "error");
+      setStep("register");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleRegister = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    setLoading(true);
+    const form = new FormData(e.currentTarget);
+    const em = (form.get("email") as string).trim().toLowerCase();
+    setEmail(em);
+    try {
+      await api.register({
+        email: em,
+        phone: form.get("phone") as string,
+        name: form.get("name") as string,
+        company: (form.get("company") as string) || undefined,
+      });
+      setStep("verify");
+      showToast("Verification codes sent to your email and phone.", "success");
+    } catch (err: unknown) {
+      showToast(
+        err && typeof err === "object" && "error" in err
+          ? String((err as { error: string }).error)
+          : "Registration failed",
+        "error"
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleVerify = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    setLoading(true);
+    const form = new FormData(e.currentTarget);
+    try {
+      await api.verify({
+        email,
+        emailCode: form.get("emailCode") as string,
+        phoneCode: form.get("phoneCode") as string,
+      });
+      setStep("card");
+      showToast("Email and phone verified. Add a card to activate Free Trial.", "success");
+    } catch (err: unknown) {
+      showToast(
+        err && typeof err === "object" && "error" in err
+          ? String((err as { error: string }).error)
+          : "Verification failed",
+        "error"
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCard = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    setLoading(true);
+    const form = new FormData(e.currentTarget);
+    try {
+      const result = await api.attachCard({
+        email,
+        cardNumber: form.get("cardNumber") as string,
+        expMonth: form.get("expMonth") as string,
+        expYear: form.get("expYear") as string,
+        cvc: form.get("cvc") as string,
+      });
+      await finish(result.message || "Free Trial activated!", email);
+    } catch (err: unknown) {
+      showToast(
+        err && typeof err === "object" && "error" in err
+          ? String((err as { error: string }).error)
+          : "Card validation failed",
+        "error"
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (!initialized) {
+    return (
+      <div className="min-h-[60vh] flex items-center justify-center text-slate-400 text-sm">
+        Loading...
+      </div>
+    );
+  }
+
+  return (
+    <div className="max-w-md w-full mx-auto">
+      <div className="glass-card bg-navy-900 rounded-3xl p-6 border border-navy-800 shadow-2xl text-center sm:text-left">
+        <h1 className="text-xl font-black text-white mb-1">
+          {step === "signin" && "Sign In"}
+          {step === "register" && "Create Account"}
+          {step === "verify" && "Verify Email & Phone"}
+          {step === "card" && "Add Card (Required)"}
+        </h1>
+        <p className="text-xs text-slate-400 mb-6">
+          {step === "signin" &&
+            "Only fully verified accounts can access the dashboard."}
+          {step === "register" &&
+            "Register with email and phone. Verification is mandatory before Free Trial."}
+          {step === "verify" &&
+            "Enter the 6-digit codes sent to your email and mobile phone."}
+          {step === "card" &&
+            "Free Trial requires a valid payment card on file for security."}
+        </p>
+
+        {step === "signin" && (
+          <form onSubmit={handleSignIn} className="space-y-4 text-xs">
+            <Field label="Email" name="email" type="email" defaultValue={email} required />
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full bg-orange-500 hover:bg-orange-600 text-white font-bold py-3 rounded-xl"
+            >
+              {loading ? "Checking..." : "Sign In"}
+            </button>
+            <button
+              type="button"
+              onClick={() => setStep("register")}
+              className="w-full text-slate-400 hover:text-white font-bold py-2"
+            >
+              New account? Register →
+            </button>
+          </form>
+        )}
+
+        {step === "register" && (
+          <form onSubmit={handleRegister} className="space-y-3 text-xs">
+            <Field label="Full Name" name="name" required />
+            <Field label="Work Email" name="email" type="email" defaultValue={email} required />
+            <Field label="Mobile Phone" name="phone" type="tel" placeholder="+1..." required />
+            <Field label="Company (optional)" name="company" />
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full bg-orange-500 hover:bg-orange-600 text-white font-bold py-3 rounded-xl"
+            >
+              {loading ? "Sending codes..." : "Send Verification Codes"}
+            </button>
+            <button
+              type="button"
+              onClick={() => setStep("signin")}
+              className="w-full text-slate-500 font-bold py-2"
+            >
+              ← Back to sign in
+            </button>
+          </form>
+        )}
+
+        {step === "verify" && (
+          <form onSubmit={handleVerify} className="space-y-3 text-xs">
+            <p className="text-[10px] text-slate-500">Verifying: {email}</p>
+            <Field label="Email Code" name="emailCode" required maxLength={6} />
+            <Field label="Phone / SMS Code" name="phoneCode" required maxLength={6} />
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full bg-orange-500 hover:bg-orange-600 text-white font-bold py-3 rounded-xl"
+            >
+              {loading ? "Verifying..." : "Verify Codes"}
+            </button>
+          </form>
+        )}
+
+        {step === "card" && (
+          <form onSubmit={handleCard} className="space-y-3 text-xs">
+            <p className="text-[10px] text-slate-500">Account: {email}</p>
+            <Field label="Card Number" name="cardNumber" required />
+            <div className="grid grid-cols-3 gap-2">
+              <Field label="MM" name="expMonth" placeholder="12" required />
+              <Field label="YYYY" name="expYear" placeholder="2030" required />
+              <Field label="CVC" name="cvc" required />
+            </div>
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full bg-orange-500 hover:bg-orange-600 text-white font-bold py-3 rounded-xl"
+            >
+              {loading ? "Validating..." : "Save Card & Start Free Trial"}
+            </button>
+          </form>
+        )}
+
+        <p className="text-[10px] text-slate-500 mt-6 text-center">
+          <Link href="/" className="hover:text-orange-400">
+            ← Back to home
+          </Link>
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function Field({
+  label,
+  name,
+  type = "text",
+  required,
+  placeholder,
+  maxLength,
+  defaultValue,
+}: {
+  label: string;
+  name: string;
+  type?: string;
+  required?: boolean;
+  placeholder?: string;
+  maxLength?: number;
+  defaultValue?: string;
+}) {
+  return (
+    <div>
+      <label className="block font-bold text-slate-300 mb-1">{label}</label>
+      <input
+        type={type}
+        name={name}
+        required={required}
+        placeholder={placeholder}
+        maxLength={maxLength}
+        defaultValue={defaultValue}
+        className="w-full border border-navy-700 rounded-xl p-3 bg-navy-950 font-bold text-white"
+      />
+    </div>
+  );
+}

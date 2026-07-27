@@ -1,0 +1,209 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Package {
+  id             String         @id @default(cuid())
+  slug           String         @unique
+  name           String
+  monthlyCredits Int
+  priceUsd       Float          @default(0)
+  renewalDays    Int            @default(30)
+  isActive       Boolean        @default(true)
+  users          User[]
+  subscriptions  Subscription[]
+  paymentLogs    PaymentLog[]
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+}
+
+model User {
+  id                    String              @id @default(cuid())
+  email                 String              @unique
+  name                  String?
+  phone                 String?
+  company               String?
+  packageId             String
+  package               Package             @relation(fields: [packageId], references: [id])
+  remainingCredits      Int                 @default(0)
+  unlimitedCredits      Boolean             @default(false)
+  notes                 String?
+  source                String?             @default("signup")
+
+  // Verification (required before plan join)
+  emailVerified         Boolean             @default(false)
+  phoneVerified         Boolean             @default(false)
+  cardOnFile            Boolean             @default(false)
+  cardLast4             String?
+  cardBrand             String?
+  stripePaymentMethodId String?
+
+  // Wallet (USD balance for top-up / auto-debit)
+  walletBalanceUsd      Float               @default(0)
+
+  // Subscription lifecycle: none | trial | active | frozen
+  accountStatus         String              @default("pending_verification")
+
+  // Multi-channel notification prefs
+  notifyEmail           Boolean             @default(true)
+  notifyWhatsapp        Boolean             @default(true)
+  notifyTelegram        Boolean             @default(true)
+  whatsappNumber        String?
+  telegramChatId        String?
+
+  // Activity for missed-post / missed-reply reminders
+  lastSocialPostAt      DateTime?
+  lastGbpPostAt         DateTime?
+  lastReviewReplyAt     DateTime?
+  pendingReviewCount    Int                 @default(0)
+
+  stripeCustomerId      String?
+  paypalCustomerId      String?
+  usageLogs             UsageLog[]
+  subscriptions         Subscription[]
+  paymentLogs           PaymentLog[]
+  walletTxns            WalletTransaction[]
+  notifications         NotificationLog[]
+  verificationCodes     VerificationCode[]
+  createdAt             DateTime            @default(now())
+  updatedAt             DateTime            @updatedAt
+}
+
+model VerificationCode {
+  id        String    @id @default(cuid())
+  userId    String?
+  user      User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  email     String?
+  phone     String?
+  channel   String // email | sms
+  code      String
+  purpose   String // register | login | topup
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([email, purpose])
+  @@index([phone, purpose])
+}
+
+model WalletTransaction {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type        String // topup | debit_usage | debit_plan | refund | freeze
+  amountUsd   Float
+  balanceAfter Float
+  gateway     String?
+  status      String   @default("completed")
+  metadata    String?
+  createdAt   DateTime @default(now())
+
+  @@index([userId, createdAt])
+}
+
+model NotificationLog {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  channel   String // email | whatsapp | telegram
+  type      String // missed_post | missed_review | low_balance | frozen | verify
+  title     String
+  body      String
+  status    String   @default("sent") // sent | failed | demo
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@index([type])
+}
+
+model UsageLog {
+  id               String   @id @default(cuid())
+  userId           String
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  action           String
+  model            String?
+  promptTokens     Int      @default(0)
+  completionTokens Int      @default(0)
+  totalTokens      Int      @default(0)
+  apiCostUsd       Float    @default(0)
+  creditsDeducted  Int
+  metadata         String?
+  createdAt        DateTime @default(now())
+
+  @@index([userId, createdAt])
+}
+
+model Subscription {
+  id               String    @id @default(cuid())
+  userId           String
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  packageId        String
+  package          Package   @relation(fields: [packageId], references: [id])
+  status           String    @default("active") // active | frozen | cancelled
+  gateway          String
+  gatewaySubId     String?
+  currentPeriodEnd DateTime?
+  frozenAt         DateTime?
+  freezeReason     String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@index([userId])
+  @@index([status])
+}
+
+model Admin {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  name         String?
+  passwordHash String
+  role         String   @default("super_admin")
+  totpSecret   String
+  totpEnabled  Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model PaymentLog {
+  id               String   @id @default(cuid())
+  userId           String
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  packageId        String
+  package          Package  @relation(fields: [packageId], references: [id])
+  amountUsd        Float
+  gateway          String
+  gatewayPaymentId String?
+  status           String   @default("completed")
+  createdAt        DateTime @default(now())
+
+  @@index([userId, createdAt])
+}
+
+model ApiConfig {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     String
+  updatedAt DateTime @updatedAt
+}
+
+model Lead {
+  id        String   @id @default(cuid())
+  name      String
+  email     String
+  phone     String?
+  company   String?
+  message   String?
+  source    String   @default("contact")
+  status    String   @default("new")
+  notes     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([email, createdAt])
+  @@index([status])
+}
