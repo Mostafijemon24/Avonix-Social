@@ -11,9 +11,9 @@ import { getCreditConfig } from "./src/credits.js";
 import { syncConfigToEnv } from "./src/services/configService.js";
 import { startReminderScheduler } from "./src/services/reminderService.js";
 
-// Always load backend/.env (PM2 may start with a different cwd)
+// Always load backend/.env (PM2 may start with a different cwd / stale env)
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-dotenv.config({ path: path.join(__dirname, ".env") });
+dotenv.config({ path: path.join(__dirname, ".env"), override: true });
 
 const app = express();
 const PORT = process.env.PORT || 4000;
