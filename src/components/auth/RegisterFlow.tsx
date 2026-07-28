@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { useToast } from "@/components/ui/Toast";
+import { PasswordField } from "@/components/ui/PasswordField";
 import { useWorkspace } from "@/context/WorkspaceContext";
 import { api } from "@/lib/api-client";
 
@@ -37,6 +38,7 @@ export function RegisterFlow() {
   const [loading, setLoading] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [initialized, setInitialized] = useState(false);
 
   useEffect(() => {
@@ -244,7 +246,12 @@ export function RegisterFlow() {
         {step === "signin" && (
           <form onSubmit={handleSignIn} className="space-y-4 text-xs">
             <Field label="Email" name="email" type="email" defaultValue={email} required />
-            <Field label="Password" name="password" type="password" required autoComplete="current-password" />
+            <PasswordField
+              label="Password"
+              name="password"
+              required
+              autoComplete="current-password"
+            />
             <button
               type="submit"
               disabled={loading}
@@ -278,19 +285,27 @@ export function RegisterFlow() {
               sent here.
             </p>
             <Field label="Company (optional)" name="company" />
-            <Field
+            <PasswordField
               label="Password"
               name="password"
-              type="password"
               required
               autoComplete="new-password"
+              showGenerate
+              value={password}
+              onChange={setPassword}
+              onGenerate={(pwd) => {
+                setPassword(pwd);
+                setConfirmPassword(pwd);
+                showToast("Strong password generated. Copy it somewhere safe.", "success");
+              }}
             />
-            <Field
+            <PasswordField
               label="Confirm Password"
               name="confirmPassword"
-              type="password"
               required
               autoComplete="new-password"
+              value={confirmPassword}
+              onChange={setConfirmPassword}
             />
             <p className="text-[10px] text-slate-500 -mt-1">{PASSWORD_HINT}</p>
             <button

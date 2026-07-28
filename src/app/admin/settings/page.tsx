@@ -8,6 +8,7 @@ import {
   type AdminPlan,
   type ApiConfig,
 } from "@/lib/admin-api";
+import { PasswordField } from "@/components/ui/PasswordField";
 
 const CONFIG_FIELDS: { key: string; label: string }[] = [
   { key: "OPENROUTER_API_KEY", label: "OpenRouter API Key" },
@@ -218,26 +219,28 @@ function PasswordPanel({
   return (
     <div className="space-y-3 text-xs max-w-md">
       <p className="font-bold text-slate-300">Change Password (requires 2FA code)</p>
-      <input
-        type="password"
-        placeholder="Current password"
+      <PasswordField
+        label="Current password"
+        name="currentPassword"
+        autoComplete="current-password"
         value={form.currentPassword}
-        onChange={(e) => setForm((f) => ({ ...f, currentPassword: e.target.value }))}
-        className="w-full border border-navy-700 bg-navy-950 rounded-xl p-3 text-white"
+        onChange={(v) => setForm((f) => ({ ...f, currentPassword: v }))}
       />
-      <input
-        type="password"
-        placeholder="New password (strong)"
+      <PasswordField
+        label="New password"
+        name="newPassword"
+        autoComplete="new-password"
+        showGenerate
         value={form.newPassword}
-        onChange={(e) => setForm((f) => ({ ...f, newPassword: e.target.value }))}
-        className="w-full border border-navy-700 bg-navy-950 rounded-xl p-3 text-white"
+        onChange={(v) => setForm((f) => ({ ...f, newPassword: v }))}
+        onGenerate={(pwd) => setForm((f) => ({ ...f, newPassword: pwd, confirm: pwd }))}
       />
-      <input
-        type="password"
-        placeholder="Confirm new password"
+      <PasswordField
+        label="Confirm new password"
+        name="confirmPassword"
+        autoComplete="new-password"
         value={form.confirm}
-        onChange={(e) => setForm((f) => ({ ...f, confirm: e.target.value }))}
-        className="w-full border border-navy-700 bg-navy-950 rounded-xl p-3 text-white"
+        onChange={(v) => setForm((f) => ({ ...f, confirm: v }))}
       />
       <input
         type="text"

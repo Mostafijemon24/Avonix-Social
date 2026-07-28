@@ -10,6 +10,7 @@ import {
   clearPreAuthToken,
   wipeAdminSession,
 } from "@/lib/admin-api";
+import { PasswordField } from "@/components/ui/PasswordField";
 
 function AdminLoginForm() {
   const router = useRouter();
@@ -123,17 +124,13 @@ function AdminLoginForm() {
                 className="w-full border border-navy-700 rounded-xl p-3 bg-navy-950 text-white"
               />
             </div>
-            <div>
-              <label className="block font-bold text-slate-300 mb-1">Password</label>
-              <input
-                type="password"
-                name="password"
-                required
-                autoComplete="off"
-                placeholder="Enter password"
-                className="w-full border border-navy-700 rounded-xl p-3 bg-navy-950 text-white"
-              />
-            </div>
+            <PasswordField
+              label="Password"
+              name="password"
+              required
+              autoComplete="off"
+              placeholder="Enter password"
+            />
             <button
               type="submit"
               disabled={loading}
