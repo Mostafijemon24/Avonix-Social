@@ -29,14 +29,24 @@ async function bootstrap() {
   startPriceRefreshInterval();
   startReminderScheduler();
 
-  app.listen(PORT, () => {
+  const host = process.env.HOST || "0.0.0.0";
+  const server = app.listen(PORT, host, () => {
     const config = getCreditConfig();
-    console.log(`Avonix Social API → http://localhost:${PORT}`);
-    console.log(`Admin panel API → http://localhost:${PORT}/api/admin`);
+    console.log(`Avonix Social API → http://${host}:${PORT}`);
+    console.log(`Admin panel API → http://${host}:${PORT}/api/admin`);
     console.log(
       `Credit: $1 = ${config.creditsPerDollar} credits | Margin: ${config.marginMultiplier}x`
     );
   });
+
+  server.on("error", (err) => {
+    console.error("[avonix-api] listen failed:", err.message);
+    process.exit(1);
+  });
 }
 
-bootstrap().catch(console.error);
+bootstrap().catch((err) => {
+  console.error("[avonix-api] bootstrap failed:", err);
+  process.exit(1);
+});
+
