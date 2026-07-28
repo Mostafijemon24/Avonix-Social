@@ -8,14 +8,23 @@ import {
   getConnectionsSetupStatus,
 } from "../services/connectionsService.js";
 import { publishContent } from "../services/publishService.js";
+import { assertSessionMatchesEmail } from "../middleware/userAuth.js";
 
 const router = Router();
+
+function requireSessionForEmail(req, res, next) {
+  const email = req.query.email || req.body?.email;
+  if (!email) return res.status(400).json({ error: "Email is required" });
+  const gate = assertSessionMatchesEmail(req, email);
+  if (!gate.ok) return res.status(gate.status).json({ error: gate.error });
+  next();
+}
 
 router.get("/setup", (_req, res) => {
   res.json({ ok: true, setup: getConnectionsSetupStatus() });
 });
 
-router.post("/publish", async (req, res) => {
+router.post("/publish", requireSessionForEmail, async (req, res) => {
   try {
     const result = await publishContent(req.body);
     if (!result.ok) return res.status(result.status || 400).json(result);
@@ -25,7 +34,7 @@ router.post("/publish", async (req, res) => {
   }
 });
 
-router.get("/", async (req, res) => {
+router.get("/", requireSessionForEmail, async (req, res) => {
   try {
     const result = await listConnections(req.query.email, req.query.workspaceId);
     if (!result.ok) return res.status(result.status || 400).json(result);
@@ -35,7 +44,7 @@ router.get("/", async (req, res) => {
   }
 });
 
-router.post("/manual", async (req, res) => {
+router.post("/manual", requireSessionForEmail, async (req, res) => {
   try {
     const result = await saveManualLink(req.body);
     if (!result.ok) return res.status(result.status || 400).json(result);
@@ -45,7 +54,7 @@ router.post("/manual", async (req, res) => {
   }
 });
 
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", requireSessionForEmail, async (req, res) => {
   try {
     const result = await disconnectAccount({
       email: req.query.email || req.body?.email,
@@ -58,8 +67,7 @@ router.delete("/:id", async (req, res) => {
   }
 });
 
-/** Returns { authUrl } — frontend navigates the browser there */
-router.get("/oauth/:provider/start", async (req, res) => {
+router.get("/oauth/:provider/start", requireSessionForEmail, async (req, res) => {
   try {
     const result = await startOAuth({
       email: req.query.email,

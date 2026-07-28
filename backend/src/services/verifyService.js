@@ -6,6 +6,7 @@ import bcrypt from "bcryptjs";
 import prisma from "../db.js";
 import { sendRegistrationOtps, normalizePhone } from "./notifyService.js";
 import { validatePasswordStrength, PASSWORD_HINT } from "../password.js";
+import { signUserSession } from "../middleware/userAuth.js";
 
 const OTP_TTL_MS = 10 * 60 * 1000; // 10 minutes
 const IS_PRODUCTION = process.env.NODE_ENV === "production";
@@ -374,5 +375,7 @@ export async function loginVerifiedUser(email, password) {
     };
   }
 
-  return { ok: true, email: user.email };
+  const sessionToken = signUserSession({ id: user.id, email: user.email });
+
+  return { ok: true, email: user.email, sessionToken };
 }

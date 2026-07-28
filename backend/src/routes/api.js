@@ -21,6 +21,7 @@ import { getPriceCacheStats, getAllModelPrices } from "../modelPrices.js";
 import { analyzeSite } from "../services/siteAnalyzer.js";
 import connectionsRoutes from "./connections.js";
 import workspacesRoutes from "./workspaces.js";
+import { assertSessionMatchesEmail } from "../middleware/userAuth.js";
 import prisma from "../db.js";
 
 const router = Router();
@@ -119,7 +120,7 @@ router.post("/auth/login", async (req, res) => {
     const result = await loginVerifiedUser(req.body.email, req.body.password);
     if (!result.ok) return res.status(result.status || 400).json(result);
     const state = await getUserState(result.email);
-    res.json({ ok: true, user: state });
+    res.json({ ok: true, user: state, sessionToken: result.sessionToken });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -128,6 +129,9 @@ router.post("/auth/login", async (req, res) => {
 router.get("/users/:email/credits", async (req, res) => {
   try {
     const email = req.params.email.trim().toLowerCase();
+    const gate = assertSessionMatchesEmail(req, email);
+    if (!gate.ok) return res.status(gate.status).json({ error: gate.error });
+
     const user = await prisma.user.findUnique({ where: { email } });
     if (!user) return res.status(404).json({ error: "User not found" });
     if (!isFullyVerified(user)) {
@@ -148,7 +152,10 @@ router.get("/users/:email/credits", async (req, res) => {
 
 router.get("/wallet/:email", async (req, res) => {
   try {
-    const wallet = await getWallet(req.params.email);
+    const email = req.params.email.trim().toLowerCase();
+    const gate = assertSessionMatchesEmail(req, email);
+    if (!gate.ok) return res.status(gate.status).json({ error: gate.error });
+    const wallet = await getWallet(email);
     if (!wallet) return res.status(404).json({ error: "User not found" });
     res.json(wallet);
   } catch (err) {
@@ -158,6 +165,8 @@ router.get("/wallet/:email", async (req, res) => {
 
 router.post("/wallet/topup", async (req, res) => {
   try {
+    const gate = assertSessionMatchesEmail(req, req.body.email);
+    if (!gate.ok) return res.status(gate.status).json({ error: gate.error });
     const result = await topUpWallet(req.body);
     if (!result.ok) return res.status(400).json(result);
     const state = await getUserState(req.body.email);
@@ -170,6 +179,8 @@ router.post("/wallet/topup", async (req, res) => {
 router.put("/users/:email/notifications", async (req, res) => {
   try {
     const email = req.params.email.trim().toLowerCase();
+    const gate = assertSessionMatchesEmail(req, email);
+    if (!gate.ok) return res.status(gate.status).json({ error: gate.error });
     const {
       notifyEmail,
       notifyWhatsapp,
@@ -204,8 +215,11 @@ router.put("/users/:email/notifications", async (req, res) => {
 
 router.get("/users/:email/notifications", async (req, res) => {
   try {
+    const email = req.params.email.trim().toLowerCase();
+    const gate = assertSessionMatchesEmail(req, email);
+    if (!gate.ok) return res.status(gate.status).json({ error: gate.error });
     const logs = await prisma.notificationLog.findMany({
-      where: { user: { email: req.params.email.trim().toLowerCase() } },
+      where: { user: { email } },
       orderBy: { createdAt: "desc" },
       take: 50,
     });
@@ -259,6 +273,8 @@ router.post("/generate", async (req, res) => {
     if (!email || !action || !prompt) {
       return res.status(400).json({ error: "email, action, and prompt are required" });
     }
+    const gate = assertSessionMatchesEmail(req, email);
+    if (!gate.ok) return res.status(gate.status).json({ error: gate.error });
     const result = await generateContent({ email, action, prompt, model, metadata });
     if (!result.ok) return res.status(result.status || 400).json(result);
     res.json(result);
@@ -270,6 +286,8 @@ router.post("/generate", async (req, res) => {
 router.post("/credits/spend", async (req, res) => {
   try {
     const { email, action, metadata } = req.body;
+    const gate = assertSessionMatchesEmail(req, email);
+    if (!gate.ok) return res.status(gate.status).json({ error: gate.error });
     const result = await spendFixedCredits({ email, action, metadata });
     if (!result.ok) return res.status(result.status || 400).json(result);
     res.json(result);
@@ -281,6 +299,8 @@ router.post("/credits/spend", async (req, res) => {
 router.post("/billing/subscribe", async (req, res) => {
   try {
     const { email, plan, gateway, gatewaySubId } = req.body;
+    const gate = assertSessionMatchesEmail(req, email);
+    if (!gate.ok) return res.status(gate.status).json({ error: gate.error });
     const planSlug =
       plan === "Pro Growth" ? "pro" : plan === "Agency Enterprise" ? "agency" : plan;
     const result = await subscribeUser({ email, planSlug, gateway, gatewaySubId });

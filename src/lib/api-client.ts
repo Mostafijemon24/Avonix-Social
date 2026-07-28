@@ -1,13 +1,73 @@
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000/api";
+const EMAIL_KEY = "avonix-social-email";
+const TOKEN_KEY = "avonix-social-session";
+
+export function getSessionToken() {
+  if (typeof window === "undefined") return null;
+  return localStorage.getItem(TOKEN_KEY);
+}
+
+export function setSession(email: string, token: string) {
+  localStorage.setItem(EMAIL_KEY, email.trim().toLowerCase());
+  localStorage.setItem(TOKEN_KEY, token);
+}
+
+export function clearSession() {
+  localStorage.removeItem(EMAIL_KEY);
+  localStorage.removeItem(TOKEN_KEY);
+}
+
+export function getStoredEmail() {
+  if (typeof window === "undefined") return null;
+  return localStorage.getItem(EMAIL_KEY);
+}
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   let res: Response;
+  const method = options?.method || "GET";
+  const token = typeof window !== "undefined" ? getSessionToken() : null;
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...(options?.headers as Record<string, string> | undefined),
+  };
+  if (token) headers.Authorization = `Bearer ${token}`;
+
+  // #region agent log
+  fetch("http://127.0.0.1:7503/ingest/1b67c8f7-5f79-477d-afb3-859f8b05d962", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "f2bb88" },
+    body: JSON.stringify({
+      sessionId: "f2bb88",
+      runId: "audit1",
+      hypothesisId: "A",
+      location: "api-client.ts:request:entry",
+      message: "API request start",
+      data: { apiBase: API_BASE, path, method, hasToken: !!token },
+      timestamp: Date.now(),
+    }),
+  }).catch(() => {});
+  // #endregion
   try {
     res = await fetch(`${API_BASE}${path}`, {
-      headers: { "Content-Type": "application/json", ...options?.headers },
       ...options,
+      headers,
     });
-  } catch {
+  } catch (err) {
+    // #region agent log
+    fetch("http://127.0.0.1:7503/ingest/1b67c8f7-5f79-477d-afb3-859f8b05d962", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "f2bb88" },
+      body: JSON.stringify({
+        sessionId: "f2bb88",
+        runId: "audit1",
+        hypothesisId: "A",
+        location: "api-client.ts:request:network-error",
+        message: "API network failure",
+        data: { apiBase: API_BASE, path, method },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
     throw { status: 0, error: `Cannot reach API (${API_BASE}). Is the backend running?` };
   }
 
@@ -16,6 +76,27 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   try {
     data = text ? JSON.parse(text) : {};
   } catch {
+    // #region agent log
+    fetch("http://127.0.0.1:7503/ingest/1b67c8f7-5f79-477d-afb3-859f8b05d962", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "f2bb88" },
+      body: JSON.stringify({
+        sessionId: "f2bb88",
+        runId: "audit1",
+        hypothesisId: "A",
+        location: "api-client.ts:request:non-json",
+        message: "API returned non-JSON (likely HTML 404/proxy fail)",
+        data: {
+          apiBase: API_BASE,
+          path,
+          status: res.status,
+          contentType: res.headers.get("content-type"),
+          bodyPreview: text.slice(0, 120),
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
     throw {
       status: res.status,
       error: `Invalid API response (${res.status}). Backend may be outdated — pull latest and restart avonix-api.`,
@@ -23,8 +104,43 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   }
 
   if (!res.ok) {
+    // #region agent log
+    fetch("http://127.0.0.1:7503/ingest/1b67c8f7-5f79-477d-afb3-859f8b05d962", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "f2bb88" },
+      body: JSON.stringify({
+        sessionId: "f2bb88",
+        runId: "audit1",
+        hypothesisId: "C",
+        location: "api-client.ts:request:http-error",
+        message: "API HTTP error",
+        data: {
+          path,
+          status: res.status,
+          error: (data.error as string) || res.statusText,
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
     throw { status: res.status, ...data, error: (data.error as string) || res.statusText };
   }
+
+  // #region agent log
+  fetch("http://127.0.0.1:7503/ingest/1b67c8f7-5f79-477d-afb3-859f8b05d962", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "f2bb88" },
+    body: JSON.stringify({
+      sessionId: "f2bb88",
+      runId: "post-fix",
+      hypothesisId: "A",
+      location: "api-client.ts:request:ok",
+      message: "API request success",
+      data: { path, status: res.status },
+      timestamp: Date.now(),
+    }),
+  }).catch(() => {});
+  // #endregion
 
   return data as T;
 }
@@ -66,7 +182,7 @@ export const api = {
     }),
 
   login: (email: string, password: string) =>
-    request<{ ok: boolean; user: ApiUserState }>("/auth/login", {
+    request<{ ok: boolean; user: ApiUserState; sessionToken?: string }>("/auth/login", {
       method: "POST",
       body: JSON.stringify({ email, password }),
     }),

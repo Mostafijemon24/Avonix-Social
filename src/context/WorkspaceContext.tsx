@@ -9,7 +9,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { api, type ApiUserState, isApiError } from "@/lib/api-client";
+import { api, type ApiUserState, isApiError, setSession, clearSession, getStoredEmail, getSessionToken } from "@/lib/api-client";
 import { PLAN_CONFIG, type PlanId } from "@/lib/credits";
 import type {
   ClientWorkspaceSummary,
@@ -102,26 +102,68 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [apiOnline, setApiOnline] = useState(true);
 
   const loadWorkspacesInto = useCallback(async (email: string, apiState: ApiUserState) => {
-    const ws = await api.listWorkspaces(email);
-    const active =
-      ws.workspaces.find((w) => w.id === ws.activeWorkspaceId) || ws.workspaces[0] || null;
-    setApiOnline(true);
-    setState(
-      toWorkspaceState(apiState, active?.sitemap || null, {
-        activeWorkspaceId: ws.activeWorkspaceId,
-        workspaces: ws.workspaces,
-        workspaceLimit: ws.limit,
-      })
-    );
+    try {
+      const ws = await api.listWorkspaces(email);
+      const active =
+        ws.workspaces.find((w) => w.id === ws.activeWorkspaceId) || ws.workspaces[0] || null;
+      setApiOnline(true);
+      // #region agent log
+      fetch("http://127.0.0.1:7503/ingest/1b67c8f7-5f79-477d-afb3-859f8b05d962", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "f2bb88" },
+        body: JSON.stringify({
+          sessionId: "f2bb88",
+          runId: "audit1",
+          hypothesisId: "C",
+          location: "WorkspaceContext.tsx:loadWorkspacesInto",
+          message: "Workspaces loaded",
+          data: {
+            count: ws.workspaces?.length ?? 0,
+            activeWorkspaceId: ws.activeWorkspaceId,
+            limit: ws.limit,
+            hasSitemap: !!active?.sitemap,
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
+      setState(
+        toWorkspaceState(apiState, active?.sitemap || null, {
+          activeWorkspaceId: ws.activeWorkspaceId,
+          workspaces: ws.workspaces,
+          workspaceLimit: ws.limit,
+        })
+      );
+    } catch (err) {
+      // #region agent log
+      fetch("http://127.0.0.1:7503/ingest/1b67c8f7-5f79-477d-afb3-859f8b05d962", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "f2bb88" },
+        body: JSON.stringify({
+          sessionId: "f2bb88",
+          runId: "audit1",
+          hypothesisId: "C",
+          location: "WorkspaceContext.tsx:loadWorkspacesInto:error",
+          message: "Workspaces load failed",
+          data: {
+            error: isApiError(err) ? err.error : String(err),
+            status: isApiError(err) ? err.status : undefined,
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
+      throw err;
+    }
   }, []);
 
   const refreshState = useCallback(async () => {
-    const email = state.email || localStorage.getItem(STORAGE_KEY);
-    if (!email) return;
+    const email = state.email || getStoredEmail();
+    if (!email || !getSessionToken()) return;
 
     const apiState = await api.getCredits(email);
     if (!apiState.fullyVerified) {
-      localStorage.removeItem(STORAGE_KEY);
+      clearSession();
       setState(defaultState);
       throw new Error("Verification required");
     }
@@ -129,39 +171,47 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   }, [state.email, loadWorkspacesInto]);
 
   useEffect(() => {
-    const savedEmail = localStorage.getItem(STORAGE_KEY);
-    if (!savedEmail) return;
+    const savedEmail = getStoredEmail() || localStorage.getItem(STORAGE_KEY);
+    const token = getSessionToken();
+    if (!savedEmail || !token) {
+      clearSession();
+      return;
+    }
 
     api
       .getCredits(savedEmail)
       .then(async (apiState) => {
         if (!apiState.fullyVerified) {
-          localStorage.removeItem(STORAGE_KEY);
+          clearSession();
           return;
         }
         await loadWorkspacesInto(savedEmail, apiState);
       })
       .catch(() => {
-        localStorage.removeItem(STORAGE_KEY);
+        clearSession();
         setApiOnline(false);
+        setState(defaultState);
       });
   }, [loadWorkspacesInto]);
 
   const establishSession = useCallback(
     async (email: string, password: string) => {
       const normalized = email.trim().toLowerCase();
-      const { user } = await api.login(normalized, password);
+      const { user, sessionToken } = await api.login(normalized, password);
       if (!user.fullyVerified) {
         throw new Error("Account not fully verified");
       }
-      localStorage.setItem(STORAGE_KEY, normalized);
+      if (!sessionToken) {
+        throw new Error("Login succeeded but no session token returned — update backend");
+      }
+      setSession(normalized, sessionToken);
       await loadWorkspacesInto(normalized, user);
     },
     [loadWorkspacesInto]
   );
 
   const logout = useCallback(() => {
-    localStorage.removeItem(STORAGE_KEY);
+    clearSession();
     setState(defaultState);
   }, []);
 
