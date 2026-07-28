@@ -8,6 +8,7 @@ import { useWorkspace, PLAN_CONFIG } from "@/context/WorkspaceContext";
 import { useToast } from "@/components/ui/Toast";
 import { api } from "@/lib/api-client";
 import type { PlanId } from "@/lib/credits";
+import { isPaidPlan } from "@/lib/credits";
 
 export default function BillingPage() {
   const { state, refreshState } = useWorkspace();
@@ -26,6 +27,7 @@ export default function BillingPage() {
 
   const activePlanName = PLAN_CONFIG[state.planId].name;
   const frozen = state.accountStatus === "frozen";
+  const paidPlan = isPaidPlan(state.planId);
 
   const loadWallet = async () => {
     if (!state.email) return;
@@ -79,9 +81,16 @@ export default function BillingPage() {
       <div className="glass-card p-6 rounded-2xl border border-navy-800">
         <h2 className="text-base font-bold text-white mb-1">Wallet Balance (USD)</h2>
         <p className="text-xs text-slate-400 mb-4">
-          Custom top-up via Stripe/PayPal. Usage auto-debits this balance. Plan freezes at $0.
+          {paidPlan
+            ? "Pro / Agency only — top up via Stripe or PayPal when payments are enabled. Usage debits this balance after plan credits."
+            : "Free Trial uses included credits only. Upgrade to Pro or Agency below to unlock wallet top-up and extra usage."}
         </p>
         <p className="text-3xl font-black text-orange-500 mb-4">${wallet.toFixed(2)}</p>
+        {!paidPlan && wallet > 0 && (
+          <p className="text-[11px] text-amber-400 mb-4 bg-amber-950/20 border border-amber-500/30 rounded-xl px-3 py-2">
+            This balance cannot be used on Free Trial. Upgrade your plan to activate wallet spending.
+          </p>
+        )}
         {state.cardOnFile && (
           <p className="text-[10px] text-slate-500 mb-4">
             Card on file: {state.cardBrand || "card"} ···· {state.cardLast4}
@@ -95,20 +104,23 @@ export default function BillingPage() {
               min={1}
               value={amount}
               onChange={(e) => setAmount(e.target.value)}
-              className="w-full border border-navy-700 bg-navy-950 rounded-xl p-3 text-white"
+              disabled={!paidPlan}
+              className="w-full border border-navy-700 bg-navy-950 rounded-xl p-3 text-white disabled:opacity-50"
             />
           </div>
           <button
             type="button"
+            disabled={!paidPlan}
             onClick={() => topUp("stripe")}
-            className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold px-4 py-3 rounded-xl"
+            className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white font-bold px-4 py-3 rounded-xl"
           >
             Top-Up Stripe
           </button>
           <button
             type="button"
+            disabled={!paidPlan}
             onClick={() => topUp("paypal")}
-            className="bg-blue-600 hover:bg-blue-500 text-white font-bold px-4 py-3 rounded-xl"
+            className="bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white font-bold px-4 py-3 rounded-xl"
           >
             Top-Up PayPal
           </button>

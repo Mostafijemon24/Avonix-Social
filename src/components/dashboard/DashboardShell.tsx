@@ -70,7 +70,9 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
 
   const plan = PLAN_CONFIG[state.planId];
   const unlimited = !!state.unlimitedCredits;
-  const hasWallet = (state.walletBalanceUsd ?? 0) > 0;
+  const hasWallet =
+    (state.planId === "pro" || state.planId === "agency") &&
+    (state.walletBalanceUsd ?? 0) > 0;
   const creditPct =
     unlimited || state.creditLimit <= 0
       ? 100

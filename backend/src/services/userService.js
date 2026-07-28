@@ -5,6 +5,7 @@ import { callOpenRouter, extractUsage } from "../openrouter.js";
 import { ACTION_MODELS } from "../credits.js";
 import { getModelPricing, resolveAvailableModel } from "../modelPrices.js";
 import { assertNotFrozen, debitWalletForUsage } from "./walletService.js";
+import { canUseWalletBalance, spendableWalletUsd } from "../walletPolicy.js";
 import { stampActivity } from "./reminderService.js";
 import { isFullyVerified } from "./verifyService.js";
 
@@ -103,13 +104,17 @@ export async function generateContent({ email, action, prompt, model, metadata =
   const user = gate.user;
   const unlimited = !!user.unlimitedCredits;
 
-  if (!unlimited && user.remainingCredits <= 0 && (user.walletBalanceUsd || 0) <= 0) {
+  if (!unlimited && user.remainingCredits <= 0 && spendableWalletUsd(user) <= 0) {
+    const onFree = (user.package?.slug || "free") === "free";
     return {
       ok: false,
       status: 403,
-      error: "Insufficient credits and wallet balance. Please top up.",
+      error: onFree
+        ? "Free Trial credits used up. Upgrade to Pro or Agency under Plan & Price to continue."
+        : "Insufficient credits and wallet balance. Top up your wallet or wait for plan renewal.",
       creditsLeft: 0,
       walletBalanceUsd: user.walletBalanceUsd,
+      requiresUpgrade: onFree,
     };
   }
 
@@ -161,11 +166,11 @@ export async function generateContent({ email, action, prompt, model, metadata =
 
   const { promptTokens, completionTokens, totalTokens, apiCostUsd } = usageData;
   const creditsToDeduct = unlimited ? 0 : usdCostToCredits(apiCostUsd);
-  const walletUsd = user.walletBalanceUsd || 0;
+  const walletUsd = spendableWalletUsd(user);
 
   let creditsDeducted = 0;
   let creditsLeft = user.remainingCredits;
-  let walletBalanceUsd = walletUsd;
+  let walletBalanceUsd = user.walletBalanceUsd || 0;
   let paidVia = unlimited ? "unlimited" : "credits";
 
   if (!unlimited) {
@@ -192,7 +197,7 @@ export async function generateContent({ email, action, prompt, model, metadata =
           },
         }),
       ]);
-    } else if (walletUsd >= apiCostUsd) {
+    } else if (canUseWalletBalance(user) && walletUsd >= apiCostUsd) {
       paidVia = "wallet";
       const walletResult = await debitWalletForUsage(user.id, apiCostUsd, {
         action,
@@ -226,10 +231,13 @@ export async function generateContent({ email, action, prompt, model, metadata =
       return {
         ok: false,
         status: 402,
-        error: `Insufficient balance. Need ${creditsToDeduct} credits or $${apiCostUsd.toFixed(4)} in wallet (you have ${user.remainingCredits} credits, $${walletUsd.toFixed(2)} wallet).`,
+        error: canUseWalletBalance(user)
+          ? `Insufficient balance. Need ${creditsToDeduct} credits or $${apiCostUsd.toFixed(4)} in wallet (you have ${user.remainingCredits} credits, $${walletUsd.toFixed(2)} spendable wallet).`
+          : `Free Trial credits used up (${user.remainingCredits} left). Upgrade to Pro or Agency to continue.`,
         creditsRequired: creditsToDeduct,
         creditsLeft: user.remainingCredits,
-        walletBalanceUsd: walletUsd,
+        walletBalanceUsd: user.walletBalanceUsd,
+        requiresUpgrade: !canUseWalletBalance(user),
         usageDetails: {
           modelUsed: selectedModel,
           promptTokens,
@@ -307,23 +315,27 @@ export async function spendFixedCredits({ email, action, metadata = {} }) {
     return { ok: false, status: 400, error: `Unknown fixed action: ${action}` };
   }
 
-  const walletUsd = user.walletBalanceUsd || 0;
+  const walletUsd = spendableWalletUsd(user);
   const usdCost = fixedActionUsd(action) || 0.01;
 
   if (!unlimited && user.remainingCredits < cost && walletUsd < usdCost) {
+    const onFree = (user.package?.slug || "free") === "free";
     return {
       ok: false,
       status: 403,
-      error: `Insufficient balance. Need ${cost} credits or $${usdCost.toFixed(2)} wallet.`,
+      error: onFree
+        ? "Free Trial credits used up. Upgrade to Pro or Agency to continue."
+        : `Insufficient balance. Need ${cost} credits or $${usdCost.toFixed(2)} wallet.`,
       creditsRequired: cost,
       creditsLeft: user.remainingCredits,
-      walletBalanceUsd: walletUsd,
+      walletBalanceUsd: user.walletBalanceUsd,
+      requiresUpgrade: onFree,
     };
   }
 
   let deduct = 0;
   let creditsLeft = user.remainingCredits;
-  let walletBalanceUsd = walletUsd;
+  let walletBalanceUsd = user.walletBalanceUsd || 0;
   let paidVia = unlimited ? "unlimited" : "credits";
 
   if (unlimited) {
@@ -353,7 +365,7 @@ export async function spendFixedCredits({ email, action, metadata = {} }) {
         },
       }),
     ]);
-  } else {
+  } else if (canUseWalletBalance(user) && user.remainingCredits < cost) {
     paidVia = "wallet";
     const walletResult = await debitWalletForUsage(user.id, usdCost, {
       action,

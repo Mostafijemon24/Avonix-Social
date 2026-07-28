@@ -3,6 +3,12 @@
  */
 import prisma from "../db.js";
 import { notifyFrozen, notifyLowBalance } from "./notifyService.js";
+import {
+  allowDemoTopUp,
+  canUseWalletBalance,
+  isGatewayConfigured,
+  isPaidPlanSlug,
+} from "../walletPolicy.js";
 
 const LOW_BALANCE_USD = 2;
 
@@ -30,7 +36,7 @@ export async function getWallet(email) {
 }
 
 /**
- * Top-up custom USD amount via payment gateway (demo completes instantly)
+ * Top-up wallet — paid plans only; requires configured payment gateway (no silent demo credit).
  */
 export async function topUpWallet({ email, amountUsd, gateway = "stripe" }) {
   const amount = Number(amountUsd);
@@ -43,11 +49,39 @@ export async function topUpWallet({ email, amountUsd, gateway = "stripe" }) {
 
   const user = await prisma.user.findUnique({
     where: { email: (email || "").trim().toLowerCase() },
+    include: { package: true },
   });
   if (!user) return { ok: false, error: "User not found" };
   if (!user.emailVerified) {
     return { ok: false, error: "Verify email before topping up" };
   }
+
+  const planSlug = user.package?.slug || "free";
+  if (!isPaidPlanSlug(planSlug)) {
+    return {
+      ok: false,
+      status: 403,
+      error:
+        "Wallet top-up is for Pro and Agency plans only. Upgrade under Plan & Price — Free Trial uses included credits.",
+    };
+  }
+
+  if (!allowDemoTopUp()) {
+    if (!isGatewayConfigured(gateway)) {
+      return {
+        ok: false,
+        status: 503,
+        error: `${gateway === "paypal" ? "PayPal" : "Stripe"} is not configured on the server yet. Contact support or upgrade your plan for monthly credits.`,
+      };
+    }
+    return {
+      ok: false,
+      status: 501,
+      error:
+        "Online wallet top-up is not enabled yet. Use your plan’s monthly credits or contact support to enable payments.",
+    };
+  }
+
   if (!user.cardOnFile && gateway === "stripe") {
     return { ok: false, error: "Add a valid card on file before Stripe top-up" };
   }
@@ -59,7 +93,6 @@ export async function topUpWallet({ email, amountUsd, gateway = "stripe" }) {
       where: { id: user.id },
       data: {
         walletBalanceUsd: newBalance,
-        // Unfreeze if was frozen due to balance
         accountStatus:
           user.accountStatus === "frozen" ? "active" : user.accountStatus,
       },
@@ -72,12 +105,11 @@ export async function topUpWallet({ email, amountUsd, gateway = "stripe" }) {
         balanceAfter: newBalance,
         gateway,
         status: "completed",
-        metadata: JSON.stringify({ demo: true }),
+        metadata: JSON.stringify({ demo: true, devOnly: true }),
       },
     }),
   ]);
 
-  // Reactivate frozen subscriptions
   if (user.accountStatus === "frozen") {
     await prisma.subscription.updateMany({
       where: { userId: user.id, status: "frozen" },
@@ -89,7 +121,7 @@ export async function topUpWallet({ email, amountUsd, gateway = "stripe" }) {
     ok: true,
     walletBalanceUsd: newBalance,
     amountUsd: amount,
-    message: `Topped up $${amount.toFixed(2)}. New balance: $${newBalance.toFixed(2)}`,
+    message: `Topped up $${amount.toFixed(2)} (dev demo). New balance: $${newBalance.toFixed(2)}`,
   };
 }
 
@@ -101,10 +133,20 @@ export async function debitWalletForUsage(userId, amountUsd, meta = {}) {
     return { ok: true, skipped: true };
   }
 
-  const user = await prisma.user.findUnique({ where: { id: userId } });
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    include: { package: true },
+  });
   if (!user) return { ok: false, error: "User not found" };
   if (user.unlimitedCredits) {
     return { ok: true, skipped: true, unlimited: true };
+  }
+  if (!canUseWalletBalance(user)) {
+    return {
+      ok: false,
+      error: "Wallet spending requires a Pro or Agency plan.",
+      walletSkipped: true,
+    };
   }
 
   const cost = Math.round(amountUsd * 1e6) / 1e6;
@@ -189,6 +231,7 @@ export async function freezeAccount(userId, reason) {
 export async function assertNotFrozen(email) {
   const user = await prisma.user.findUnique({
     where: { email: (email || "").trim().toLowerCase() },
+    include: { package: true },
   });
   if (!user) return { ok: false, error: "User not found" };
   if (user.accountStatus === "frozen") {

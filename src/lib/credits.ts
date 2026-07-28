@@ -55,14 +55,18 @@ export function getPlanCredits(planId: PlanId) {
   return PLAN_CONFIG[planId];
 }
 
-/** Plan credits first; wallet USD is fallback when trial/plan credits are used up */
+/** Plan credits first; wallet USD only on Pro / Agency */
 export function canAffordUsage(
-  state: { credits: number; walletBalanceUsd?: number; unlimitedCredits?: boolean },
+  state: { credits: number; walletBalanceUsd?: number; unlimitedCredits?: boolean; planId?: string },
   minCredits = 1
 ) {
-  return (
-    !!state.unlimitedCredits ||
-    state.credits >= minCredits ||
-    (state.walletBalanceUsd ?? 0) >= 0.01
-  );
+  if (state.unlimitedCredits) return true;
+  if (state.credits >= minCredits) return true;
+  const paid = state.planId === "pro" || state.planId === "agency";
+  if (paid && (state.walletBalanceUsd ?? 0) >= 0.01) return true;
+  return false;
+}
+
+export function isPaidPlan(planId?: string) {
+  return planId === "pro" || planId === "agency";
 }
