@@ -5,6 +5,7 @@
 /backend/node_modules
 /backend/prisma/dev.db
 /backend/prisma/dev.db-journal
+/backend/uploads/
 /ai-engine/.venv
 /ai-engine/__pycache__
 

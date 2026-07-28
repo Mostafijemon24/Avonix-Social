@@ -23,6 +23,7 @@ import { setPendingReviews, runReminderSweep } from "../services/reminderService
 import { getCreditConfig } from "../credits.js";
 import { getPriceCacheStats, getAllModelPrices } from "../modelPrices.js";
 import { analyzeSite } from "../services/siteAnalyzer.js";
+import { generateSocialSuite } from "../services/socialSuiteService.js";
 import connectionsRoutes from "./connections.js";
 import workspacesRoutes from "./workspaces.js";
 import { assertSessionMatchesEmail } from "../middleware/userAuth.js";
@@ -53,10 +54,10 @@ router.post("/leads", async (req, res) => {
   }
 });
 
-/** Root domain → crawl sitemap/pages → extract primary & secondary keywords */
+/** Root domain → crawl sitemap/pages/posts → extract primary & secondary keywords */
 router.post("/site/analyze", async (req, res) => {
   try {
-    const { domain, email } = req.body;
+    const { domain, email, location } = req.body;
     if (!domain || !String(domain).trim()) {
       return res.status(400).json({ ok: false, error: "Domain is required, e.g. example.com" });
     }
@@ -68,7 +69,7 @@ router.post("/site/analyze", async (req, res) => {
         return res.status(403).json({ error: "Verification required" });
       }
     }
-    const result = await analyzeSite(domain);
+    const result = await analyzeSite(domain, { location });
     if (!result.ok) return res.status(400).json(result);
     res.json(result);
   } catch (err) {
@@ -322,6 +323,22 @@ router.post("/generate", async (req, res) => {
     if (!result.ok) return res.status(result.status || 400).json(result);
     res.json(result);
   } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/** Connected platforms only — format/word limits, no links/emojis, + image */
+router.post("/generate/social-suite", async (req, res) => {
+  try {
+    const { email, workspaceId, intent } = req.body;
+    if (!email) return res.status(400).json({ error: "email is required" });
+    const gate = assertSessionMatchesEmail(req, email);
+    if (!gate.ok) return res.status(gate.status).json({ error: gate.error });
+    const result = await generateSocialSuite({ email, workspaceId, intent });
+    if (!result.ok) return res.status(result.status || 400).json(result);
+    res.json(result);
+  } catch (err) {
+    console.error("[generate/social-suite]", err);
     res.status(500).json({ error: err.message });
   }
 });

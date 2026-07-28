@@ -220,13 +220,48 @@ export const api = {
       body: JSON.stringify(payload),
     }),
 
+  generateSocialSuite: (payload: {
+    email: string;
+    workspaceId?: string;
+    intent?: string;
+  }) =>
+    request<{
+      ok: boolean;
+      workspaceId: string;
+      primaryKeyword: string;
+      secondaryKeywords: string[];
+      location: string;
+      intent: string;
+      posts: Record<
+        string,
+        {
+          provider: string;
+          label: string;
+          content: string;
+          maxWords: number;
+          accountName: string | null;
+          connectionId: string | null;
+          creditsDeducted: number;
+        }
+      >;
+      skipped: Array<{ provider: string; reason: string }>;
+      imageUrl: string | null;
+      imageError: string | null;
+      creditsDeducted: number;
+      creditsLeft: number;
+      error?: string;
+    }>("/generate/social-suite", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
   spendFixed: (payload: { email: string; action: string; metadata?: Record<string, unknown> }) =>
     request<{ ok: boolean; creditsDeducted: number; creditsLeft: number }>("/credits/spend", {
       method: "POST",
       body: JSON.stringify(payload),
     }),
 
-  analyzeSite: (payload: { domain: string; email?: string }) =>
+  analyzeSite: (payload: { domain: string; email?: string; location?: string }) =>
     request<{
       ok: boolean;
       domain: string;
@@ -302,12 +337,13 @@ export const api = {
   publishContent: (payload: {
     email: string;
     content: string;
-    action: "social_post" | "gbp_post" | "review_reply";
+    action: "social_post" | "gbp_post" | "review_reply" | "social_suite";
     providers?: string[];
     imageUrl?: string;
     reviewName?: string;
     connectionIds?: string[];
     workspaceId?: string;
+    contentByProvider?: Record<string, string>;
   }) =>
     request<{
       ok: boolean;

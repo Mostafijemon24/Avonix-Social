@@ -303,12 +303,15 @@ async function publishGbpReviewReply(account, message, reviewName) {
 }
 
 /**
- * @param {{ email: string, content: string, action: string, providers?: string[], imageUrl?: string, reviewName?: string, connectionIds?: string[], workspaceId?: string }} opts
+ * @param {{ email: string, content: string, action: string, providers?: string[], imageUrl?: string, reviewName?: string, connectionIds?: string[], workspaceId?: string, contentByProvider?: Record<string, string> }} opts
  */
 export async function publishContent(opts) {
-  const { email, content, action, imageUrl, reviewName, connectionIds, workspaceId } = opts;
-  const message = String(content || "").trim();
-  if (!message) return { ok: false, status: 400, error: "Content is required" };
+  const { email, content, action, imageUrl, reviewName, connectionIds, workspaceId, contentByProvider } =
+    opts;
+  const fallbackMessage = String(content || "").trim();
+  if (!fallbackMessage && !(contentByProvider && Object.keys(contentByProvider).length)) {
+    return { ok: false, status: 400, error: "Content is required" };
+  }
 
   const gate = await requireVerifiedUser(email);
   if (!gate.ok) return gate;
@@ -322,6 +325,8 @@ export async function publishContent(opts) {
   let allowedProviders;
   if (action === "gbp_post" || action === "review_reply") {
     allowedProviders = GBP_PROVIDERS;
+  } else if (action === "social_suite") {
+    allowedProviders = [...SOCIAL_PROVIDERS, ...GBP_PROVIDERS];
   } else {
     allowedProviders = SOCIAL_PROVIDERS;
   }
@@ -361,7 +366,21 @@ export async function publishContent(opts) {
 
   for (const account of accounts) {
     try {
+      const message = String(
+        contentByProvider?.[account.provider] || fallbackMessage || ""
+      ).trim();
+      if (!message) {
+        throw new Error("No content generated for this platform");
+      }
+
       let result;
+      const publishAction =
+        account.provider === "google_business"
+          ? action === "review_reply"
+            ? "review_reply"
+            : "gbp_post"
+          : "social_post";
+
       if (account.provider === "facebook") {
         result = await publishFacebook(account, message);
       } else if (account.provider === "instagram") {
@@ -369,7 +388,7 @@ export async function publishContent(opts) {
       } else if (account.provider === "linkedin") {
         result = await publishLinkedIn(account, message);
       } else if (account.provider === "google_business") {
-        if (action === "review_reply") {
+        if (publishAction === "review_reply") {
           result = await publishGbpReviewReply(account, message, reviewName);
         } else {
           result = await publishGbpPost(account, message);

@@ -1,17 +1,62 @@
+import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
 import { getModelPricing } from "./modelPrices.js";
 import { calculateUsdCost } from "./credits.js";
 
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const UPLOAD_DIR = path.join(__dirname, "..", "uploads", "generated");
+
+function ensureUploadDir() {
+  fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+}
+
+function publicUploadUrl(filename) {
+  const base = (process.env.API_PUBLIC_URL || process.env.APP_URL || "http://localhost:4000").replace(
+    /\/$/,
+    ""
+  );
+  // Served at /api/uploads/generated/... when proxied, or /uploads/generated on API port
+  return `${base}/api/uploads/generated/${filename}`;
+}
+
+/** Persist data-URL / remote image to uploads so Meta can fetch a public HTTPS URL */
+export async function persistImageUrl(imageUrl) {
+  if (!imageUrl) return null;
+  if (/^https?:\/\//i.test(imageUrl) && !imageUrl.startsWith("data:")) {
+    return imageUrl;
+  }
+
+  ensureUploadDir();
+  const match = String(imageUrl).match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/);
+  if (!match) return imageUrl;
+
+  const ext = match[1].includes("png")
+    ? "png"
+    : match[1].includes("webp")
+      ? "webp"
+      : match[1].includes("jpeg") || match[1].includes("jpg")
+        ? "jpg"
+        : "png";
+  const filename = `img-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+  const filePath = path.join(UPLOAD_DIR, filename);
+  fs.writeFileSync(filePath, Buffer.from(match[2], "base64"));
+  return publicUploadUrl(filename);
+}
 
 /**
  * Call OpenRouter API for text generation
  */
-export async function callOpenRouter({ model, messages, maxTokens = 1024 }) {
+export async function callOpenRouter({ model, messages, maxTokens = 1024, modalities }) {
   const apiKey = process.env.OPENROUTER_API_KEY;
 
   if (!apiKey) {
-    return mockOpenRouterResponse({ model, messages });
+    return mockOpenRouterResponse({ model, messages, modalities });
   }
+
+  const body = { model, messages, max_tokens: maxTokens };
+  if (modalities) body.modalities = modalities;
 
   const response = await fetch(OPENROUTER_URL, {
     method: "POST",
@@ -21,7 +66,7 @@ export async function callOpenRouter({ model, messages, maxTokens = 1024 }) {
       "HTTP-Referer": process.env.APP_URL || "http://localhost:3000",
       "X-Title": "Avonix Social",
     },
-    body: JSON.stringify({ model, messages, max_tokens: maxTokens }),
+    body: JSON.stringify(body),
   });
 
   if (!response.ok) {
@@ -32,7 +77,109 @@ export async function callOpenRouter({ model, messages, maxTokens = 1024 }) {
   return response.json();
 }
 
-function mockOpenRouterResponse({ model, messages }) {
+/** Strip URLs, emails, hashtags, and emoji characters from generated copy */
+export function stripLinksAndEmojis(text) {
+  return String(text || "")
+    .replace(/https?:\/\/\S+/gi, "")
+    .replace(/\bwww\.\S+/gi, "")
+    .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, "")
+    .replace(/#[\p{L}\p{N}_]+/gu, "")
+    .replace(
+      /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE00}-\u{FE0F}\u{1F1E0}-\u{1F1FF}]/gu,
+      ""
+    )
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .replace(/ {2,}/g, " ")
+    .trim();
+}
+
+export function enforceWordLimit(text, maxWords) {
+  const words = String(text || "").trim().split(/\s+/).filter(Boolean);
+  if (words.length <= maxWords) return words.join(" ");
+  return words.slice(0, maxWords).join(" ");
+}
+
+/**
+ * Generate a related image via OpenRouter image-capable model.
+ * Returns { ok, url } where url is a data: or https URL.
+ */
+export async function generateImage({ prompt }) {
+  const apiKey = process.env.OPENROUTER_API_KEY;
+  const model =
+    process.env.IMAGE_MODEL || "google/gemini-2.5-flash-image-preview";
+
+  if (!apiKey) {
+    // Deterministic placeholder SVG so UI/publish paths still work in demo mode
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1080">
+      <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0%" stop-color="#0f172a"/><stop offset="100%" stop-color="#ea580c"/>
+      </linearGradient></defs>
+      <rect width="1080" height="1080" fill="url(#g)"/>
+      <text x="540" y="520" fill="#fff" font-size="42" font-family="Arial" text-anchor="middle">Avonix Social</text>
+      <text x="540" y="580" fill="#fdba74" font-size="24" font-family="Arial" text-anchor="middle">Demo image</text>
+    </svg>`;
+    const dataUrl = `data:image/svg+xml;base64,${Buffer.from(svg).toString("base64")}`;
+    const url = await persistImageUrl(dataUrl);
+    return { ok: true, url, mock: true };
+  }
+
+  const data = await callOpenRouter({
+    model,
+    maxTokens: 1024,
+    modalities: ["image", "text"],
+    messages: [{ role: "user", content: prompt }],
+  });
+
+  const message = data?.choices?.[0]?.message;
+  const images = message?.images || [];
+  if (images[0]?.image_url?.url) {
+    const url = await persistImageUrl(images[0].image_url.url);
+    return { ok: true, url, mock: false };
+  }
+  if (images[0]?.imageUrl) {
+    const url = await persistImageUrl(images[0].imageUrl);
+    return { ok: true, url, mock: false };
+  }
+
+  // Some models put data URLs in content parts
+  const content = message?.content;
+  if (Array.isArray(content)) {
+    for (const part of content) {
+      const u = part?.image_url?.url || part?.imageUrl || part?.url;
+      if (u) {
+        const url = await persistImageUrl(u);
+        return { ok: true, url, mock: false };
+      }
+      if (part?.type === "image_url" && part?.image_url?.url) {
+        const url = await persistImageUrl(part.image_url.url);
+        return { ok: true, url, mock: false };
+      }
+    }
+  }
+
+  throw new Error("Image model returned no image URL. Check IMAGE_MODEL on the server.");
+}
+
+function mockOpenRouterResponse({ model, messages, modalities }) {
+  if (modalities?.includes("image")) {
+    return {
+      id: "mock-img-" + Date.now(),
+      model,
+      choices: [
+        {
+          message: {
+            role: "assistant",
+            content: "demo",
+            images: [{ image_url: { url: "" } }],
+          },
+        },
+      ],
+      usage: { prompt_tokens: 10, completion_tokens: 10, total_tokens: 20 },
+      _mock: true,
+    };
+  }
+
   const promptText = messages.map((m) => m.content).join(" ");
   const promptTokens = Math.ceil(promptText.length / 4);
   const content = generateMockContent(messages);
@@ -53,13 +200,19 @@ function mockOpenRouterResponse({ model, messages }) {
 
 function generateMockContent(messages) {
   const last = messages[messages.length - 1]?.content || "";
-  if (last.includes("GBP") || last.includes("Google Business")) {
-    return `Leading enterprise SEO agency. Optimize your Google Profile to capture local customers.\n\nAddress: 350 Fifth Ave, New York, NY 10118\nWebsite: https://nexadigital.com/\n\n#LocalSEO #LocalBusiness`;
-  }
   if (last.includes("review reply") || last.includes("Review:")) {
     return "Thank you for your stellar 5-star review! We are glad our SEO automation delivered great ranking results for your business.";
   }
-  return `Strategic search engine optimization helps local businesses capture high-intent organic traffic. By focusing on targeted keywords, companies build long-term authority and increase conversions.\n\nLearn more: https://nexadigital.com/\n\n#EnterpriseSEO #OrganicRanking`;
+  if (last.includes("Google Business Profile")) {
+    return "Looking for trusted local expertise in your area. Our team helps nearby businesses improve visibility, win more customers, and stay consistent online. Stop by or message us to learn how we can support your next growth goal.";
+  }
+  if (last.includes("Instagram")) {
+    return "Your brand deserves a clear first impression. We craft visuals and messaging that help local customers recognize and trust you faster.";
+  }
+  if (last.includes("LinkedIn")) {
+    return "Strong local brands win when strategy and execution stay aligned. We help teams clarify positioning, improve discoverability, and turn attention into qualified conversations.";
+  }
+  return "Elevate how local customers discover your brand. Focused messaging and consistent presence help you stand out, build trust, and convert interest into real business outcomes.";
 }
 
 /**
