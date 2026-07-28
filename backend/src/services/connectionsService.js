@@ -217,6 +217,36 @@ function verifyState(state) {
   }
 }
 
+function metaOAuthScopes(provider) {
+  const fbDefault = "pages_show_list,pages_read_engagement,business_management";
+  const igDefault =
+    "pages_show_list,pages_read_engagement,instagram_basic,business_management";
+
+  const raw =
+    provider === "instagram"
+      ? process.env.META_IG_OAUTH_SCOPES || process.env.META_OAUTH_SCOPES || igDefault
+      : process.env.META_FB_OAUTH_SCOPES || process.env.META_OAUTH_SCOPES || fbDefault;
+
+  return raw
+    .split(/[,\s]+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+/** Full publish scopes — set META_*_OAUTH_SCOPES in .env after Meta use-case permissions are Ready for testing */
+export function getMetaOAuthScopeHint(provider) {
+  if (provider === "instagram") {
+    return (
+      process.env.META_IG_OAUTH_SCOPES ||
+      "pages_show_list,pages_read_engagement,instagram_basic,instagram_content_publish,business_management (after Meta use case)"
+    );
+  }
+  return (
+    process.env.META_FB_OAUTH_SCOPES ||
+    "pages_show_list,pages_read_engagement,pages_manage_posts,business_management (after Meta use case)"
+  );
+}
+
 export async function startOAuth({ email, provider, workspaceId }) {
   if (!PROVIDERS.includes(provider)) {
     return { ok: false, status: 400, error: "Unsupported provider" };
@@ -248,22 +278,7 @@ export async function startOAuth({ email, provider, workspaceId }) {
 
   let authUrl;
   if (provider === "facebook" || provider === "instagram") {
-    const scopes =
-      provider === "instagram"
-        ? [
-            "pages_show_list",
-            "pages_read_engagement",
-            "pages_manage_posts",
-            "instagram_basic",
-            "instagram_content_publish",
-            "business_management",
-          ]
-        : [
-            "pages_show_list",
-            "pages_read_engagement",
-            "pages_manage_posts",
-            "business_management",
-          ];
+    const scopes = metaOAuthScopes(provider);
     const params = new URLSearchParams({
       client_id: cfg.appId,
       redirect_uri: redirectUri,
@@ -339,14 +354,36 @@ async function handleMetaCallback({ code, provider, user, workspaceId }) {
 
   const userToken = tokenData.access_token;
   const pagesRes = await fetch(
-    `https://graph.facebook.com/v21.0/me/accounts?fields=id,name,access_token,instagram_business_account{id,username}&access_token=${encodeURIComponent(userToken)}`
+    `https://graph.facebook.com/v21.0/me/accounts?fields=id,name,access_token,instagram_business_account{id,username}&limit=100&access_token=${encodeURIComponent(userToken)}`
   );
   const pagesData = await pagesRes.json();
-  const pages = pagesData.data || [];
+  if (pagesData.error) {
+    throw new Error(
+      pagesData.error.message ||
+        "Could not load Facebook Pages (permission or API error)."
+    );
+  }
+  const pages = Array.isArray(pagesData.data) ? pagesData.data : [];
 
   if (!pages.length) {
+    // Help distinguish: no Page vs Page not selected in Meta consent UI
+    let granted = [];
+    try {
+      const permRes = await fetch(
+        `https://graph.facebook.com/v21.0/me/permissions?access_token=${encodeURIComponent(userToken)}`
+      );
+      const permData = await permRes.json();
+      granted = (permData.data || [])
+        .filter((p) => p.status === "granted")
+        .map((p) => p.permission);
+    } catch {
+      /* ignore */
+    }
+    const hasPagesScope = granted.includes("pages_show_list");
     throw new Error(
-      "No Facebook Pages found for this account. Create a Page, then reconnect."
+      hasPagesScope
+        ? "No Facebook Pages found for this account. Either this Facebook login has no Page, or you did not select a Page in the Facebook permission screen. Create a Page (facebook.com/pages/create), then reconnect and choose that Page when Facebook asks."
+        : "Facebook did not grant Page access (pages_show_list). Reconnect and allow Page permissions when Facebook asks — do not skip the Page selection step."
     );
   }
 
