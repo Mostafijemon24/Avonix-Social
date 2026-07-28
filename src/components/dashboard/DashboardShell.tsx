@@ -16,6 +16,7 @@ import {
   Menu,
   X,
   Link2,
+  LifeBuoy,
 } from "lucide-react";
 import { BrandLogo } from "@/components/ui/BrandLogo";
 import { DASHBOARD_NAV } from "@/lib/constants";
@@ -35,6 +36,7 @@ const ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
   notification: Bell,
   report: FileText,
   billing: CreditCard,
+  support: LifeBuoy,
 };
 
 export function DashboardShell({ children }: { children: React.ReactNode }) {

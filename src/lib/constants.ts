@@ -6,6 +6,7 @@ export const PUBLIC_NAV = [
   { href: "/pricing", label: "Pricing & Plans", match: "pricing" },
   { href: "/api-integrations", label: "API Integrations", match: "api" },
   { href: "/about", label: "About Us", match: "about" },
+  { href: "/support", label: "Support", match: "support" },
   { href: "/contact", label: "Contact Us", match: "contact" },
 ] as const;
 
@@ -20,6 +21,7 @@ export const DASHBOARD_NAV = [
   { href: "/dashboard/notification", label: "Notification", id: "notification" },
   { href: "/dashboard/report", label: "Report", id: "report" },
   { href: "/dashboard/billing", label: "Plan & Price", id: "billing" },
+  { href: "/dashboard/support", label: "Support", id: "support" },
 ] as const;
 
 export const PRICING_PLANS = [
