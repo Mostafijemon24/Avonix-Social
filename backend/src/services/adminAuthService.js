@@ -9,6 +9,8 @@ import {
 } from "../middleware/adminAuth.js";
 import { validatePasswordStrength } from "../password.js";
 
+export { validatePasswordStrength };
+
 /** Hard limit — cannot create more than 2 super admins */
 export const MAX_SUPER_ADMINS = 2;
 
