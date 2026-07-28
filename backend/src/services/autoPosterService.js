@@ -7,7 +7,7 @@
  * - Publish lock, schedule, rewrite
  */
 import crypto from "crypto";
-import { callOpenRouter } from "../openrouter.js";
+import { callOpenRouter, generateImage } from "../openrouter.js";
 import { resolveActiveWorkspace } from "./workspaceService.js";
 import { publishContent } from "./publishService.js";
 import prisma from "../db.js";
@@ -51,12 +51,12 @@ export const PLATFORM_CONFIG = {
     maxWords: 150,
     allowLinks: true,
     allowHashtags: true,
-    image: { width: 1200, height: 630, aspect: "1.91:1" },
+    image: { width: 1200, height: 630, aspect: "16:9" },
   },
   Instagram: {
     key: "instagram",
     maxWords: 80,
-    allowLinks: false, // link in bio only
+    allowLinks: false,
     allowHashtags: true,
     image: { width: 1080, height: 1080, aspect: "1:1" },
   },
@@ -65,23 +65,23 @@ export const PLATFORM_CONFIG = {
     maxWords: 180,
     allowLinks: true,
     allowHashtags: true,
-    image: { width: 1200, height: 627, aspect: "1.91:1" },
+    image: { width: 1200, height: 627, aspect: "16:9" },
   },
   GMB: {
     key: "google_business",
     maxWords: 100,
-    allowLinks: false, // GBP updates: no URLs / no hashtags
+    allowLinks: false,
     allowHashtags: false,
     image: { width: 1024, height: 576, aspect: "16:9" },
   },
 };
 
-const TONE_PREFIX = {
-  Professional: "Welcome to our official update.",
-  Enthusiastic: "Exciting news for everyone!",
-  Empathetic: "We understand exactly what you need.",
-  Authoritative: "Setting the industry standard.",
-  Storytelling: "Let us share our journey with you...",
+const TONE_OPENER = {
+  Professional: "Here is a clear update from our team.",
+  Enthusiastic: "We have something worth sharing.",
+  Empathetic: "If you have been searching for the right fit, this is for you.",
+  Authoritative: "Results matter — and consistency wins.",
+  Storytelling: "Every strong brand starts with a clear next step.",
 };
 
 function fingerprintOf(url, platform, primary) {
@@ -89,6 +89,77 @@ function fingerprintOf(url, platform, primary) {
     .toLowerCase()
     .trim()}`;
   return crypto.createHash("sha256").update(raw).digest("hex").slice(0, 32);
+}
+
+/** Denver, TX — not "Denver Tx" */
+export function normalizeLocation(loc) {
+  return String(loc || "")
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .map((part) => {
+      if (/^[a-z]{2}$/i.test(part)) return part.toUpperCase();
+      return part
+        .split(/\s+/)
+        .map((w) => {
+          if (/^[a-z]{2}$/i.test(w) && w.length === 2) return w.toUpperCase();
+          return w.charAt(0).toUpperCase() + w.slice(1).toLowerCase();
+        })
+        .join(" ");
+    })
+    .join(", ");
+}
+
+function locationTokens(loc) {
+  return String(loc || "")
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((t) => t.length >= 2);
+}
+
+function phraseHasLocation(phrase, loc) {
+  const p = String(phrase || "").toLowerCase();
+  return locationTokens(loc).some((t) => t.length >= 3 && p.includes(t));
+}
+
+/** Fix "Logo Design Denver Tx" → align state casing with location */
+function polishKeyword(kw, loc) {
+  let s = String(kw || "").trim().replace(/\s+/g, " ");
+  s = s.replace(/\b\w/g, (c) => c.toUpperCase());
+  const state = String(loc || "").match(/,\s*([A-Za-z]{2})\s*$/);
+  if (state) {
+    const st = state[1].toUpperCase();
+    s = s.replace(new RegExp(`\\b${state[1]}\\b`, "gi"), st);
+  }
+  s = s.replace(/\bSeo\b/g, "SEO").replace(/\bGbp\b/g, "GBP");
+  return s;
+}
+
+/** "primary in Location" only when location is not already in the phrase */
+function withLocation(phrase, loc) {
+  const p = polishKeyword(phrase, loc);
+  const place = normalizeLocation(loc);
+  if (!place || phraseHasLocation(p, place)) return p;
+  return `${p} in ${place}`;
+}
+
+/** Avoid "a Services" / "a Solutions" */
+function asProvider(phrase) {
+  const p = String(phrase || "").trim();
+  if (!p) return "a trusted local team";
+  if (/^(a|an|the|our)\s/i.test(p)) return p;
+  if (/\b(services|solutions|products|designs|experts|agency|studio)\b/i.test(p)) {
+    return p;
+  }
+  const an = /^[aeiou]/i.test(p);
+  return `${an ? "an" : "a"} ${p}`;
+}
+
+function asOffering(phrase) {
+  const p = String(phrase || "").trim();
+  if (!p) return "premium service";
+  if (/^(a|an|the|our)\s/i.test(p)) return p;
+  return p;
 }
 
 function normalizeUrl(input) {
@@ -216,24 +287,21 @@ function scorePageKeywords(page, location) {
   const multi = ranked.filter(([p]) => p.includes(" "));
   const pool = multi.length >= 5 ? multi : ranked;
 
-  let primary = pool[0]?.[0] || page.h1 || page.title || "local business services";
-  if (locToken && !primary.toLowerCase().includes(locToken)) {
-    primary = `${primary} ${pretty(locToken)}`;
-  }
-
+  const primary = pool[0]?.[0] || page.h1 || page.title || "local business services";
+  // Do not append location into primary — copy adds location cleanly when needed
   const rest = pool
     .slice(1)
     .map(([p]) => p)
     .filter((p) => p.toLowerCase() !== primary.toLowerCase());
 
   return {
-    primary: pretty(primary),
-    secondary: pretty(rest[0] || `best ${primary}`),
+    primary: polishKeyword(primary, location),
+    secondary: polishKeyword(rest[0] || `custom ${primary}`, location),
     general: [
-      pretty(rest[1] || `top ${primary} provider`),
-      pretty(rest[2] || "quality products"),
-      pretty(rest[3] || "trusted brand"),
-      pretty(rest[4] || "special offer"),
+      polishKeyword(rest[1] || `${primary} experts`, location),
+      polishKeyword(rest[2] || "affordable packages", location),
+      polishKeyword(rest[3] || "local branding services", location),
+      polishKeyword(rest[4] || "creative solutions", location),
     ].slice(0, 4),
   };
 }
@@ -274,9 +342,9 @@ Pick 1 primary, 1 secondary, and exactly 4 general keywords best for Google + AI
     const general = (parsed.general || []).map((k) => pretty(String(k).trim())).filter(Boolean);
     if (!parsed.primary || !parsed.secondary || general.length < 4) return null;
     return {
-      primary: pretty(parsed.primary),
-      secondary: pretty(parsed.secondary),
-      general: general.slice(0, 4),
+      primary: polishKeyword(parsed.primary, location),
+      secondary: polishKeyword(parsed.secondary, location),
+      general: general.slice(0, 4).map((k) => polishKeyword(k, location)),
     };
   } catch (err) {
     console.error("[autoPoster keywords AI]", err.message);
@@ -301,65 +369,129 @@ function hashtagify(...parts) {
 }
 
 function enforceWords(text, max) {
-  const words = String(text || "").trim().split(/\s+/).filter(Boolean);
-  if (words.length <= max) return words.join(" ");
-  return words.slice(0, max).join(" ");
+  const paragraphs = String(text || "")
+    .trim()
+    .split(/\n+/)
+    .map((p) => p.trim())
+    .filter(Boolean);
+  let count = 0;
+  const out = [];
+  for (const para of paragraphs) {
+    const words = para.split(/\s+/).filter(Boolean);
+    if (count >= max) break;
+    if (count + words.length <= max) {
+      out.push(words.join(" "));
+      count += words.length;
+    } else {
+      out.push(words.slice(0, max - count).join(" "));
+      break;
+    }
+  }
+  return out.join("\n\n");
 }
 
 /**
- * Build heading + body per platform rules.
- * Returns { heading, content (plain with markers), contentHtml }
+ * Professional heading + body per platform rules (no location duplication, clean grammar).
  */
 export function generatePostContent(platform, keywords, location, url, tone) {
-  const { primary, secondary, general } = keywords;
+  const place = normalizeLocation(location) || "your area";
+  const primary = polishKeyword(keywords.primary, place);
+  const secondary = polishKeyword(keywords.secondary, place);
+  const g = (keywords.general || []).map((x) => polishKeyword(x, place));
+  while (g.length < 4) g.push("trusted local support");
+
   const cfg = PLATFORM_CONFIG[platform];
-  const prefix = TONE_PREFIX[tone] || TONE_PREFIX.Professional;
-  const g = [
-    general[0] || "trusted provider",
-    general[1] || "quality service",
-    general[2] || "reliable results",
-    general[3] || "limited offer",
-  ];
-  const loc = location || "your area";
+  const opener = TONE_OPENER[tone] || TONE_OPENER.Professional;
+  const primaryLocal = withLocation(primary, place);
+  const provider = asProvider(g[0]);
+  const offering = asOffering(g[1]);
+  const proof = asOffering(g[2]);
+  const promo = asOffering(g[3]);
 
   let heading = "";
   let plain = "";
   let html = "";
 
   if (platform === "Facebook") {
-    heading = `Discover the ${primary} in ${loc}!`;
-    plain = `${prefix} Looking for the ${secondary}? You've come to the right place. We are known as a ${g[0]} providing ${g[1]}.\n\nJoin our community and experience a ${g[2]} today! Grab our ${g[3]}.\n\nLearn more here: ${primary}\n${url}\n\n${hashtagify(loc, primary)}`;
-    html = `${prefix} Looking for the ${secondary}? You've come to the right place. We are known as a ${g[0]} providing ${g[1]}.\n\nJoin our community and experience a ${g[2]} today! Grab our ${g[3]}.\n\n👉 Learn more here: ${keywordLinkHtml(url, primary)}\n\n${hashtagify(loc, primary)}`;
+    heading = `Discover ${primaryLocal}`;
+    plain = `${opener}\n\nLooking for ${secondary}? Our team delivers ${offering} with care and clarity. Clients trust us for ${proof}.\n\nExplore ${promo} and see why local businesses rely on ${asOffering(g[0])}.\n\nLearn more: ${primary}\n${url}\n\n${hashtagify(place, primary)}`;
+    html = `${opener}\n\nLooking for ${secondary}? Our team delivers ${offering} with care and clarity. Clients trust us for ${proof}.\n\nExplore ${promo} and see why local businesses rely on ${asOffering(g[0])}.\n\nLearn more: ${keywordLinkHtml(url, primary)}\n\n${hashtagify(place, primary)}`;
   } else if (platform === "Instagram") {
-    heading = `Elevate your lifestyle with ${primary}`;
-    plain = `${prefix} Finding the ${secondary} in ${loc} just got easier!\n\nWe pride ourselves on delivering ${g[1]} as a ${g[2]}. Don't miss out on our ${g[3]} designed just for you.\n\nLink in bio to explore more.\n\n${hashtagify(primary, secondary, loc, "Lifestyle", "InstaGood", "TrendingNow")}`;
-    html = plain; // no clickable links on IG captions
+    heading = `${primary} — crafted with care`;
+    plain = `${opener}\n\n${secondary} for businesses in ${place}.\n\nWe focus on ${offering} and ${proof}. Ready for ${promo}?\n\nLink in bio.\n\n${hashtagify(primary, secondary, place, "LocalBusiness", "BrandDesign")}`;
+    html = plain;
   } else if (platform === "LinkedIn") {
-    heading = `Strategic insights on ${primary} for professionals in ${loc}`;
+    heading = phraseHasLocation(primary, place)
+      ? `${primary} — practical value for growing teams`
+      : `${primary} for teams in ${place}`;
     const bridge =
       tone === "Storytelling"
-        ? "Every successful business has a story of finding the right tools."
-        : "In today's fast-paced corporate environment, finding the right solutions is crucial.";
-    plain = `${prefix} ${bridge} As a ${g[0]}, we are committed to delivering ${g[1]} to our professional network.\n\nBuilding a ${g[2]} takes time and dedication. We are excited to announce a ${g[3]} tailored for industry leaders in ${loc}.\n\nExplore our latest insights about ${primary}:\n${url}\n\n${hashtagify("ProfessionalDevelopment", primary, "BusinessGrowth", loc)}`;
-    html = `${prefix} ${bridge} As a ${g[0]}, we are committed to delivering ${g[1]} to our professional network.\n\nBuilding a ${g[2]} takes time and dedication. We are excited to announce a ${g[3]} tailored for industry leaders in ${loc}.\n\nExplore our latest insights: ${keywordLinkHtml(url, `Read more about ${primary}`)}\n\n${hashtagify("ProfessionalDevelopment", primary, "BusinessGrowth", loc)}`;
+        ? "Strong brands are built through clear positioning and steady execution."
+        : "In competitive markets, clear positioning and reliable delivery separate leaders from the rest.";
+    plain = `${opener} ${bridge}\n\nWe support organizations with ${offering}, backed by ${proof}. Our specialists help clients move from idea to polished identity through ${provider}.\n\nDiscover ${promo}:\n${url}\n\n${hashtagify("BusinessGrowth", primary, "Leadership", place)}`;
+    html = `${opener} ${bridge}\n\nWe support organizations with ${offering}, backed by ${proof}. Our specialists help clients move from idea to polished identity through ${provider}.\n\nDiscover ${promo}: ${keywordLinkHtml(url, primary)}\n\n${hashtagify("BusinessGrowth", primary, "Leadership", place)}`;
   } else {
-    // GMB — no hashtags, no URLs, keywords woven into natural copy
-    heading = `Top ${primary} in ${loc} — Open Now!`;
-    plain = `${prefix} Welcome to the ${secondary} provider in ${loc}. We offer premium ${g[1]} for all your needs. Known as a ${g[2]}, we have a special ${g[3]} running this week.\n\nVisit us today or message us to learn more about ${primary}.`;
+    // GMB
+    heading = phraseHasLocation(primary, place)
+      ? `${primary} — open and ready to help`
+      : `${primary} in ${place} — open and ready to help`;
+    plain = `${opener} Looking for ${secondary}? We provide ${offering} for local customers. Ask us about ${promo} and how ${proof} can support your next project.\n\nVisit or message us to learn more about ${primary}.`;
     html = plain;
   }
 
-  plain = enforceWords(plain, cfg.maxWords + 20); // slight buffer for links/hashtags display
+  plain = enforceWords(plain, cfg.maxWords + 25);
   return { heading, content: plain, contentHtml: html || plain };
 }
 
+/** Scene-based photoreal prompt — never ask the model to render keyword text/logos */
+function buildPhotorealImagePrompt(keyword, location, heading) {
+  const place = normalizeLocation(location) || "a local business district";
+  const topic = polishKeyword(keyword, place);
+  return `Photorealistic natural photograph of a real-world professional scene related to "${topic}" in ${place}.
+Show authentic people, hands at work, tools, materials, or a real studio/office environment that matches this service.
+Natural window light or golden hour, shallow depth of field, sharp detail on textures and faces, documentary style, shot on a full-frame camera, 85mm lens, ISO 100, ultra detailed, 8K resolution.
+Strictly forbidden: any text, letters, words, typography, watermarks, logos, brand marks, UI, posters with writing, 3D metallic emblems, sci-fi city logos, abstract chrome badges, fake signage.
+No illustrations, no cartoon, no CGI logo mockups — only realistic natural photography.`;
+}
+
+/**
+ * Photoreal natural images (no text/logos in frame).
+ * Set STUDIO_USE_OPENROUTER_IMAGES=true to prefer OpenRouter image models.
+ */
+export async function generateStudioImage({ keyword, location, platform, heading }) {
+  const cfg = PLATFORM_CONFIG[platform] || PLATFORM_CONFIG.Facebook;
+  const { width, height } = cfg.image;
+  const prompt = buildPhotorealImagePrompt(keyword, location, heading);
+
+  const preferOr =
+    process.env.STUDIO_USE_OPENROUTER_IMAGES === "true" && process.env.OPENROUTER_API_KEY;
+
+  if (preferOr) {
+    try {
+      const img = await generateImage({
+        prompt,
+        aspectRatio: platform === "Instagram" ? "1:1" : "16:9",
+      });
+      if (img?.ok && img.url) return img.url;
+    } catch (err) {
+      console.error("[autoPoster image OpenRouter]", err.message);
+    }
+  }
+
+  const encoded = encodeURIComponent(prompt.slice(0, 1800));
+  const seed = Math.floor(Math.random() * 1e9);
+  // model=flux tends to follow photoreal + no-text instructions better
+  return `https://image.pollinations.ai/prompt/${encoded}?width=${width}&height=${height}&nologo=true&enhance=true&model=flux&seed=${seed}`;
+}
+
+/** @deprecated use generateStudioImage */
 export function getRealisticImageUrl(keyword, platform) {
   const cfg = PLATFORM_CONFIG[platform] || PLATFORM_CONFIG.Facebook;
   const { width, height } = cfg.image;
   const prompt = encodeURIComponent(
-    `ultra realistic photography of ${keyword}, highly detailed, 8k resolution, professional lighting, corporate editorial style, no text, no watermark`
+    buildPhotorealImagePrompt(keyword, "", keyword).slice(0, 1200)
   );
-  return `https://image.pollinations.ai/prompt/${prompt}?width=${width}&height=${height}&nologo=true&seed=${Math.floor(Math.random() * 1e6)}`;
+  return `https://image.pollinations.ai/prompt/${prompt}?width=${width}&height=${height}&nologo=true&enhance=true&seed=${Date.now()}`;
 }
 
 async function scanOneUrl(rawUrl, location) {
@@ -373,18 +505,18 @@ async function scanOneUrl(rawUrl, location) {
       .replace(/^https?:\/\//, "")
       .split(/[/?#]/)[0]
       .split(".")[0];
-    const primary = pretty(`${slug} services${location ? ` ${location.split(",")[0]}` : ""}`);
+    const primary = polishKeyword(`${slug} services`, location);
     return {
       url,
       reachable: false,
       keywords: {
         primary,
-        secondary: pretty(`best ${slug} online`),
+        secondary: polishKeyword(`custom ${slug} design`, location),
         general: [
-          pretty(`top ${slug} provider`),
-          "Quality Products",
-          "Trusted Brand",
-          "Special Offer",
+          polishKeyword(`${slug} experts`, location),
+          "Affordable Packages",
+          "Local Branding Services",
+          "Creative Solutions",
         ],
       },
     };
@@ -469,10 +601,9 @@ export async function generateAutoPosterSuite({
   const wid = workspaceId || activeId || workspace?.id || null;
 
   const selectedTone = TONE_PRESETS.includes(tone) ? tone : "Professional";
-  const loc =
-    String(location || "").trim() ||
-    workspace?.location ||
-    "";
+  const loc = normalizeLocation(
+    String(location || "").trim() || workspace?.location || ""
+  );
 
   const scan = await scanUrlsForKeywords(urls, loc);
   if (!scan.ok) return scan;
@@ -512,7 +643,12 @@ export async function generateAutoPosterSuite({
         item.url,
         selectedTone
       );
-      const imageUrl = getRealisticImageUrl(item.keywords.primary, platform);
+      const imageUrl = await generateStudioImage({
+        keyword: item.keywords.primary,
+        location: loc,
+        platform,
+        heading: postData.heading,
+      });
 
       const row = await prisma.studioPost.create({
         data: {
@@ -523,9 +659,11 @@ export async function generateAutoPosterSuite({
           platform,
           tone: selectedTone,
           location: loc,
-          primaryKeyword: item.keywords.primary,
-          secondaryKeyword: item.keywords.secondary,
-          generalKeywords: JSON.stringify(item.keywords.general),
+          primaryKeyword: polishKeyword(item.keywords.primary, loc),
+          secondaryKeyword: polishKeyword(item.keywords.secondary, loc),
+          generalKeywords: JSON.stringify(
+            (item.keywords.general || []).map((k) => polishKeyword(k, loc))
+          ),
           heading: postData.heading,
           content: postData.content,
           contentHtml: postData.contentHtml,
@@ -723,17 +861,20 @@ export async function rewriteStudioPost({ email, postId, tone }) {
     post.sourceUrl,
     selectedTone
   );
-  const imageUrl = getRealisticImageUrl(keywords.primary, post.platform);
+  const imageUrl = await generateStudioImage({
+    keyword: keywords.primary,
+    location: post.location,
+    platform: post.platform,
+    heading: postData.heading,
+  });
 
-  // New draft from locked template — new fingerprint seed via rewrite timestamp in content only;
-  // fingerprint stays same so we unlock by creating a draft clone with locked=false
   const updated = await prisma.studioPost.update({
     where: { id: post.id },
     data: {
       tone: selectedTone,
-      heading: `[Updated] ${postData.heading}`,
-      content: `[Rewritten — ${selectedTone}]\n${postData.content}`,
-      contentHtml: `[Rewritten — ${selectedTone}]\n${postData.contentHtml}`,
+      heading: postData.heading,
+      content: postData.content,
+      contentHtml: postData.contentHtml,
       imageUrl,
       status: "draft",
       locked: false,
