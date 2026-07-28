@@ -2,8 +2,10 @@
  * Email + SMS OTP verification for registration / security
  */
 import crypto from "crypto";
+import bcrypt from "bcryptjs";
 import prisma from "../db.js";
 import { sendRegistrationOtps, normalizePhone } from "./notifyService.js";
+import { validatePasswordStrength, PASSWORD_HINT } from "../password.js";
 
 const OTP_TTL_MS = 10 * 60 * 1000; // 10 minutes
 const IS_PRODUCTION = process.env.NODE_ENV === "production";
@@ -20,7 +22,14 @@ function generateOtp() {
   return String(crypto.randomInt(100000, 999999));
 }
 
-export async function startRegistration({ email, phone, name, company }) {
+export async function startRegistration({
+  email,
+  phone,
+  name,
+  company,
+  password,
+  confirmPassword,
+}) {
   const normalizedEmail = (email || "").trim().toLowerCase();
   const normalizedPhone = normalizePhone(phone);
 
@@ -34,13 +43,23 @@ export async function startRegistration({ email, phone, name, company }) {
     };
   }
 
+  if (password !== confirmPassword) {
+    return { ok: false, error: "Password and confirmation do not match" };
+  }
+  const strength = validatePasswordStrength(password);
+  if (!strength.ok) {
+    return { ok: false, error: `${strength.error}. ${PASSWORD_HINT}` };
+  }
+
+  const passwordHash = await bcrypt.hash(password, 12);
+
   let user = await prisma.user.findUnique({
     where: { email: normalizedEmail },
     include: { package: true },
   });
 
   if (user && isFullyVerified(user)) {
-    return { ok: false, error: "Account already verified. Sign in to access the dashboard." };
+    return { ok: false, error: "Account already verified. Sign in with your email and password." };
   }
 
   if (!user) {
@@ -53,8 +72,9 @@ export async function startRegistration({ email, phone, name, company }) {
         phone: normalizedPhone,
         name: name || normalizedEmail.split("@")[0],
         company: company || null,
+        passwordHash,
         packageId: freePlan.id,
-        remainingCredits: 0, // no credits until verified + card
+        remainingCredits: 0,
         source: "signup",
         accountStatus: "pending_verification",
         whatsappNumber: normalizedPhone,
@@ -69,6 +89,7 @@ export async function startRegistration({ email, phone, name, company }) {
         name: name || user.name,
         company: company || user.company,
         whatsappNumber: normalizedPhone,
+        passwordHash,
       },
       include: { package: true },
     });
@@ -304,19 +325,40 @@ export async function getAuthStatus(email) {
   };
 }
 
-export async function loginVerifiedUser(email) {
+export async function loginVerifiedUser(email, password) {
   const normalizedEmail = (email || "").trim().toLowerCase();
   if (!normalizedEmail.includes("@")) {
     return { ok: false, status: 400, error: "Valid email required" };
   }
+  if (!password) {
+    return { ok: false, status: 400, error: "Password is required" };
+  }
 
   const user = await prisma.user.findUnique({ where: { email: normalizedEmail } });
   if (!user) {
+    await bcrypt.compare(
+      password,
+      "$2a$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/X4.G2oQ.5Y5Y5Y5Y5u"
+    );
     return {
       ok: false,
-      status: 404,
-      error: "No account found. Complete registration first.",
+      status: 401,
+      error: "Invalid email or password.",
     };
+  }
+
+  if (!user.passwordHash) {
+    return {
+      ok: false,
+      status: 403,
+      error:
+        "This account has no password set. Register again with a strong password, or contact support.",
+    };
+  }
+
+  const valid = await bcrypt.compare(password, user.passwordHash);
+  if (!valid) {
+    return { ok: false, status: 401, error: "Invalid email or password." };
   }
 
   if (!isFullyVerified(user)) {

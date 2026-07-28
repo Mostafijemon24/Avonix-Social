@@ -9,10 +9,22 @@ import { api } from "@/lib/api-client";
 
 type Step = "signin" | "register" | "verify" | "card";
 
+const PASSWORD_HINT =
+  "Min 12 characters, with uppercase, lowercase, number, and special character (!@#$…).";
+
 function stepFromNext(next?: string): Step {
   if (next === "verify_codes") return "verify";
   if (next === "add_card") return "card";
   return "signin";
+}
+
+function clientPasswordOk(password: string): string | null {
+  if (!password || password.length < 12) return "Password must be at least 12 characters";
+  if (!/[A-Z]/.test(password)) return "Include an uppercase letter";
+  if (!/[a-z]/.test(password)) return "Include a lowercase letter";
+  if (!/[0-9]/.test(password)) return "Include a number";
+  if (!/[^A-Za-z0-9]/.test(password)) return "Include a special character";
+  return null;
 }
 
 export function RegisterFlow() {
@@ -24,6 +36,7 @@ export function RegisterFlow() {
   const [step, setStep] = useState<Step>("signin");
   const [loading, setLoading] = useState(false);
   const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [initialized, setInitialized] = useState(false);
 
   useEffect(() => {
@@ -41,8 +54,9 @@ export function RegisterFlow() {
       api
         .getAuthStatus(paramEmail)
         .then((status) => {
+          // Never auto-enter dashboard without password login
           if (status.fullyVerified) {
-            router.replace("/dashboard");
+            setStep("signin");
             return;
           }
           setStep(stepFromNext(status.next));
@@ -55,9 +69,10 @@ export function RegisterFlow() {
     setInitialized(true);
   }, [searchParams, router]);
 
-  const finish = async (msg: string, userEmail: string) => {
-    await establishSession(userEmail);
+  const finish = async (msg: string, userEmail: string, pwd: string) => {
+    await establishSession(userEmail, pwd);
     await refreshState();
+    setPassword("");
     showToast(msg, "success");
     router.push("/dashboard");
   };
@@ -67,22 +82,23 @@ export function RegisterFlow() {
     setLoading(true);
     const form = new FormData(e.currentTarget);
     const em = (form.get("email") as string).trim().toLowerCase();
+    const pwd = form.get("password") as string;
     setEmail(em);
     try {
-      const { user } = await api.login(em);
-      await finish(`Welcome back! ${user.credits} credits available.`, em);
+      const { user } = await api.login(em, pwd);
+      await finish(`Welcome back! ${user.credits} credits available.`, em, pwd);
     } catch (err: unknown) {
       const payload =
         err && typeof err === "object"
           ? (err as { error?: string; next?: string; status?: number })
           : {};
       if (payload.status === 403 && payload.next) {
+        setPassword(pwd);
         setStep(stepFromNext(payload.next));
         showToast("Complete verification to access the dashboard.", "success");
         return;
       }
-      showToast(payload.error || "No verified account found. Register first.", "error");
-      setStep("register");
+      showToast(payload.error || "Invalid email or password.", "error");
     } finally {
       setLoading(false);
     }
@@ -93,14 +109,32 @@ export function RegisterFlow() {
     setLoading(true);
     const form = new FormData(e.currentTarget);
     const em = (form.get("email") as string).trim().toLowerCase();
+    const pwd = form.get("password") as string;
+    const confirm = form.get("confirmPassword") as string;
     setEmail(em);
+
+    const strengthErr = clientPasswordOk(pwd);
+    if (strengthErr) {
+      showToast(`${strengthErr}. ${PASSWORD_HINT}`, "error");
+      setLoading(false);
+      return;
+    }
+    if (pwd !== confirm) {
+      showToast("Password and confirmation do not match", "error");
+      setLoading(false);
+      return;
+    }
+
     try {
       const result = await api.register({
         email: em,
         phone: form.get("phone") as string,
         name: form.get("name") as string,
         company: (form.get("company") as string) || undefined,
+        password: pwd,
+        confirmPassword: confirm,
       });
+      setPassword(pwd);
       setStep("verify");
       const emailStatus = result.delivery?.email;
       const smsStatus = result.delivery?.sms;
@@ -162,7 +196,12 @@ export function RegisterFlow() {
         expYear: form.get("expYear") as string,
         cvc: form.get("cvc") as string,
       });
-      await finish(result.message || "Free Trial activated!", email);
+      if (!password) {
+        showToast("Card saved. Please sign in with your password.", "success");
+        setStep("signin");
+        return;
+      }
+      await finish(result.message || "Free Trial activated!", email, password);
     } catch (err: unknown) {
       showToast(
         err && typeof err === "object" && "error" in err
@@ -193,10 +232,9 @@ export function RegisterFlow() {
           {step === "card" && "Add Card (Required)"}
         </h1>
         <p className="text-xs text-slate-400 mb-6">
-          {step === "signin" &&
-            "Only fully verified accounts can access the dashboard."}
+          {step === "signin" && "Sign in with email and password every time."}
           {step === "register" &&
-            "Register with email and phone. Verification is mandatory before Free Trial."}
+            "Set a strong password, then verify email & phone before Free Trial."}
           {step === "verify" &&
             "Enter the 6-digit codes sent to your email and mobile phone."}
           {step === "card" &&
@@ -206,12 +244,13 @@ export function RegisterFlow() {
         {step === "signin" && (
           <form onSubmit={handleSignIn} className="space-y-4 text-xs">
             <Field label="Email" name="email" type="email" defaultValue={email} required />
+            <Field label="Password" name="password" type="password" required autoComplete="current-password" />
             <button
               type="submit"
               disabled={loading}
               className="w-full bg-orange-500 hover:bg-orange-600 text-white font-bold py-3 rounded-xl"
             >
-              {loading ? "Checking..." : "Sign In"}
+              {loading ? "Signing in..." : "Sign In"}
             </button>
             <button
               type="button"
@@ -235,9 +274,25 @@ export function RegisterFlow() {
               required
             />
             <p className="text-[10px] text-slate-500 -mt-1">
-              Any country. Include country code (e.g. +880… BD, +1… US, +44… UK). SMS OTP will be sent here.
+              Any country. Include country code (e.g. +880… BD, +1… US, +44… UK). SMS OTP will be
+              sent here.
             </p>
             <Field label="Company (optional)" name="company" />
+            <Field
+              label="Password"
+              name="password"
+              type="password"
+              required
+              autoComplete="new-password"
+            />
+            <Field
+              label="Confirm Password"
+              name="confirmPassword"
+              type="password"
+              required
+              autoComplete="new-password"
+            />
+            <p className="text-[10px] text-slate-500 -mt-1">{PASSWORD_HINT}</p>
             <button
               type="submit"
               disabled={loading}
@@ -307,6 +362,7 @@ function Field({
   placeholder,
   maxLength,
   defaultValue,
+  autoComplete,
 }: {
   label: string;
   name: string;
@@ -315,6 +371,7 @@ function Field({
   placeholder?: string;
   maxLength?: number;
   defaultValue?: string;
+  autoComplete?: string;
 }) {
   return (
     <div>
@@ -326,6 +383,7 @@ function Field({
         placeholder={placeholder}
         maxLength={maxLength}
         defaultValue={defaultValue}
+        autoComplete={autoComplete}
         className="w-full border border-navy-700 rounded-xl p-3 bg-navy-950 font-bold text-white"
       />
     </div>

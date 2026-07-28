@@ -30,7 +30,14 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  register: (payload: { email: string; phone: string; name?: string; company?: string }) =>
+  register: (payload: {
+    email: string;
+    phone: string;
+    name?: string;
+    company?: string;
+    password: string;
+    confirmPassword: string;
+  }) =>
     request<{
       ok: boolean;
       email: string;
@@ -58,10 +65,10 @@ export const api = {
       body: JSON.stringify(payload),
     }),
 
-  login: (email: string) =>
+  login: (email: string, password: string) =>
     request<{ ok: boolean; user: ApiUserState }>("/auth/login", {
       method: "POST",
-      body: JSON.stringify({ email }),
+      body: JSON.stringify({ email, password }),
     }),
 
   getAuthStatus: (email: string) =>

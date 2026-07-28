@@ -28,6 +28,7 @@ model User {
   name                  String?
   phone                 String?
   company               String?
+  passwordHash          String?
   packageId             String
   package               Package             @relation(fields: [packageId], references: [id])
   remainingCredits      Int                 @default(0)

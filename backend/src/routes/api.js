@@ -116,7 +116,7 @@ router.get("/auth/status/:email", async (req, res) => {
 
 router.post("/auth/login", async (req, res) => {
   try {
-    const result = await loginVerifiedUser(req.body.email);
+    const result = await loginVerifiedUser(req.body.email, req.body.password);
     if (!result.ok) return res.status(result.status || 400).json(result);
     const state = await getUserState(result.email);
     res.json({ ok: true, user: state });

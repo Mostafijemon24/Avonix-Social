@@ -74,7 +74,7 @@ const defaultState: WorkspaceState = {
 type WorkspaceContextValue = {
   state: WorkspaceState;
   apiOnline: boolean;
-  establishSession: (email: string) => Promise<void>;
+  establishSession: (email: string, password: string) => Promise<void>;
   logout: () => void;
   refreshState: () => Promise<void>;
   subscribeToPlan: (planId: PlanId, gateway: string) => Promise<void>;
@@ -148,9 +148,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   }, [loadWorkspacesInto]);
 
   const establishSession = useCallback(
-    async (email: string) => {
+    async (email: string, password: string) => {
       const normalized = email.trim().toLowerCase();
-      const { user } = await api.login(normalized);
+      const { user } = await api.login(normalized, password);
       if (!user.fullyVerified) {
         throw new Error("Account not fully verified");
       }
