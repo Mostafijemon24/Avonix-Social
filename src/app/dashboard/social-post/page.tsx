@@ -59,7 +59,7 @@ export default function SocialPostPage() {
         const ready = (data.accounts || [])
           .filter((a: ConnectedAccount) => a.publishReady)
           .map((a) => a.provider);
-        const unique = [...new Set(ready)];
+        const unique = Array.from(new Set(ready));
         setReadyProviders(unique);
         setSelected(Object.fromEntries(unique.map((p) => [p, true])));
       })
