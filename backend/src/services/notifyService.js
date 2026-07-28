@@ -302,17 +302,29 @@ async function sendViaBulkSmsBd(to, body) {
     };
   }
 
-  // BulkSMSBD expects 8801XXXXXXXXX without +
+  // BulkSMSBD expects 8801XXXXXXXXX without + ; official API uses form fields + type=text
   const number = to.replace(/\D/g, "");
+  if (apiKey && senderid && apiKey === senderid) {
+    return {
+      status: "failed",
+      from: senderid,
+      error:
+        "BULKSMSBD_SENDER_ID looks the same as API key. Use your Approved Sender ID from bulksmsbd.net (e.g. 88096… or mask name), not the API key.",
+    };
+  }
+
+  const form = new URLSearchParams({
+    api_key: apiKey,
+    type: "text",
+    number,
+    senderid,
+    message: body,
+  });
+
   const res = await fetch(apiUrl, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      api_key: apiKey,
-      senderid,
-      number,
-      message: body,
-    }),
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: form.toString(),
   });
   const text = await res.text();
   let json = null;
@@ -322,20 +334,18 @@ async function sendViaBulkSmsBd(to, body) {
     /* plain text */
   }
 
-  // API returns response_code 202 = success (varies by account); also accept "SMS Submitted"
-  const code = json?.response_code ?? json?.responseCode;
-  const ok =
-    res.ok &&
-    (code === 202 ||
-      code === "202" ||
-      code === 200 ||
-      /success|submitted|sent/i.test(text));
+  console.log(`[bulksmsbd response→${number}]`, text.slice(0, 300));
+
+  // ONLY 202 = submitted successfully (do not regex-match "sent" — false positives)
+  const code = Number(json?.response_code ?? json?.responseCode);
+  const ok = code === 202;
 
   if (!ok) {
+    const hint = json?.error_message || json?.success_message || text.slice(0, 200);
     return {
       status: "failed",
       from: senderid,
-      error: `BulkSMSBD ${res.status}: ${text.slice(0, 200)}`,
+      error: `BulkSMSBD response_code=${Number.isFinite(code) ? code : "?"} ${hint}`,
     };
   }
   return { status: "sent", from: senderid, error: null };

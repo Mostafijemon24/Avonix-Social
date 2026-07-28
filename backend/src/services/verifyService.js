@@ -123,14 +123,9 @@ export async function startRegistration({
 
   const delivery = await sendRegistrationOtps(user, { emailCode, phoneCode });
 
-  const emailOk = delivery.email?.status === "sent";
-  const smsOk = delivery.sms?.status === "sent";
-
-  // Always log codes when a channel fails so ops can unblock users from pm2 logs
-  if (!emailOk || !smsOk || !IS_PRODUCTION) {
-    console.log(`[OTP email→${normalizedEmail}] ${emailCode} (${delivery.email?.status})`);
-    console.log(`[OTP sms→${normalizedPhone}] ${phoneCode} (${delivery.sms?.status})`);
-  }
+  // Always log codes so ops can complete verification if inbox/SMS delayed
+  console.log(`[OTP email→${normalizedEmail}] ${emailCode} (${delivery.email?.status})`);
+  console.log(`[OTP sms→${normalizedPhone}] ${phoneCode} (${delivery.sms?.status})`);
 
   console.log("[OTP delivery]", {
     email: delivery.email?.status,
@@ -194,13 +189,9 @@ export async function resendRegistrationOtps(email) {
   });
 
   const delivery = await sendRegistrationOtps(user, { emailCode, phoneCode });
-  const emailOk = delivery.email?.status === "sent";
-  const smsOk = delivery.sms?.status === "sent";
 
-  if (!emailOk || !smsOk || !IS_PRODUCTION) {
-    console.log(`[OTP resend email→${normalizedEmail}] ${emailCode} (${delivery.email?.status})`);
-    console.log(`[OTP resend sms→${user.phone}] ${phoneCode} (${delivery.sms?.status})`);
-  }
+  console.log(`[OTP resend email→${normalizedEmail}] ${emailCode} (${delivery.email?.status})`);
+  console.log(`[OTP resend sms→${user.phone}] ${phoneCode} (${delivery.sms?.status})`);
 
   console.log("[OTP resend delivery]", {
     email: delivery.email?.status,

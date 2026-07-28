@@ -377,8 +377,9 @@ export function RegisterFlow() {
             <Field label="Email Code" name="emailCode" required maxLength={6} />
             <Field label="Phone / SMS Code" name="phoneCode" required maxLength={6} />
             <p className="text-[10px] text-slate-500">
-              BD numbers: use +880… Check spam for email. If SMS does not arrive, tap Resend
-              after the admin configures BulkSMSBD.
+              OTP is sent first — then enter those codes here to verify. Check Gmail Spam/Promotions.
+              Use phone as +8801… or 01…. Wrong BulkSMSBD Sender ID = API says sent but phone gets
+              nothing.
             </p>
             <button
               type="submit"
