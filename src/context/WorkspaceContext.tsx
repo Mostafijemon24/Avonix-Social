@@ -102,59 +102,17 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [apiOnline, setApiOnline] = useState(true);
 
   const loadWorkspacesInto = useCallback(async (email: string, apiState: ApiUserState) => {
-    try {
-      const ws = await api.listWorkspaces(email);
-      const active =
-        ws.workspaces.find((w) => w.id === ws.activeWorkspaceId) || ws.workspaces[0] || null;
-      setApiOnline(true);
-      // #region agent log
-      fetch("http://127.0.0.1:7503/ingest/1b67c8f7-5f79-477d-afb3-859f8b05d962", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "f2bb88" },
-        body: JSON.stringify({
-          sessionId: "f2bb88",
-          runId: "audit1",
-          hypothesisId: "C",
-          location: "WorkspaceContext.tsx:loadWorkspacesInto",
-          message: "Workspaces loaded",
-          data: {
-            count: ws.workspaces?.length ?? 0,
-            activeWorkspaceId: ws.activeWorkspaceId,
-            limit: ws.limit,
-            hasSitemap: !!active?.sitemap,
-          },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
-      setState(
-        toWorkspaceState(apiState, active?.sitemap || null, {
-          activeWorkspaceId: ws.activeWorkspaceId,
-          workspaces: ws.workspaces,
-          workspaceLimit: ws.limit,
-        })
-      );
-    } catch (err) {
-      // #region agent log
-      fetch("http://127.0.0.1:7503/ingest/1b67c8f7-5f79-477d-afb3-859f8b05d962", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "f2bb88" },
-        body: JSON.stringify({
-          sessionId: "f2bb88",
-          runId: "audit1",
-          hypothesisId: "C",
-          location: "WorkspaceContext.tsx:loadWorkspacesInto:error",
-          message: "Workspaces load failed",
-          data: {
-            error: isApiError(err) ? err.error : String(err),
-            status: isApiError(err) ? err.status : undefined,
-          },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
-      throw err;
-    }
+    const ws = await api.listWorkspaces(email);
+    const active =
+      ws.workspaces.find((w) => w.id === ws.activeWorkspaceId) || ws.workspaces[0] || null;
+    setApiOnline(true);
+    setState(
+      toWorkspaceState(apiState, active?.sitemap || null, {
+        activeWorkspaceId: ws.activeWorkspaceId,
+        workspaces: ws.workspaces,
+        workspaceLimit: ws.limit,
+      })
+    );
   }, []);
 
   const refreshState = useCallback(async () => {

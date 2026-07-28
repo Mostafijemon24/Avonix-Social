@@ -25,26 +25,6 @@ export function DashboardAuthGuard({ children }: { children: React.ReactNode }) 
     async function guard() {
       const email = state.email || getStoredEmail();
       const token = getSessionToken();
-      // #region agent log
-      fetch("http://127.0.0.1:7503/ingest/1b67c8f7-5f79-477d-afb3-859f8b05d962", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "f2bb88" },
-        body: JSON.stringify({
-          sessionId: "f2bb88",
-          runId: "post-fix",
-          hypothesisId: "B",
-          location: "DashboardAuthGuard.tsx:guard",
-          message: "Dashboard auth guard check",
-          data: {
-            hasEmail: !!email,
-            hasToken: !!token,
-            loggedIn: !!state.loggedIn,
-            fullyVerified: !!state.fullyVerified,
-          },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
 
       if (!email || !token) {
         clearSession();
@@ -60,21 +40,6 @@ export function DashboardAuthGuard({ children }: { children: React.ReactNode }) 
       try {
         const apiState = await api.getCredits(email);
         await refreshState();
-        // #region agent log
-        fetch("http://127.0.0.1:7503/ingest/1b67c8f7-5f79-477d-afb3-859f8b05d962", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "f2bb88" },
-          body: JSON.stringify({
-            sessionId: "f2bb88",
-            runId: "post-fix",
-            hypothesisId: "B",
-            location: "DashboardAuthGuard.tsx:session-ok",
-            message: "Session restored with JWT (password was required at login)",
-            data: { fullyVerified: !!apiState.fullyVerified },
-            timestamp: Date.now(),
-          }),
-        }).catch(() => {});
-        // #endregion
         if (!apiState.fullyVerified) {
           logout();
           redirectForStatus(router, email);
