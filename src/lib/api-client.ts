@@ -74,10 +74,7 @@ export const api = {
       next: string;
       delivery?: {
         email?: string;
-        sms?: string;
         emailError?: string | null;
-        smsError?: string | null;
-        provider?: string | null;
       };
     }>("/auth/register", { method: "POST", body: JSON.stringify(payload) }),
 
@@ -85,17 +82,14 @@ export const api = {
     request<{
       ok: boolean;
       email: string;
-      phone: string;
+      phone?: string | null;
       delivery?: {
         email?: string;
-        sms?: string;
         emailError?: string | null;
-        smsError?: string | null;
-        provider?: string | null;
       };
     }>("/auth/resend-otp", { method: "POST", body: JSON.stringify({ email }) }),
 
-  verify: (payload: { email: string; emailCode: string; phoneCode: string }) =>
+  verify: (payload: { email: string; emailCode: string }) =>
     request<{ ok: boolean; next: string; message?: string }>("/auth/verify", {
       method: "POST",
       body: JSON.stringify(payload),

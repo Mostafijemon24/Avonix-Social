@@ -1,10 +1,10 @@
 /**
- * Email + SMS OTP verification for registration / security
+ * Email OTP verification for registration
  */
 import crypto from "crypto";
 import bcrypt from "bcryptjs";
 import prisma from "../db.js";
-import { sendRegistrationOtps, normalizePhone } from "./notifyService.js";
+import { sendRegistrationEmailOtp, normalizePhone } from "./notifyService.js";
 import { validatePasswordStrength, PASSWORD_HINT } from "../password.js";
 import { signUserSession } from "../middleware/userAuth.js";
 
@@ -32,16 +32,10 @@ export async function startRegistration({
   confirmPassword,
 }) {
   const normalizedEmail = (email || "").trim().toLowerCase();
-  const normalizedPhone = normalizePhone(phone);
+  const normalizedPhone = phone ? normalizePhone(phone) : null;
 
   if (!normalizedEmail.includes("@")) {
     return { ok: false, error: "Valid email required" };
-  }
-  if (!normalizedPhone) {
-    return {
-      ok: false,
-      error: "Valid mobile required. Use country code, e.g. +8801XXXXXXXXX (BD) or +1XXXXXXXXXX (US)",
-    };
   }
 
   if (password !== confirmPassword) {
@@ -86,10 +80,10 @@ export async function startRegistration({
     user = await prisma.user.update({
       where: { id: user.id },
       data: {
-        phone: normalizedPhone,
+        phone: normalizedPhone ?? user.phone,
         name: name || user.name,
         company: company || user.company,
-        whatsappNumber: normalizedPhone,
+        whatsappNumber: normalizedPhone ?? user.whatsappNumber,
         passwordHash,
       },
       include: { package: true },
@@ -97,42 +91,25 @@ export async function startRegistration({
   }
 
   const emailCode = generateOtp();
-  const phoneCode = generateOtp();
   const expiresAt = new Date(Date.now() + OTP_TTL_MS);
 
-  await prisma.verificationCode.createMany({
-    data: [
-      {
-        userId: user.id,
-        email: normalizedEmail,
-        channel: "email",
-        code: emailCode,
-        purpose: "register",
-        expiresAt,
-      },
-      {
-        userId: user.id,
-        phone: normalizedPhone,
-        channel: "sms",
-        code: phoneCode,
-        purpose: "register",
-        expiresAt,
-      },
-    ],
+  await prisma.verificationCode.create({
+    data: {
+      userId: user.id,
+      email: normalizedEmail,
+      channel: "email",
+      code: emailCode,
+      purpose: "register",
+      expiresAt,
+    },
   });
 
-  const delivery = await sendRegistrationOtps(user, { emailCode, phoneCode });
+  const delivery = await sendRegistrationEmailOtp(user, { emailCode });
 
-  // Always log codes so ops can complete verification if inbox/SMS delayed
   console.log(`[OTP email→${normalizedEmail}] ${emailCode} (${delivery.email?.status})`);
-  console.log(`[OTP sms→${normalizedPhone}] ${phoneCode} (${delivery.sms?.status})`);
-
   console.log("[OTP delivery]", {
     email: delivery.email?.status,
-    sms: delivery.sms?.status,
     emailError: delivery.email?.error || null,
-    smsError: delivery.sms?.error || null,
-    provider: delivery.sms?.provider || null,
   });
 
   return {
@@ -143,15 +120,12 @@ export async function startRegistration({
     next: "verify_codes",
     delivery: {
       email: delivery.email?.status,
-      sms: delivery.sms?.status,
       emailError: delivery.email?.error || null,
-      smsError: delivery.sms?.error || null,
-      provider: delivery.sms?.provider || null,
     },
   };
 }
 
-/** Resend email + SMS OTPs for an incomplete registration */
+/** Resend email OTP for an incomplete registration */
 export async function resendRegistrationOtps(email) {
   const normalizedEmail = (email || "").trim().toLowerCase();
   const user = await prisma.user.findUnique({ where: { email: normalizedEmail } });
@@ -159,46 +133,27 @@ export async function resendRegistrationOtps(email) {
   if (isFullyVerified(user)) {
     return { ok: false, error: "Account already verified. Sign in instead." };
   }
-  if (!user.phone) {
-    return { ok: false, error: "No phone on file. Register again with a mobile number." };
+  if (user.emailVerified) {
+    return { ok: false, error: "Email already verified. Continue to add card." };
   }
 
   const emailCode = generateOtp();
-  const phoneCode = generateOtp();
   const expiresAt = new Date(Date.now() + OTP_TTL_MS);
 
-  await prisma.verificationCode.createMany({
-    data: [
-      {
-        userId: user.id,
-        email: normalizedEmail,
-        channel: "email",
-        code: emailCode,
-        purpose: "register",
-        expiresAt,
-      },
-      {
-        userId: user.id,
-        phone: user.phone,
-        channel: "sms",
-        code: phoneCode,
-        purpose: "register",
-        expiresAt,
-      },
-    ],
+  await prisma.verificationCode.create({
+    data: {
+      userId: user.id,
+      email: normalizedEmail,
+      channel: "email",
+      code: emailCode,
+      purpose: "register",
+      expiresAt,
+    },
   });
 
-  const delivery = await sendRegistrationOtps(user, { emailCode, phoneCode });
+  const delivery = await sendRegistrationEmailOtp(user, { emailCode });
 
   console.log(`[OTP resend email→${normalizedEmail}] ${emailCode} (${delivery.email?.status})`);
-  console.log(`[OTP resend sms→${user.phone}] ${phoneCode} (${delivery.sms?.status})`);
-
-  console.log("[OTP resend delivery]", {
-    email: delivery.email?.status,
-    sms: delivery.sms?.status,
-    emailError: delivery.email?.error || null,
-    smsError: delivery.sms?.error || null,
-  });
 
   return {
     ok: true,
@@ -207,15 +162,12 @@ export async function resendRegistrationOtps(email) {
     next: "verify_codes",
     delivery: {
       email: delivery.email?.status,
-      sms: delivery.sms?.status,
       emailError: delivery.email?.error || null,
-      smsError: delivery.sms?.error || null,
-      provider: delivery.sms?.provider || null,
     },
   };
 }
 
-export async function verifyCodes({ email, emailCode, phoneCode }) {
+export async function verifyCodes({ email, emailCode }) {
   const normalizedEmail = (email || "").trim().toLowerCase();
   const user = await prisma.user.findUnique({ where: { email: normalizedEmail } });
   if (!user) return { ok: false, error: "User not found" };
@@ -232,29 +184,15 @@ export async function verifyCodes({ email, emailCode, phoneCode }) {
     },
     orderBy: { createdAt: "desc" },
   });
-  const phoneRow = await prisma.verificationCode.findFirst({
-    where: {
-      userId: user.id,
-      channel: "sms",
-      purpose: "register",
-      usedAt: null,
-      expiresAt: { gt: now },
-      code: String(phoneCode || "").trim(),
-    },
-    orderBy: { createdAt: "desc" },
-  });
 
   if (!emailRow) return { ok: false, error: "Invalid or expired email code" };
-  if (!phoneRow) return { ok: false, error: "Invalid or expired phone code" };
 
   await prisma.$transaction([
     prisma.verificationCode.update({ where: { id: emailRow.id }, data: { usedAt: now } }),
-    prisma.verificationCode.update({ where: { id: phoneRow.id }, data: { usedAt: now } }),
     prisma.user.update({
       where: { id: user.id },
       data: {
         emailVerified: true,
-        phoneVerified: true,
         accountStatus: "pending_card",
       },
     }),
@@ -263,9 +201,8 @@ export async function verifyCodes({ email, emailCode, phoneCode }) {
   return {
     ok: true,
     emailVerified: true,
-    phoneVerified: true,
     next: "add_card",
-    message: "Email and phone verified. Add a valid card to activate Free Trial.",
+    message: "Email verified. Add a valid card to activate Free Trial.",
   };
 }
 
@@ -278,8 +215,8 @@ export async function attachCard({ email, cardNumber, expMonth, expYear, cvc, br
     include: { package: true },
   });
   if (!user) return { ok: false, error: "User not found" };
-  if (!user.emailVerified || !user.phoneVerified) {
-    return { ok: false, error: "Verify email and phone before adding a card" };
+  if (!user.emailVerified) {
+    return { ok: false, error: "Verify your email before adding a card" };
   }
 
   const digits = String(cardNumber || "").replace(/\D/g, "");
@@ -290,7 +227,6 @@ export async function attachCard({ email, cardNumber, expMonth, expYear, cvc, br
     return { ok: false, error: "Invalid card expiry or CVC" };
   }
 
-  // Luhn check (basic validity)
   if (!luhnCheck(digits)) {
     return { ok: false, error: "Card number failed validation" };
   }
@@ -315,7 +251,6 @@ export async function attachCard({ email, cardNumber, expMonth, expYear, cvc, br
     include: { package: true },
   });
 
-  // Create trial subscription
   await prisma.subscription.create({
     data: {
       userId: updated.id,
@@ -359,11 +294,11 @@ function luhnCheck(num) {
 }
 
 export function isFullyVerified(user) {
-  return !!(user.emailVerified && user.phoneVerified && user.cardOnFile);
+  return !!(user.emailVerified && user.cardOnFile);
 }
 
 export function verificationNextStep(user) {
-  if (!user.emailVerified || !user.phoneVerified) return "verify_codes";
+  if (!user.emailVerified) return "verify_codes";
   if (!user.cardOnFile) return "add_card";
   return "dashboard";
 }
@@ -384,7 +319,6 @@ export async function getAuthStatus(email) {
     email: user.email,
     phone: user.phone,
     emailVerified: !!user.emailVerified,
-    phoneVerified: !!user.phoneVerified,
     cardOnFile: !!user.cardOnFile,
     fullyVerified: isFullyVerified(user),
     next: verificationNextStep(user),
@@ -431,10 +365,9 @@ export async function loginVerifiedUser(email, password) {
     return {
       ok: false,
       status: 403,
-      error: "Account verification incomplete. Finish email, phone, and card verification.",
+      error: "Account verification incomplete. Finish email and card verification.",
       email: user.email,
       emailVerified: !!user.emailVerified,
-      phoneVerified: !!user.phoneVerified,
       cardOnFile: !!user.cardOnFile,
       next: verificationNextStep(user),
     };

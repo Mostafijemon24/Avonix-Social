@@ -27,7 +27,7 @@ export async function runReminderSweep() {
   const users = await prisma.user.findMany({
     where: {
       accountStatus: { in: ["trial", "active"] },
-      OR: [{ emailVerified: true }, { phoneVerified: true }],
+      OR: [{ emailVerified: true }],
     },
   });
 

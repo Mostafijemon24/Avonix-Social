@@ -45,8 +45,8 @@ export async function topUpWallet({ email, amountUsd, gateway = "stripe" }) {
     where: { email: (email || "").trim().toLowerCase() },
   });
   if (!user) return { ok: false, error: "User not found" };
-  if (!user.emailVerified || !user.phoneVerified) {
-    return { ok: false, error: "Verify email and phone before topping up" };
+  if (!user.emailVerified) {
+    return { ok: false, error: "Verify email before topping up" };
   }
   if (!user.cardOnFile && gateway === "stripe") {
     return { ok: false, error: "Add a valid card on file before Stripe top-up" };
@@ -202,7 +202,7 @@ export async function assertNotFrozen(email) {
   if (user.accountStatus === "pending_verification" || user.accountStatus === "pending_card") {
     return {
       ok: false,
-      error: "Complete email, phone, and card verification before using the dashboard.",
+      error: "Complete email and card verification before using the dashboard.",
       accountStatus: user.accountStatus,
     };
   }

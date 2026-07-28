@@ -146,7 +146,7 @@ export default function BillingPage() {
       <div className="glass-card p-6 rounded-2xl border border-navy-800">
         <h2 className="text-base font-bold text-white mb-1">Service Plans</h2>
         <p className="text-xs text-slate-400 mb-6">
-          Email + phone verification and a valid card are required before joining any plan
+          Email verification and a valid card are required before joining any plan
           (including Free Trial).
         </p>
 

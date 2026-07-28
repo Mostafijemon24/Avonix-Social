@@ -49,13 +49,12 @@ export function DashboardAuthGuard({ children }: { children: React.ReactNode }) 
       } catch (err: unknown) {
         const payload =
           err && typeof err === "object"
-            ? (err as { status?: number; emailVerified?: boolean; phoneVerified?: boolean })
+            ? (err as { status?: number; emailVerified?: boolean })
             : {};
 
         if (payload.status === 403) {
           logout();
-          const next =
-            !payload.emailVerified || !payload.phoneVerified ? "verify_codes" : "add_card";
+          const next = !payload.emailVerified ? "verify_codes" : "add_card";
           redirectForStatus(router, email, next);
           return;
         }

@@ -324,11 +324,11 @@ export async function subscribeUser({ email, planSlug, gateway, gatewaySubId }) 
 
   const user = await requireUser(email);
 
-  if (!user.emailVerified || !user.phoneVerified) {
+  if (!user.emailVerified) {
     return {
       ok: false,
       status: 403,
-      error: "Verify email and phone before joining a plan.",
+      error: "Verify email before joining a plan.",
     };
   }
   if (!user.cardOnFile && plan.priceUsd === 0) {

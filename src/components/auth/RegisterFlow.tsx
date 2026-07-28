@@ -30,34 +30,19 @@ function clientPasswordOk(password: string): string | null {
 
 type DeliveryInfo = {
   email?: string;
-  sms?: string;
   emailError?: string | null;
-  smsError?: string | null;
 };
 
 function deliveryToastMessage(delivery?: DeliveryInfo): { text: string; ok: boolean } {
   const emailStatus = delivery?.email;
-  const smsStatus = delivery?.sms;
   const emailOk = emailStatus === "sent";
-  const smsOk = smsStatus === "sent";
 
-  if (emailOk && smsOk) {
-    return { text: "Codes sent to your email and phone.", ok: true };
+  if (emailOk) {
+    return { text: "Verification code sent to your email.", ok: true };
   }
 
-  const parts: string[] = [];
-  if (!emailOk) {
-    parts.push(
-      `Email: ${delivery?.emailError || emailStatus || "not sent"} (check spam / SMTP)`
-    );
-  }
-  if (!smsOk) {
-    parts.push(
-      `SMS: ${delivery?.smsError || smsStatus || "not sent"} (BD needs BulkSMSBD keys)`
-    );
-  }
   return {
-    text: `OTP delivery issue — ${parts.join(" · ")}. You can Resend, or ask admin to check pm2 logs for codes.`,
+    text: `Email OTP not sent: ${delivery?.emailError || emailStatus || "unknown error"}. Check spam or tap Resend.`,
     ok: false,
   };
 }
@@ -216,10 +201,9 @@ export function RegisterFlow() {
       await api.verify({
         email,
         emailCode: form.get("emailCode") as string,
-        phoneCode: form.get("phoneCode") as string,
       });
       setStep("card");
-      showToast("Email and phone verified. Add a card to activate Free Trial.", "success");
+      showToast("Email verified. Add a card to activate Free Trial.", "success");
     } catch (err: unknown) {
       showToast(
         err && typeof err === "object" && "error" in err
@@ -276,15 +260,15 @@ export function RegisterFlow() {
         <h1 className="text-xl font-black text-white mb-1">
           {step === "signin" && "Sign In"}
           {step === "register" && "Create Account"}
-          {step === "verify" && "Verify Email & Phone"}
+          {step === "verify" && "Verify Email"}
           {step === "card" && "Add Card (Required)"}
         </h1>
         <p className="text-xs text-slate-400 mb-6">
           {step === "signin" && "Sign in with email and password every time."}
           {step === "register" &&
-            "Set a strong password, then verify email & phone before Free Trial."}
+            "Set a strong password, then verify your email before Free Trial."}
           {step === "verify" &&
-            "Enter the 6-digit codes sent to your email and mobile phone."}
+            "Enter the 6-digit code sent to your email."}
           {step === "card" &&
             "Free Trial requires a valid payment card on file for security."}
         </p>
@@ -320,16 +304,11 @@ export function RegisterFlow() {
             <Field label="Full Name" name="name" required />
             <Field label="Work Email" name="email" type="email" defaultValue={email} required />
             <Field
-              label="Mobile Phone"
+              label="Mobile Phone (optional)"
               name="phone"
               type="tel"
               placeholder="+880 1712 345678"
-              required
             />
-            <p className="text-[10px] text-slate-500 -mt-1">
-              Any country. Include country code (e.g. +880… BD, +1… US, +44… UK). SMS OTP will be
-              sent here.
-            </p>
             <Field label="Company (optional)" name="company" />
             <PasswordField
               label="Password"
@@ -359,7 +338,7 @@ export function RegisterFlow() {
               disabled={loading}
               className="w-full bg-orange-500 hover:bg-orange-600 text-white font-bold py-3 rounded-xl"
             >
-              {loading ? "Sending codes..." : "Send Verification Codes"}
+              {loading ? "Sending code..." : "Send Email Verification Code"}
             </button>
             <button
               type="button"
@@ -374,19 +353,16 @@ export function RegisterFlow() {
         {step === "verify" && (
           <form onSubmit={handleVerify} className="space-y-3 text-xs">
             <p className="text-[10px] text-slate-500">Verifying: {email}</p>
-            <Field label="Email Code" name="emailCode" required maxLength={6} />
-            <Field label="Phone / SMS Code" name="phoneCode" required maxLength={6} />
+            <Field label="Email Code" name="emailCode" required maxLength={6} inputMode="numeric" />
             <p className="text-[10px] text-slate-500">
-              OTP is sent first — then enter those codes here to verify. Check Gmail Spam/Promotions.
-              Use phone as +8801… or 01…. Wrong BulkSMSBD Sender ID = API says sent but phone gets
-              nothing.
+              Check your inbox and spam folder. Code expires in 10 minutes.
             </p>
             <button
               type="submit"
               disabled={loading}
               className="w-full bg-orange-500 hover:bg-orange-600 text-white font-bold py-3 rounded-xl"
             >
-              {loading ? "Verifying..." : "Verify Codes"}
+              {loading ? "Verifying..." : "Verify Email"}
             </button>
             <button
               type="button"
@@ -394,7 +370,7 @@ export function RegisterFlow() {
               onClick={handleResendOtp}
               className="w-full text-slate-400 hover:text-white font-bold py-2"
             >
-              Resend codes
+              Resend email code
             </button>
           </form>
         )}
@@ -437,6 +413,7 @@ function Field({
   maxLength,
   defaultValue,
   autoComplete,
+  inputMode,
 }: {
   label: string;
   name: string;
@@ -446,6 +423,7 @@ function Field({
   maxLength?: number;
   defaultValue?: string;
   autoComplete?: string;
+  inputMode?: React.HTMLAttributes<HTMLInputElement>["inputMode"];
 }) {
   return (
     <div>
@@ -458,6 +436,7 @@ function Field({
         maxLength={maxLength}
         defaultValue={defaultValue}
         autoComplete={autoComplete}
+        inputMode={inputMode}
         className="w-full border border-navy-700 rounded-xl p-3 bg-navy-950 font-bold text-white"
       />
     </div>

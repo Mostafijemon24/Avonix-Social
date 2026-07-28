@@ -29,51 +29,19 @@ export async function notifyUser(userId, { type, title, body }) {
   return { ok: true, results };
 }
 
-/** BulkSMSBD OTP text — must match: "Your {Brand} OTP is XXXX" */
-function formatOtpSms(phoneCode) {
-  const brand =
-    process.env.BULKSMSBD_OTP_BRAND ||
-    process.env.OTP_SMS_BRAND ||
-    "Avonix Social";
-  return `Your ${brand} OTP is ${phoneCode}`;
-}
-
-/** Registration OTP: email + SMS (BD gateways preferred for +880; WhatsApp fallback) */
-export async function sendRegistrationOtps(user, { emailCode, phoneCode }) {
+/** Registration OTP: email only */
+export async function sendRegistrationEmailOtp(user, { emailCode }) {
   const emailResult = await sendEmail(user, {
     type: "verify",
     title: "Avonix Social — Email verification code",
     body: `Your email verification code is: ${emailCode}\n\nValid for 10 minutes. If you did not request this, ignore this email.`,
   });
+  return { email: emailResult };
+}
 
-  const smsBody = formatOtpSms(phoneCode);
-  const smsResult = await sendSms(user.phone, {
-    type: "verify",
-    body: smsBody,
-    userId: user.id,
-  });
-
-  // WhatsApp backup for phone OTP (especially useful for BD when US SMS is blocked)
-  let whatsapp = null;
-  if (smsResult.status !== "sent") {
-    whatsapp = await sendWhatsApp(
-      { ...user, whatsappNumber: user.whatsappNumber || user.phone },
-      {
-        type: "verify",
-        title: "Avonix Social verification",
-        body: smsBody,
-      }
-    );
-    if (whatsapp.status === "sent") {
-      smsResult.status = "sent";
-      smsResult.error = smsResult.error
-        ? `${smsResult.error} (delivered via WhatsApp)`
-        : null;
-      smsResult.provider = `${smsResult.provider || "sms"}+whatsapp`;
-    }
-  }
-
-  return { email: emailResult, sms: smsResult, whatsapp };
+/** @deprecated use sendRegistrationEmailOtp */
+export async function sendRegistrationOtps(user, { emailCode }) {
+  return sendRegistrationEmailOtp(user, { emailCode });
 }
 
 async function logNotification(userId, channel, type, title, body, status) {

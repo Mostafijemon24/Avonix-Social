@@ -74,7 +74,7 @@ router.post("/site/analyze", async (req, res) => {
   }
 });
 
-/** Multi-step registration: email + phone → OTPs */
+/** Multi-step registration: email → OTP → card */
 router.post("/auth/register", async (req, res) => {
   try {
     const result = await startRegistration(req.body);
@@ -149,7 +149,6 @@ router.get("/users/:email/credits", async (req, res) => {
       return res.status(403).json({
         error: "Verification required",
         emailVerified: !!user.emailVerified,
-        phoneVerified: !!user.phoneVerified,
         cardOnFile: !!user.cardOnFile,
         fullyVerified: false,
       });
