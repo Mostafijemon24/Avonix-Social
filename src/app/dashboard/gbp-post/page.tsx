@@ -6,6 +6,7 @@ import { useToast } from "@/components/ui/Toast";
 import { useWorkspace } from "@/context/WorkspaceContext";
 import { api, isApiError } from "@/lib/api-client";
 import { InsufficientCreditsBanner } from "@/components/ui/CreditCostBadge";
+import { PublishBar } from "@/components/dashboard/PublishBar";
 
 export default function GbpPostPage() {
   const { showToast } = useToast();
@@ -83,11 +84,16 @@ Include local SEO hashtags.`;
       </div>
 
       {output && (
-        <div className="glass-card p-5 rounded-2xl border border-navy-800">
-          <p className="text-xs font-bold text-white mb-2">GBP Post Content:</p>
-          <div className="bg-navy-900 border border-navy-800 p-4 rounded-xl text-xs text-slate-300 whitespace-pre-line leading-relaxed">
-            {output}
+        <div className="space-y-4">
+          <div className="glass-card p-5 rounded-2xl border border-navy-800">
+            <p className="text-xs font-bold text-white mb-2">GBP Post Content:</p>
+            <div className="bg-navy-900 border border-navy-800 p-4 rounded-xl text-xs text-slate-300 whitespace-pre-line leading-relaxed">
+              {output}
+            </div>
           </div>
+          {state.email && (
+            <PublishBar email={state.email} content={output} action="gbp_post" />
+          )}
         </div>
       )}
     </div>

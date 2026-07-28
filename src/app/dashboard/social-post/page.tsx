@@ -5,7 +5,8 @@ import { useRouter } from "next/navigation";
 import { useToast } from "@/components/ui/Toast";
 import { useWorkspace } from "@/context/WorkspaceContext";
 import { api, isApiError } from "@/lib/api-client";
-import { CreditCostBadge, InsufficientCreditsBanner } from "@/components/ui/CreditCostBadge";
+import { InsufficientCreditsBanner } from "@/components/ui/CreditCostBadge";
+import { PublishBar } from "@/components/dashboard/PublishBar";
 
 const INTENTS = [
   "Educational",
@@ -143,6 +144,9 @@ Include website link https://nexadigital.com/ and relevant hashtags. Professiona
               {output}
             </div>
           </div>
+          {state.email && (
+            <PublishBar email={state.email} content={output} action="social_post" />
+          )}
         </div>
       )}
     </div>

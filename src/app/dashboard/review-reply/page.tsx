@@ -6,6 +6,7 @@ import { useToast } from "@/components/ui/Toast";
 import { useWorkspace } from "@/context/WorkspaceContext";
 import { api, isApiError } from "@/lib/api-client";
 import { CreditCostBadge, InsufficientCreditsBanner } from "@/components/ui/CreditCostBadge";
+import { PublishBar } from "@/components/dashboard/PublishBar";
 
 export default function ReviewReplyPage() {
   const { showToast } = useToast();
@@ -120,16 +121,12 @@ Brand: Avonix Social SEO agency`;
             >
               {loading ? "Drafting..." : "Draft AI Reply"}
             </button>
-            {draft && (
-              <button
-                type="button"
-                onClick={() => showToast("Review reply published to Google Business API!", "success")}
-                className="bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-bold px-3.5 py-2 rounded-xl transition-all"
-              >
-                Publish to Google (free)
-              </button>
-            )}
           </div>
+          {draft && state.email && (
+            <div className="mt-4">
+              <PublishBar email={state.email} content={draft} action="review_reply" />
+            </div>
+          )}
         </div>
       </div>
     </div>

@@ -7,11 +7,22 @@ import {
   disconnectAccount,
   getConnectionsSetupStatus,
 } from "../services/connectionsService.js";
+import { publishContent } from "../services/publishService.js";
 
 const router = Router();
 
 router.get("/setup", (_req, res) => {
   res.json({ ok: true, setup: getConnectionsSetupStatus() });
+});
+
+router.post("/publish", async (req, res) => {
+  try {
+    const result = await publishContent(req.body);
+    if (!result.ok) return res.status(result.status || 400).json(result);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 router.get("/", async (req, res) => {

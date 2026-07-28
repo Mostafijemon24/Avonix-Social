@@ -212,6 +212,39 @@ export const api = {
     request<{ ok: boolean }>(`/connections/${encodeURIComponent(id)}?email=${encodeURIComponent(email)}`, {
       method: "DELETE",
     }),
+
+  publishContent: (payload: {
+    email: string;
+    content: string;
+    action: "social_post" | "gbp_post" | "review_reply";
+    providers?: string[];
+    imageUrl?: string;
+    reviewName?: string;
+    connectionIds?: string[];
+  }) =>
+    request<{
+      ok: boolean;
+      message?: string;
+      published: Array<{
+        ok: boolean;
+        provider: string;
+        connectionId: string;
+        accountName?: string | null;
+        externalId?: string | null;
+        url?: string | null;
+      }>;
+      failed: Array<{
+        ok: boolean;
+        provider: string;
+        connectionId: string;
+        accountName?: string | null;
+        error: string;
+      }>;
+      error?: string;
+    }>("/connections/publish", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
 };
 
 export type ConnectedAccount = {
