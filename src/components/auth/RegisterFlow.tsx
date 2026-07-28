@@ -8,7 +8,7 @@ import { PasswordField } from "@/components/ui/PasswordField";
 import { useWorkspace } from "@/context/WorkspaceContext";
 import { api } from "@/lib/api-client";
 
-type Step = "signin" | "register" | "verify" | "card";
+type Step = "signin" | "register" | "verify" | "card" | "forgot" | "reset";
 
 const PASSWORD_HINT =
   "Min 12 characters, with uppercase, lowercase, number, and special character (!@#$…).";
@@ -16,6 +16,7 @@ const PASSWORD_HINT =
 function stepFromNext(next?: string): Step {
   if (next === "verify_codes") return "verify";
   if (next === "add_card") return "card";
+  if (next === "reset_password") return "reset";
   return "signin";
 }
 
@@ -59,6 +60,7 @@ export function RegisterFlow() {
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [emailCode, setEmailCode] = useState("");
+  const [resetCode, setResetCode] = useState("");
   const [initialized, setInitialized] = useState(false);
   const verifyingRef = useRef(false);
   const emailCodeRef = useRef<HTMLInputElement>(null);
@@ -68,6 +70,11 @@ export function RegisterFlow() {
       setEmailCode("");
       requestAnimationFrame(() => emailCodeRef.current?.focus());
     }
+    if (step === "reset") {
+      setResetCode("");
+      setPassword("");
+      setConfirmPassword("");
+    }
   }, [step]);
 
   useEffect(() => {
@@ -75,7 +82,10 @@ export function RegisterFlow() {
     const paramStep = searchParams.get("step") as Step | null;
 
     if (paramEmail) setEmail(paramEmail);
-    if (paramStep && ["signin", "register", "verify", "card"].includes(paramStep)) {
+    if (
+      paramStep &&
+      ["signin", "register", "verify", "card", "forgot", "reset"].includes(paramStep)
+    ) {
       setStep(paramStep);
       setInitialized(true);
       return;
@@ -203,6 +213,99 @@ export function RegisterFlow() {
     }
   };
 
+  const handleForgot = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    setLoading(true);
+    const form = new FormData(e.currentTarget);
+    const em = (form.get("email") as string).trim().toLowerCase();
+    setEmail(em);
+    try {
+      const result = await api.forgotPassword(em);
+      setStep("reset");
+      const toast = deliveryToastMessage(result.delivery);
+      if (result.delivery) {
+        showToast(
+          toast.ok
+            ? "Reset code sent to your email (check spam)."
+            : toast.text,
+          toast.ok ? "success" : "error"
+        );
+      } else {
+        showToast(result.message || "If that email exists, a reset code was sent.", "success");
+      }
+    } catch (err: unknown) {
+      showToast(
+        err && typeof err === "object" && "error" in err
+          ? String((err as { error: string }).error)
+          : "Could not send reset code",
+        "error"
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleResendPasswordReset = async () => {
+    if (!email) {
+      showToast("Enter your email first.", "error");
+      return;
+    }
+    setLoading(true);
+    try {
+      const result = await api.resendPasswordReset(email);
+      const toast = deliveryToastMessage(result.delivery);
+      showToast(
+        toast.ok ? "Reset code resent. Check inbox and spam." : toast.text,
+        toast.ok ? "success" : "error"
+      );
+    } catch (err: unknown) {
+      showToast(
+        err && typeof err === "object" && "error" in err
+          ? String((err as { error: string }).error)
+          : "Resend failed",
+        "error"
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleResetPassword = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    setLoading(true);
+    try {
+      const strengthErr = clientPasswordOk(password);
+      if (strengthErr) {
+        showToast(`${strengthErr}. ${PASSWORD_HINT}`, "error");
+        return;
+      }
+      if (password !== confirmPassword) {
+        showToast("Password and confirmation do not match", "error");
+        return;
+      }
+      const result = await api.resetPassword({
+        email,
+        code: resetCode,
+        password,
+        confirmPassword,
+      });
+      setPassword("");
+      setConfirmPassword("");
+      setResetCode("");
+      setStep("signin");
+      showToast(result.message || "Password updated. Sign in now.", "success");
+    } catch (err: unknown) {
+      showToast(
+        err && typeof err === "object" && "error" in err
+          ? String((err as { error: string }).error)
+          : "Password reset failed",
+        "error"
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const submitEmailVerify = useCallback(
     async (code: string) => {
       const digits = code.replace(/\D/g, "").slice(0, 6);
@@ -290,15 +393,19 @@ export function RegisterFlow() {
           {step === "register" && "Create Account"}
           {step === "verify" && "Verify Email"}
           {step === "card" && "Add Card (Required)"}
+          {step === "forgot" && "Forgot Password"}
+          {step === "reset" && "Reset Password"}
         </h1>
         <p className="text-xs text-slate-400 mb-6">
           {step === "signin" && "Sign in with email and password every time."}
           {step === "register" &&
             "Set a strong password, then verify your email before Free Trial."}
-          {step === "verify" &&
-            "Enter the 6-digit code sent to your email."}
+          {step === "verify" && "Enter the 6-digit code sent to your email."}
           {step === "card" &&
             "Free Trial requires a valid payment card on file for security."}
+          {step === "forgot" && "We will email a 6-digit code to reset your password."}
+          {step === "reset" &&
+            "Enter the email code and choose a new strong password."}
         </p>
 
         {step === "signin" && (
@@ -310,6 +417,15 @@ export function RegisterFlow() {
               required
               autoComplete="current-password"
             />
+            <div className="flex justify-end -mt-2">
+              <button
+                type="button"
+                onClick={() => setStep("forgot")}
+                className="text-[10px] font-bold text-orange-400 hover:text-orange-300"
+              >
+                Forgot password?
+              </button>
+            </div>
             <button
               type="submit"
               disabled={loading}
@@ -323,6 +439,92 @@ export function RegisterFlow() {
               className="w-full text-slate-400 hover:text-white font-bold py-2"
             >
               New account? Register →
+            </button>
+          </form>
+        )}
+
+        {step === "forgot" && (
+          <form onSubmit={handleForgot} className="space-y-4 text-xs">
+            <Field label="Account Email" name="email" type="email" defaultValue={email} required />
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full bg-orange-500 hover:bg-orange-600 text-white font-bold py-3 rounded-xl"
+            >
+              {loading ? "Sending..." : "Send Reset Code"}
+            </button>
+            <button
+              type="button"
+              onClick={() => setStep("signin")}
+              className="w-full text-slate-500 font-bold py-2"
+            >
+              ← Back to sign in
+            </button>
+          </form>
+        )}
+
+        {step === "reset" && (
+          <form onSubmit={handleResetPassword} className="space-y-3 text-xs" autoComplete="off">
+            <p className="text-[10px] text-slate-500">Account: {email}</p>
+            <div>
+              <label className="block font-bold text-slate-300 mb-1">Email Reset Code</label>
+              <input
+                type="text"
+                name="reset-code"
+                required
+                inputMode="numeric"
+                pattern="[0-9]{6}"
+                maxLength={6}
+                value={resetCode}
+                onChange={(e) => setResetCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                autoComplete="off"
+                className="w-full border border-navy-700 rounded-xl p-3 bg-navy-950 font-bold text-white text-center text-lg tracking-[0.4em] font-mono"
+              />
+            </div>
+            <PasswordField
+              label="New Password"
+              name="password"
+              required
+              autoComplete="new-password"
+              showGenerate
+              value={password}
+              onChange={setPassword}
+              onGenerate={(pwd) => {
+                setPassword(pwd);
+                setConfirmPassword(pwd);
+                showToast("Strong password generated. Copy it somewhere safe.", "success");
+              }}
+            />
+            <PasswordField
+              label="Confirm New Password"
+              name="confirmPassword"
+              required
+              autoComplete="new-password"
+              value={confirmPassword}
+              onChange={setConfirmPassword}
+            />
+            <p className="text-[10px] text-slate-500 -mt-1">{PASSWORD_HINT}</p>
+            <button
+              type="submit"
+              disabled={loading || resetCode.length !== 6}
+              className="w-full bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white font-bold py-3 rounded-xl"
+            >
+              {loading ? "Updating..." : "Update Password"}
+            </button>
+            <button
+              type="button"
+              disabled={loading}
+              onClick={handleResendPasswordReset}
+              className="w-full text-slate-400 hover:text-white font-bold py-2"
+            >
+              Resend reset code
+            </button>
+            <button
+              type="button"
+              onClick={() => setStep("signin")}
+              className="w-full text-slate-500 font-bold py-2"
+            >
+              ← Back to sign in
             </button>
           </form>
         )}

@@ -15,7 +15,7 @@ const FAQS = [
   },
   {
     q: "I forgot my password / old account has no password",
-    a: "Sign-in now requires email + password. Accounts created before password auth must register again with a strong password, or contact us below with your account email.",
+    a: "On Sign In, tap Forgot password? We email a 6-digit code — enter it with a new strong password. Accounts created before password auth may need to register again, or contact support with your account email.",
   },
   {
     q: "How do multi-client workspaces work?",

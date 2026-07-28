@@ -4,7 +4,7 @@
 import crypto from "crypto";
 import bcrypt from "bcryptjs";
 import prisma from "../db.js";
-import { sendRegistrationEmailOtp, normalizePhone } from "./notifyService.js";
+import { sendRegistrationEmailOtp, sendPasswordResetEmail, normalizePhone } from "./notifyService.js";
 import { validatePasswordStrength, PASSWORD_HINT } from "../password.js";
 import { signUserSession } from "../middleware/userAuth.js";
 
@@ -376,4 +376,134 @@ export async function loginVerifiedUser(email, password) {
   const sessionToken = signUserSession({ id: user.id, email: user.email });
 
   return { ok: true, email: user.email, sessionToken };
+}
+
+/**
+ * Request password reset — always returns ok (no email enumeration).
+ * Sends 6-digit code to email when account exists.
+ */
+export async function requestPasswordReset(email) {
+  const normalizedEmail = (email || "").trim().toLowerCase();
+  if (!normalizedEmail.includes("@")) {
+    return { ok: false, error: "Valid email required" };
+  }
+
+  const generic = {
+    ok: true,
+    email: normalizedEmail,
+    next: "reset_password",
+    message: "If an account exists for this email, a reset code was sent. Check inbox and spam.",
+  };
+
+  const user = await prisma.user.findUnique({ where: { email: normalizedEmail } });
+  if (!user) {
+    console.log(`[password-reset] no account for ${normalizedEmail}`);
+    return generic;
+  }
+
+  const emailCode = generateOtp();
+  const expiresAt = new Date(Date.now() + OTP_TTL_MS);
+
+  await prisma.verificationCode.create({
+    data: {
+      userId: user.id,
+      email: normalizedEmail,
+      channel: "email",
+      code: emailCode,
+      purpose: "password_reset",
+      expiresAt,
+    },
+  });
+
+  const delivery = await sendPasswordResetEmail(user, { emailCode });
+  console.log(
+    `[OTP password-reset→${normalizedEmail}] ${emailCode} (${delivery.email?.status})`
+  );
+
+  return {
+    ...generic,
+    delivery: {
+      email: delivery.email?.status,
+      emailError: delivery.email?.error || null,
+    },
+  };
+}
+
+/** Resend password-reset OTP */
+export async function resendPasswordResetOtp(email) {
+  return requestPasswordReset(email);
+}
+
+/**
+ * Verify reset code + set new strong password
+ */
+export async function resetPasswordWithCode({
+  email,
+  code,
+  password,
+  confirmPassword,
+}) {
+  const normalizedEmail = (email || "").trim().toLowerCase();
+  if (!normalizedEmail.includes("@")) {
+    return { ok: false, error: "Valid email required" };
+  }
+
+  if (password !== confirmPassword) {
+    return { ok: false, error: "Password and confirmation do not match" };
+  }
+  const strength = validatePasswordStrength(password);
+  if (!strength.ok) {
+    return { ok: false, error: `${strength.error}. ${PASSWORD_HINT}` };
+  }
+
+  const user = await prisma.user.findUnique({ where: { email: normalizedEmail } });
+  if (!user) {
+    return { ok: false, error: "Invalid or expired reset code" };
+  }
+
+  const now = new Date();
+  const row = await prisma.verificationCode.findFirst({
+    where: {
+      userId: user.id,
+      channel: "email",
+      purpose: "password_reset",
+      usedAt: null,
+      expiresAt: { gt: now },
+      code: String(code || "").trim(),
+    },
+    orderBy: { createdAt: "desc" },
+  });
+
+  if (!row) {
+    return { ok: false, error: "Invalid or expired reset code" };
+  }
+
+  const passwordHash = await bcrypt.hash(password, 12);
+
+  await prisma.$transaction([
+    prisma.verificationCode.update({ where: { id: row.id }, data: { usedAt: now } }),
+    prisma.user.update({
+      where: { id: user.id },
+      data: { passwordHash },
+    }),
+  ]);
+
+  // Invalidate any other unused reset codes for this user
+  await prisma.verificationCode.updateMany({
+    where: {
+      userId: user.id,
+      purpose: "password_reset",
+      usedAt: null,
+    },
+    data: { usedAt: now },
+  });
+
+  console.log(`[password-reset] password updated for ${normalizedEmail}`);
+
+  return {
+    ok: true,
+    email: user.email,
+    next: "signin",
+    message: "Password updated. Sign in with your new password.",
+  };
 }

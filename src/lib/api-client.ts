@@ -114,6 +114,34 @@ export const api = {
       body: JSON.stringify({ email, password }),
     }),
 
+  forgotPassword: (email: string) =>
+    request<{
+      ok: boolean;
+      email: string;
+      next?: string;
+      message?: string;
+      delivery?: { email?: string; emailError?: string | null };
+    }>("/auth/forgot-password", { method: "POST", body: JSON.stringify({ email }) }),
+
+  resendPasswordReset: (email: string) =>
+    request<{
+      ok: boolean;
+      email: string;
+      message?: string;
+      delivery?: { email?: string; emailError?: string | null };
+    }>("/auth/resend-password-reset", { method: "POST", body: JSON.stringify({ email }) }),
+
+  resetPassword: (payload: {
+    email: string;
+    code: string;
+    password: string;
+    confirmPassword: string;
+  }) =>
+    request<{ ok: boolean; email: string; next?: string; message?: string }>(
+      "/auth/reset-password",
+      { method: "POST", body: JSON.stringify(payload) }
+    ),
+
   getAuthStatus: (email: string) =>
     request<{
       ok: boolean;

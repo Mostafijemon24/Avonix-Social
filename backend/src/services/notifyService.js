@@ -39,6 +39,16 @@ export async function sendRegistrationEmailOtp(user, { emailCode }) {
   return { email: emailResult };
 }
 
+/** Password reset OTP email */
+export async function sendPasswordResetEmail(user, { emailCode }) {
+  const emailResult = await sendEmail(user, {
+    type: "password_reset",
+    title: "Avonix Social — Password reset code",
+    body: `Your password reset code is: ${emailCode}\n\nValid for 10 minutes. If you did not request a reset, ignore this email and your password will stay the same.`,
+  });
+  return { email: emailResult };
+}
+
 /** @deprecated use sendRegistrationEmailOtp */
 export async function sendRegistrationOtps(user, { emailCode }) {
   return sendRegistrationEmailOtp(user, { emailCode });

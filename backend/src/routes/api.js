@@ -14,6 +14,9 @@ import {
   loginVerifiedUser,
   isFullyVerified,
   resendRegistrationOtps,
+  requestPasswordReset,
+  resendPasswordResetOtp,
+  resetPasswordWithCode,
 } from "../services/verifyService.js";
 import { getWallet, topUpWallet } from "../services/walletService.js";
 import { setPendingReviews, runReminderSweep } from "../services/reminderService.js";
@@ -132,6 +135,36 @@ router.post("/auth/login", async (req, res) => {
     if (!result.ok) return res.status(result.status || 400).json(result);
     const state = await getUserState(result.email);
     res.json({ ok: true, user: state, sessionToken: result.sessionToken });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post("/auth/forgot-password", async (req, res) => {
+  try {
+    const result = await requestPasswordReset(req.body.email);
+    if (!result.ok) return res.status(400).json(result);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post("/auth/resend-password-reset", async (req, res) => {
+  try {
+    const result = await resendPasswordResetOtp(req.body.email);
+    if (!result.ok) return res.status(400).json(result);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post("/auth/reset-password", async (req, res) => {
+  try {
+    const result = await resetPasswordWithCode(req.body);
+    if (!result.ok) return res.status(400).json(result);
+    res.json(result);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
