@@ -13,6 +13,7 @@ export const DASHBOARD_NAV = [
   { href: "/dashboard", label: "Dashboard", id: "dashboard" },
   { href: "/dashboard/analytics", label: "Analytics", id: "analytics" },
   { href: "/dashboard/sitemap", label: "Sitemap & Keywords", id: "sitemap" },
+  { href: "/dashboard/connections", label: "Connections", id: "connections" },
   { href: "/dashboard/social-post", label: "Social Post", id: "socialpost" },
   { href: "/dashboard/gbp-post", label: "GBP Post", id: "gbppost" },
   { href: "/dashboard/review-reply", label: "Review Reply", id: "reviewreply" },

@@ -19,9 +19,12 @@ import { setPendingReviews, runReminderSweep } from "../services/reminderService
 import { getCreditConfig } from "../credits.js";
 import { getPriceCacheStats, getAllModelPrices } from "../modelPrices.js";
 import { analyzeSite } from "../services/siteAnalyzer.js";
+import connectionsRoutes from "./connections.js";
 import prisma from "../db.js";
 
 const router = Router();
+
+router.use("/connections", connectionsRoutes);
 
 router.get("/health", (_req, res) => {
   res.json({

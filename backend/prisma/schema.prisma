@@ -70,8 +70,31 @@ model User {
   walletTxns            WalletTransaction[]
   notifications         NotificationLog[]
   verificationCodes     VerificationCode[]
+  connectedAccounts     ConnectedAccount[]
   createdAt             DateTime            @default(now())
   updatedAt             DateTime            @updatedAt
+}
+
+/** Social / GBP connected profiles (OAuth or manual URL link) */
+model ConnectedAccount {
+  id             String    @id @default(cuid())
+  userId         String
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider       String // facebook | instagram | google_business | linkedin
+  authType       String    @default("oauth") // oauth | manual
+  status         String    @default("connected") // connected | linked | expired | error
+  accountId      String?
+  accountName    String?
+  accountUrl     String?
+  accessToken    String?
+  refreshToken   String?
+  tokenExpiresAt DateTime?
+  metadata       String? // JSON: pageId, igUserId, locationName, etc.
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@unique([userId, provider, accountId])
+  @@index([userId, provider])
 }
 
 model VerificationCode {

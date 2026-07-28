@@ -183,6 +183,58 @@ export const api = {
       minCreditsPerRequest: number;
       formula: string;
     }>("/credits/config"),
+
+  getConnections: (email: string) =>
+    request<{
+      ok: boolean;
+      accounts: ConnectedAccount[];
+      byProvider: Record<string, ConnectedAccount | null>;
+      setup: ConnectionsSetup;
+    }>(`/connections?email=${encodeURIComponent(email)}`),
+
+  startConnectionOAuth: (email: string, provider: string) =>
+    request<{ ok: boolean; authUrl: string; redirectUri?: string; error?: string }>(
+      `/connections/oauth/${encodeURIComponent(provider)}/start?email=${encodeURIComponent(email)}`
+    ),
+
+  saveManualConnection: (payload: {
+    email: string;
+    provider: string;
+    accountUrl: string;
+    accountName?: string;
+  }) =>
+    request<{ ok: boolean; account: ConnectedAccount }>("/connections/manual", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
+  disconnectConnection: (email: string, id: string) =>
+    request<{ ok: boolean }>(`/connections/${encodeURIComponent(id)}?email=${encodeURIComponent(email)}`, {
+      method: "DELETE",
+    }),
+};
+
+export type ConnectedAccount = {
+  id: string;
+  provider: string;
+  authType: string;
+  status: string;
+  accountId: string | null;
+  accountName: string | null;
+  accountUrl: string | null;
+  tokenExpiresAt?: string | null;
+  metadata?: Record<string, unknown> | null;
+  publishReady?: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
+export type ConnectionsSetup = {
+  facebook: boolean;
+  instagram: boolean;
+  google_business: boolean;
+  linkedin: boolean;
+  callbacks?: Record<string, string>;
 };
 
 export type ApiUserState = {

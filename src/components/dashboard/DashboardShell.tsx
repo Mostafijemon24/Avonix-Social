@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   LayoutDashboard,
   BarChart3,
@@ -15,16 +15,19 @@ import {
   CreditCard,
   Menu,
   X,
+  Link2,
 } from "lucide-react";
 import { BrandLogo } from "@/components/ui/BrandLogo";
 import { DASHBOARD_NAV } from "@/lib/constants";
 import { useToast } from "@/components/ui/Toast";
 import { useWorkspace, PLAN_CONFIG } from "@/context/WorkspaceContext";
+import { api } from "@/lib/api-client";
 
 const ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
   dashboard: LayoutDashboard,
   analytics: BarChart3,
   sitemap: Search,
+  connections: Link2,
   socialpost: PenLine,
   gbppost: MapPin,
   reviewreply: MessageSquare,
@@ -39,6 +42,28 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
   const { showToast } = useToast();
   const { state, logout: workspaceLogout } = useWorkspace();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [fbStatus, setFbStatus] = useState<"Connected" | "Linked" | "Off">("Off");
+  const [gbpStatus, setGbpStatus] = useState<"Connected" | "Linked" | "Off">("Off");
+
+  useEffect(() => {
+    if (!state.email) return;
+    api
+      .getConnections(state.email)
+      .then((data) => {
+        const fb = data.byProvider?.facebook;
+        const gbp = data.byProvider?.google_business;
+        setFbStatus(
+          fb?.publishReady ? "Connected" : fb ? "Linked" : "Off"
+        );
+        setGbpStatus(
+          gbp?.publishReady ? "Connected" : gbp ? "Linked" : "Off"
+        );
+      })
+      .catch(() => {
+        setFbStatus("Off");
+        setGbpStatus("Off");
+      });
+  }, [state.email]);
 
   const plan = PLAN_CONFIG[state.planId];
   const unlimited = !!state.unlimitedCredits;
@@ -205,12 +230,39 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
             </div>
             <div className="flex items-center justify-between text-[11px] mb-1">
               <span className="text-slate-400">Facebook Page</span>
-              <span className="text-emerald-400 font-bold">Active</span>
+              <span
+                className={`font-bold ${
+                  fbStatus === "Connected"
+                    ? "text-emerald-400"
+                    : fbStatus === "Linked"
+                      ? "text-amber-400"
+                      : "text-slate-500"
+                }`}
+              >
+                {fbStatus === "Off" ? "Not connected" : fbStatus}
+              </span>
             </div>
             <div className="flex items-center justify-between text-[11px] mb-2">
               <span className="text-slate-400">Google Business</span>
-              <span className="text-emerald-400 font-bold">Active</span>
+              <span
+                className={`font-bold ${
+                  gbpStatus === "Connected"
+                    ? "text-emerald-400"
+                    : gbpStatus === "Linked"
+                      ? "text-amber-400"
+                      : "text-slate-500"
+                }`}
+              >
+                {gbpStatus === "Off" ? "Not connected" : gbpStatus}
+              </span>
             </div>
+            <Link
+              href="/dashboard/connections"
+              onClick={() => setSidebarOpen(false)}
+              className="text-[10px] text-orange-400 hover:text-orange-300 font-bold"
+            >
+              Manage connections →
+            </Link>
             <div className="w-full bg-navy-800 rounded-full h-1.5 overflow-hidden mt-1">
               <div
                 className={`h-1.5 rounded-full transition-all ${
