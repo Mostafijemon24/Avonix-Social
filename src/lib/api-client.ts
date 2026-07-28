@@ -184,17 +184,24 @@ export const api = {
       formula: string;
     }>("/credits/config"),
 
-  getConnections: (email: string) =>
+  getConnections: (email: string, workspaceId?: string) =>
     request<{
       ok: boolean;
+      workspaceId?: string;
       accounts: ConnectedAccount[];
       byProvider: Record<string, ConnectedAccount | null>;
       setup: ConnectionsSetup;
-    }>(`/connections?email=${encodeURIComponent(email)}`),
+    }>(
+      `/connections?email=${encodeURIComponent(email)}${
+        workspaceId ? `&workspaceId=${encodeURIComponent(workspaceId)}` : ""
+      }`
+    ),
 
-  startConnectionOAuth: (email: string, provider: string) =>
+  startConnectionOAuth: (email: string, provider: string, workspaceId?: string) =>
     request<{ ok: boolean; authUrl: string; redirectUri?: string; error?: string }>(
-      `/connections/oauth/${encodeURIComponent(provider)}/start?email=${encodeURIComponent(email)}`
+      `/connections/oauth/${encodeURIComponent(provider)}/start?email=${encodeURIComponent(email)}${
+        workspaceId ? `&workspaceId=${encodeURIComponent(workspaceId)}` : ""
+      }`
     ),
 
   saveManualConnection: (payload: {
@@ -202,6 +209,7 @@ export const api = {
     provider: string;
     accountUrl: string;
     accountName?: string;
+    workspaceId?: string;
   }) =>
     request<{ ok: boolean; account: ConnectedAccount }>("/connections/manual", {
       method: "POST",
@@ -221,6 +229,7 @@ export const api = {
     imageUrl?: string;
     reviewName?: string;
     connectionIds?: string[];
+    workspaceId?: string;
   }) =>
     request<{
       ok: boolean;
@@ -244,6 +253,56 @@ export const api = {
     }>("/connections/publish", {
       method: "POST",
       body: JSON.stringify(payload),
+    }),
+
+  listWorkspaces: (email: string) =>
+    request<{
+      ok: boolean;
+      activeWorkspaceId: string;
+      limit: number;
+      workspaces: import("./types").ClientWorkspaceSummary[];
+    }>(`/workspaces?email=${encodeURIComponent(email)}`),
+
+  createWorkspace: (payload: {
+    email: string;
+    name: string;
+    websiteUrl?: string;
+    notes?: string;
+  }) =>
+    request<{
+      ok: boolean;
+      workspace: import("./types").ClientWorkspaceSummary;
+      activeWorkspaceId: string;
+    }>("/workspaces", { method: "POST", body: JSON.stringify(payload) }),
+
+  activateWorkspace: (email: string, workspaceId: string) =>
+    request<{
+      ok: boolean;
+      workspace: import("./types").ClientWorkspaceSummary;
+      activeWorkspaceId: string;
+    }>(`/workspaces/${encodeURIComponent(workspaceId)}/activate`, {
+      method: "POST",
+      body: JSON.stringify({ email }),
+    }),
+
+  deleteWorkspace: (email: string, workspaceId: string) =>
+    request<{ ok: boolean; activeWorkspaceId: string | null }>(
+      `/workspaces/${encodeURIComponent(workspaceId)}?email=${encodeURIComponent(email)}`,
+      { method: "DELETE" }
+    ),
+
+  saveWorkspaceSitemap: (
+    email: string,
+    workspaceId: string,
+    sitemap: import("./types").SitemapData
+  ) =>
+    request<{
+      ok: boolean;
+      workspace: import("./types").ClientWorkspaceSummary;
+      activeWorkspaceId: string;
+    }>(`/workspaces/${encodeURIComponent(workspaceId)}/sitemap`, {
+      method: "PUT",
+      body: JSON.stringify({ email, sitemap }),
     }),
 };
 

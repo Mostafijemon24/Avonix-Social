@@ -5,6 +5,7 @@ import crypto from "crypto";
 import jwt from "jsonwebtoken";
 import prisma from "../db.js";
 import { isFullyVerified } from "./verifyService.js";
+import { resolveActiveWorkspace } from "./workspaceService.js";
 
 const PROVIDERS = ["facebook", "instagram", "google_business", "linkedin"];
 const STATE_SECRET = () =>
@@ -117,12 +118,15 @@ function publicAccount(row) {
   };
 }
 
-export async function listConnections(email) {
+export async function listConnections(email, workspaceId) {
   const gate = await requireVerifiedUser(email);
   if (!gate.ok) return gate;
 
+  const { workspace, activeId } = await resolveActiveWorkspace(gate.user);
+  const wid = workspaceId || activeId || workspace?.id;
+
   const rows = await prisma.connectedAccount.findMany({
-    where: { userId: gate.user.id },
+    where: { userId: gate.user.id, workspaceId: wid },
     orderBy: [{ provider: "asc" }, { updatedAt: "desc" }],
   });
 
@@ -134,18 +138,23 @@ export async function listConnections(email) {
 
   return {
     ok: true,
+    workspaceId: wid,
     accounts,
     byProvider,
     setup: getConnectionsSetupStatus(),
   };
 }
 
-export async function saveManualLink({ email, provider, accountUrl, accountName }) {
+export async function saveManualLink({ email, provider, accountUrl, accountName, workspaceId }) {
   if (!PROVIDERS.includes(provider)) {
     return { ok: false, status: 400, error: "Unsupported provider" };
   }
   const gate = await requireVerifiedUser(email);
   if (!gate.ok) return gate;
+
+  const { activeId, workspace } = await resolveActiveWorkspace(gate.user);
+  const wid = workspaceId || activeId || workspace?.id;
+  if (!wid) return { ok: false, status: 400, error: "No active client workspace" };
 
   const url = String(accountUrl || "").trim();
   if (!url || !/^https?:\/\//i.test(url)) {
@@ -158,7 +167,7 @@ export async function saveManualLink({ email, provider, accountUrl, accountName 
     provider;
 
   const existing = await prisma.connectedAccount.findFirst({
-    where: { userId: gate.user.id, provider, authType: "manual" },
+    where: { userId: gate.user.id, workspaceId: wid, provider, authType: "manual" },
   });
 
   const data = {
@@ -171,6 +180,7 @@ export async function saveManualLink({ email, provider, accountUrl, accountName 
     refreshToken: null,
     tokenExpiresAt: null,
     metadata: JSON.stringify({ note: "Manual URL — OAuth required to publish" }),
+    workspaceId: wid,
   };
 
   const row = existing
@@ -179,7 +189,7 @@ export async function saveManualLink({ email, provider, accountUrl, accountName 
         data: { userId: gate.user.id, provider, ...data },
       });
 
-  return { ok: true, account: publicAccount(row) };
+  return { ok: true, account: publicAccount(row), workspaceId: wid };
 }
 
 export async function disconnectAccount({ email, accountId }) {
@@ -207,12 +217,16 @@ function verifyState(state) {
   }
 }
 
-export async function startOAuth({ email, provider }) {
+export async function startOAuth({ email, provider, workspaceId }) {
   if (!PROVIDERS.includes(provider)) {
     return { ok: false, status: 400, error: "Unsupported provider" };
   }
   const gate = await requireVerifiedUser(email);
   if (!gate.ok) return gate;
+
+  const { activeId, workspace } = await resolveActiveWorkspace(gate.user);
+  const wid = workspaceId || activeId || workspace?.id;
+  if (!wid) return { ok: false, status: 400, error: "No active client workspace" };
 
   const cfg = providerConfig(provider);
   if (!cfg.configured) {
@@ -227,6 +241,7 @@ export async function startOAuth({ email, provider }) {
   const state = signState({
     email: gate.user.email,
     provider,
+    workspaceId: wid,
     n: crypto.randomBytes(8).toString("hex"),
   });
   const redirectUri = callbackUrl(provider);
@@ -282,10 +297,10 @@ export async function startOAuth({ email, provider }) {
   return { ok: true, authUrl, redirectUri };
 }
 
-async function upsertOAuthAccount(userId, provider, fields) {
+async function upsertOAuthAccount(userId, workspaceId, provider, fields) {
   const accountId = fields.accountId || `unknown-${provider}`;
   const existing = await prisma.connectedAccount.findFirst({
-    where: { userId, provider, accountId },
+    where: { userId, workspaceId, provider, accountId },
   });
   const data = {
     authType: "oauth",
@@ -297,6 +312,7 @@ async function upsertOAuthAccount(userId, provider, fields) {
     refreshToken: fields.refreshToken || null,
     tokenExpiresAt: fields.tokenExpiresAt || null,
     metadata: fields.metadata ? JSON.stringify(fields.metadata) : null,
+    workspaceId,
   };
   if (existing) {
     return prisma.connectedAccount.update({ where: { id: existing.id }, data });
@@ -304,7 +320,7 @@ async function upsertOAuthAccount(userId, provider, fields) {
   return prisma.connectedAccount.create({ data: { userId, provider, ...data } });
 }
 
-async function handleMetaCallback({ code, provider, user }) {
+async function handleMetaCallback({ code, provider, user, workspaceId }) {
   const cfg = providerConfig(provider);
   const redirectUri = callbackUrl(provider);
 
@@ -340,7 +356,7 @@ async function handleMetaCallback({ code, provider, user }) {
       // Always store Facebook page when connecting Facebook
       if (provider === "facebook") {
         saved.push(
-          await upsertOAuthAccount(user.id, "facebook", {
+          await upsertOAuthAccount(user.id, workspaceId, "facebook", {
             accountId: page.id,
             accountName: page.name,
             accountUrl: `https://www.facebook.com/${page.id}`,
@@ -353,7 +369,7 @@ async function handleMetaCallback({ code, provider, user }) {
       if (page.instagram_business_account?.id) {
         const ig = page.instagram_business_account;
         saved.push(
-          await upsertOAuthAccount(user.id, "instagram", {
+          await upsertOAuthAccount(user.id, workspaceId, "instagram", {
             accountId: ig.id,
             accountName: ig.username || `IG ${ig.id}`,
             accountUrl: ig.username
@@ -380,7 +396,7 @@ async function handleMetaCallback({ code, provider, user }) {
   return saved;
 }
 
-async function handleGoogleCallback({ code, user }) {
+async function handleGoogleCallback({ code, user, workspaceId }) {
   const cfg = providerConfig("google_business");
   const redirectUri = callbackUrl("google_business");
 
@@ -417,7 +433,7 @@ async function handleGoogleCallback({ code, user }) {
   if (!accounts.length) {
     // Still save token so user is "connected" and can pick location later
     return [
-      await upsertOAuthAccount(user.id, "google_business", {
+      await upsertOAuthAccount(user.id, workspaceId, "google_business", {
         accountId: "google-user",
         accountName: "Google Business (no locations yet)",
         accountUrl: "https://business.google.com/",
@@ -433,7 +449,7 @@ async function handleGoogleCallback({ code, user }) {
   for (const acc of accounts.slice(0, 5)) {
     const accountName = acc.accountName || acc.name || "Google Business";
     saved.push(
-      await upsertOAuthAccount(user.id, "google_business", {
+      await upsertOAuthAccount(user.id, workspaceId, "google_business", {
         accountId: acc.name || accountName,
         accountName,
         accountUrl: "https://business.google.com/",
@@ -447,7 +463,7 @@ async function handleGoogleCallback({ code, user }) {
   return saved;
 }
 
-async function handleLinkedInCallback({ code, user }) {
+async function handleLinkedInCallback({ code, user, workspaceId }) {
   const cfg = providerConfig("linkedin");
   const redirectUri = callbackUrl("linkedin");
 
@@ -495,7 +511,7 @@ async function handleLinkedInCallback({ code, user }) {
       );
       if (!id) continue;
       saved.push(
-        await upsertOAuthAccount(user.id, "linkedin", {
+        await upsertOAuthAccount(user.id, workspaceId, "linkedin", {
           accountId: id,
           accountName: target.localizedName || `LinkedIn Page ${id}`,
           accountUrl: `https://www.linkedin.com/company/${id}/`,
@@ -514,7 +530,7 @@ async function handleLinkedInCallback({ code, user }) {
   });
   const me = await meRes.json().catch(() => ({}));
   return [
-    await upsertOAuthAccount(user.id, "linkedin", {
+    await upsertOAuthAccount(user.id, workspaceId, "linkedin", {
       accountId: me.sub || "linkedin-user",
       accountName: me.name || me.email || "LinkedIn Profile",
       accountUrl: "https://www.linkedin.com/",
@@ -544,13 +560,19 @@ export async function handleOAuthCallback({ provider, code, state, error, errorD
     return { redirect: `${frontend}?error=${encodeURIComponent(gate.error)}` };
   }
 
+  const { activeId, workspace } = await resolveActiveWorkspace(gate.user);
+  const workspaceId = payload.workspaceId || activeId || workspace?.id;
+  if (!workspaceId) {
+    return { redirect: `${frontend}?error=${encodeURIComponent("No active client workspace")}` };
+  }
+
   try {
     if (provider === "facebook" || provider === "instagram") {
-      await handleMetaCallback({ code, provider, user: gate.user });
+      await handleMetaCallback({ code, provider, user: gate.user, workspaceId });
     } else if (provider === "google_business") {
-      await handleGoogleCallback({ code, user: gate.user });
+      await handleGoogleCallback({ code, user: gate.user, workspaceId });
     } else if (provider === "linkedin") {
-      await handleLinkedInCallback({ code, user: gate.user });
+      await handleLinkedInCallback({ code, user: gate.user, workspaceId });
     } else {
       return { redirect: `${frontend}?error=${encodeURIComponent("Unknown provider")}` };
     }

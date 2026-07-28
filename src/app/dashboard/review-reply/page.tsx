@@ -124,7 +124,12 @@ Brand: Avonix Social SEO agency`;
           </div>
           {draft && state.email && (
             <div className="mt-4">
-              <PublishBar email={state.email} content={draft} action="review_reply" />
+              <PublishBar
+                email={state.email}
+                content={draft}
+                action="review_reply"
+                workspaceId={state.activeWorkspaceId || undefined}
+              />
             </div>
           )}
         </div>

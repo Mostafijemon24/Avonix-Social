@@ -101,7 +101,7 @@ export default function SitemapPage() {
     setStep("location");
   };
 
-  const saveWorkspace = () => {
+  const saveWorkspace = async () => {
     if (!location.trim()) {
       showToast("Please enter your city / region location.", "error");
       return;
@@ -113,17 +113,20 @@ export default function SitemapPage() {
       .map((s) => s.trim())
       .filter(Boolean);
 
-    setSitemapData({
-      url: meta.domain,
-      primaryKeyword: primaryKeyword.trim(),
-      secondaryKeywords,
-      location: location.trim(),
-      address: address.trim(),
-      urlCount: meta.urlCount,
-      parsedAt: new Date().toISOString(),
-    });
-
-    showToast("Keywords & location saved. Ready for Social Post.", "success");
+    try {
+      await setSitemapData({
+        url: meta.domain,
+        primaryKeyword: primaryKeyword.trim(),
+        secondaryKeywords,
+        location: location.trim(),
+        address: address.trim(),
+        urlCount: meta.urlCount,
+        parsedAt: new Date().toISOString(),
+      });
+      showToast("Keywords & location saved for this client workspace.", "success");
+    } catch (err) {
+      showToast("Failed to save workspace sitemap data", "error");
+    }
   };
 
   const sitemap = state.sitemap;
@@ -136,7 +139,12 @@ export default function SitemapPage() {
           <CreditCostBadge action="sitemap_parse" />
         </div>
         <p className="text-xs text-slate-400 mb-4">
-          Enter only your root domain. AI scans sitemap pages and posts to extract primary &amp;
+          Client:{" "}
+          <span className="text-orange-400 font-bold">
+            {(state.workspaces || []).find((w) => w.id === state.activeWorkspaceId)?.name ||
+              "Active workspace"}
+          </span>
+          . Enter only your root domain. AI scans sitemap pages and posts to extract primary &amp;
           secondary keywords — then you confirm location.
         </p>
 

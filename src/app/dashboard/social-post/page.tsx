@@ -145,7 +145,12 @@ Include website link https://nexadigital.com/ and relevant hashtags. Professiona
             </div>
           </div>
           {state.email && (
-            <PublishBar email={state.email} content={output} action="social_post" />
+            <PublishBar
+              email={state.email}
+              content={output}
+              action="social_post"
+              workspaceId={state.activeWorkspaceId || undefined}
+            />
           )}
         </div>
       )}

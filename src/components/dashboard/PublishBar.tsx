@@ -21,12 +21,14 @@ export function PublishBar({
   action,
   imageUrl,
   reviewName,
+  workspaceId,
 }: {
   email: string;
   content: string;
   action: Action;
   imageUrl?: string;
   reviewName?: string;
+  workspaceId?: string;
 }) {
   const { showToast } = useToast();
   const [targets, setTargets] = useState<ConnectedAccount[]>([]);
@@ -41,7 +43,7 @@ export function PublishBar({
         ? ["facebook", "instagram", "linkedin"]
         : ["google_business"];
     api
-      .getConnections(email)
+      .getConnections(email, workspaceId)
       .then((data) => {
         const ready = (data.accounts || []).filter(
           (a) => a.publishReady && allowedProviders.includes(a.provider)
@@ -58,7 +60,7 @@ export function PublishBar({
       })
       .catch(() => setTargets([]))
       .finally(() => setLoaded(true));
-  }, [email, action]);
+  }, [email, action, workspaceId]);
 
   const chosen = targets.filter((t) => selected[t.provider]);
 
@@ -88,6 +90,7 @@ export function PublishBar({
         providers: chosen.map((c) => c.provider),
         imageUrl,
         reviewName,
+        workspaceId,
       });
       if (result.published?.length) {
         showToast(result.message || "Published!", "success");

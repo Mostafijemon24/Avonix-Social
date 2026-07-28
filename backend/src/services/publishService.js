@@ -4,6 +4,7 @@
 import prisma from "../db.js";
 import { isFullyVerified } from "./verifyService.js";
 import { stampActivity } from "./reminderService.js";
+import { resolveActiveWorkspace } from "./workspaceService.js";
 
 const SOCIAL_PROVIDERS = ["facebook", "instagram", "linkedin"];
 const GBP_PROVIDERS = ["google_business"];
@@ -302,15 +303,21 @@ async function publishGbpReviewReply(account, message, reviewName) {
 }
 
 /**
- * @param {{ email: string, content: string, action: string, providers?: string[], imageUrl?: string, reviewName?: string, connectionIds?: string[] }} opts
+ * @param {{ email: string, content: string, action: string, providers?: string[], imageUrl?: string, reviewName?: string, connectionIds?: string[], workspaceId?: string }} opts
  */
 export async function publishContent(opts) {
-  const { email, content, action, imageUrl, reviewName, connectionIds } = opts;
+  const { email, content, action, imageUrl, reviewName, connectionIds, workspaceId } = opts;
   const message = String(content || "").trim();
   if (!message) return { ok: false, status: 400, error: "Content is required" };
 
   const gate = await requireVerifiedUser(email);
   if (!gate.ok) return gate;
+
+  const { activeId, workspace } = await resolveActiveWorkspace(gate.user);
+  const wid = workspaceId || activeId || workspace?.id;
+  if (!wid) {
+    return { ok: false, status: 400, error: "No active client workspace" };
+  }
 
   let allowedProviders;
   if (action === "gbp_post" || action === "review_reply") {
@@ -329,6 +336,7 @@ export async function publishContent(opts) {
 
   const where = {
     userId: gate.user.id,
+    workspaceId: wid,
     provider: { in: requested },
     authType: "oauth",
     status: "connected",
@@ -344,7 +352,7 @@ export async function publishContent(opts) {
       ok: false,
       status: 400,
       error:
-        "No publish-ready connections. Open Connections and complete OAuth for the target platforms.",
+        "No publish-ready connections for this client. Open Connections and complete OAuth.",
     };
   }
 

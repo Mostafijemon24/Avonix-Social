@@ -27,7 +27,7 @@ router.post("/publish", async (req, res) => {
 
 router.get("/", async (req, res) => {
   try {
-    const result = await listConnections(req.query.email);
+    const result = await listConnections(req.query.email, req.query.workspaceId);
     if (!result.ok) return res.status(result.status || 400).json(result);
     res.json(result);
   } catch (err) {
@@ -64,6 +64,7 @@ router.get("/oauth/:provider/start", async (req, res) => {
     const result = await startOAuth({
       email: req.query.email,
       provider: req.params.provider,
+      workspaceId: req.query.workspaceId,
     });
     if (!result.ok) return res.status(result.status || 400).json(result);
     if (req.query.redirect === "1") {

@@ -11,11 +11,23 @@ import {
 } from "react";
 import { api, type ApiUserState, isApiError } from "@/lib/api-client";
 import { PLAN_CONFIG, type PlanId } from "@/lib/credits";
-import type { SitemapData, WorkspaceState } from "@/lib/types";
+import type {
+  ClientWorkspaceSummary,
+  SitemapData,
+  WorkspaceState,
+} from "@/lib/types";
 
 const STORAGE_KEY = "avonix-social-email";
 
-function toWorkspaceState(apiState: ApiUserState, sitemap: SitemapData | null): WorkspaceState {
+function toWorkspaceState(
+  apiState: ApiUserState,
+  sitemap: SitemapData | null,
+  extras?: {
+    activeWorkspaceId?: string | null;
+    workspaces?: ClientWorkspaceSummary[];
+    workspaceLimit?: number;
+  }
+): WorkspaceState {
   return {
     email: apiState.email,
     planId: (apiState.planId as PlanId) || "free",
@@ -40,6 +52,9 @@ function toWorkspaceState(apiState: ApiUserState, sitemap: SitemapData | null): 
       timestamp: t.timestamp,
     })),
     loggedIn: true,
+    activeWorkspaceId: extras?.activeWorkspaceId ?? null,
+    workspaces: extras?.workspaces ?? [],
+    workspaceLimit: extras?.workspaceLimit,
   };
 }
 
@@ -52,6 +67,8 @@ const defaultState: WorkspaceState = {
   sitemap: null,
   transactions: [],
   loggedIn: false,
+  activeWorkspaceId: null,
+  workspaces: [],
 };
 
 type WorkspaceContextValue = {
@@ -61,8 +78,15 @@ type WorkspaceContextValue = {
   logout: () => void;
   refreshState: () => Promise<void>;
   subscribeToPlan: (planId: PlanId, gateway: string) => Promise<void>;
-  setSitemapData: (data: SitemapData) => void;
+  setSitemapData: (data: SitemapData) => Promise<void>;
   applyApiCredits: (creditsLeft: number) => void;
+  switchWorkspace: (workspaceId: string) => Promise<void>;
+  createClientWorkspace: (payload: {
+    name: string;
+    websiteUrl?: string;
+  }) => Promise<ClientWorkspaceSummary>;
+  removeClientWorkspace: (workspaceId: string) => Promise<void>;
+  reloadWorkspaces: () => Promise<void>;
 };
 
 const WorkspaceContext = createContext<WorkspaceContextValue | null>(null);
@@ -77,6 +101,20 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<WorkspaceState>(defaultState);
   const [apiOnline, setApiOnline] = useState(true);
 
+  const loadWorkspacesInto = useCallback(async (email: string, apiState: ApiUserState) => {
+    const ws = await api.listWorkspaces(email);
+    const active =
+      ws.workspaces.find((w) => w.id === ws.activeWorkspaceId) || ws.workspaces[0] || null;
+    setApiOnline(true);
+    setState(
+      toWorkspaceState(apiState, active?.sitemap || null, {
+        activeWorkspaceId: ws.activeWorkspaceId,
+        workspaces: ws.workspaces,
+        workspaceLimit: ws.limit,
+      })
+    );
+  }, []);
+
   const refreshState = useCallback(async () => {
     const email = state.email || localStorage.getItem(STORAGE_KEY);
     if (!email) return;
@@ -87,9 +125,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       setState(defaultState);
       throw new Error("Verification required");
     }
-    setApiOnline(true);
-    setState((prev) => toWorkspaceState(apiState, prev.sitemap));
-  }, [state.email]);
+    await loadWorkspacesInto(email, apiState);
+  }, [state.email, loadWorkspacesInto]);
 
   useEffect(() => {
     const savedEmail = localStorage.getItem(STORAGE_KEY);
@@ -97,30 +134,31 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
     api
       .getCredits(savedEmail)
-      .then((apiState) => {
+      .then(async (apiState) => {
         if (!apiState.fullyVerified) {
           localStorage.removeItem(STORAGE_KEY);
           return;
         }
-        setApiOnline(true);
-        setState(toWorkspaceState(apiState, null));
+        await loadWorkspacesInto(savedEmail, apiState);
       })
       .catch(() => {
         localStorage.removeItem(STORAGE_KEY);
         setApiOnline(false);
       });
-  }, []);
+  }, [loadWorkspacesInto]);
 
-  const establishSession = useCallback(async (email: string) => {
-    const normalized = email.trim().toLowerCase();
-    const { user } = await api.login(normalized);
-    if (!user.fullyVerified) {
-      throw new Error("Account not fully verified");
-    }
-    localStorage.setItem(STORAGE_KEY, normalized);
-    setApiOnline(true);
-    setState(toWorkspaceState(user, null));
-  }, []);
+  const establishSession = useCallback(
+    async (email: string) => {
+      const normalized = email.trim().toLowerCase();
+      const { user } = await api.login(normalized);
+      if (!user.fullyVerified) {
+        throw new Error("Account not fully verified");
+      }
+      localStorage.setItem(STORAGE_KEY, normalized);
+      await loadWorkspacesInto(normalized, user);
+    },
+    [loadWorkspacesInto]
+  );
 
   const logout = useCallback(() => {
     localStorage.removeItem(STORAGE_KEY);
@@ -136,23 +174,93 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
           plan: planId,
           gateway,
         });
-        setApiOnline(true);
-        setState((prev) => toWorkspaceState(result.user, prev.sitemap));
+        await loadWorkspacesInto(state.email, result.user);
       } catch (err) {
         if (isApiError(err)) throw err;
         throw new Error("Subscription failed");
       }
     },
-    [state.email]
+    [state.email, loadWorkspacesInto]
   );
 
-  const setSitemapData = useCallback((data: SitemapData) => {
-    setState((prev) => ({ ...prev, sitemap: data }));
-  }, []);
+  const setSitemapData = useCallback(
+    async (data: SitemapData) => {
+      if (!state.email || !state.activeWorkspaceId) {
+        setState((prev) => ({ ...prev, sitemap: data }));
+        return;
+      }
+      const result = await api.saveWorkspaceSitemap(
+        state.email,
+        state.activeWorkspaceId,
+        data
+      );
+      setState((prev) => ({
+        ...prev,
+        sitemap: result.workspace.sitemap,
+        activeWorkspaceId: result.activeWorkspaceId,
+        workspaces: (prev.workspaces || []).map((w) =>
+          w.id === result.workspace.id ? result.workspace : w
+        ),
+      }));
+    },
+    [state.email, state.activeWorkspaceId]
+  );
 
   const applyApiCredits = useCallback((creditsLeft: number) => {
     setState((prev) => ({ ...prev, credits: creditsLeft }));
   }, []);
+
+  const switchWorkspace = useCallback(
+    async (workspaceId: string) => {
+      if (!state.email) return;
+      const result = await api.activateWorkspace(state.email, workspaceId);
+      setState((prev) => ({
+        ...prev,
+        activeWorkspaceId: result.activeWorkspaceId,
+        sitemap: result.workspace.sitemap,
+        workspaces: (prev.workspaces || []).map((w) => ({
+          ...w,
+          isActive: w.id === result.activeWorkspaceId,
+          ...(w.id === result.workspace.id ? result.workspace : {}),
+        })),
+      }));
+    },
+    [state.email]
+  );
+
+  const createClientWorkspace = useCallback(
+    async (payload: { name: string; websiteUrl?: string }) => {
+      if (!state.email) throw new Error("Not logged in");
+      const result = await api.createWorkspace({ email: state.email, ...payload });
+      setState((prev) => ({
+        ...prev,
+        activeWorkspaceId: result.activeWorkspaceId,
+        sitemap: result.workspace.sitemap,
+        workspaces: [
+          ...(prev.workspaces || []).map((w) => ({ ...w, isActive: false })),
+          { ...result.workspace, isActive: true },
+        ],
+      }));
+      return result.workspace;
+    },
+    [state.email]
+  );
+
+  const removeClientWorkspace = useCallback(
+    async (workspaceId: string) => {
+      if (!state.email) return;
+      await api.deleteWorkspace(state.email, workspaceId);
+      const apiState = await api.getCredits(state.email);
+      await loadWorkspacesInto(state.email, apiState);
+    },
+    [state.email, loadWorkspacesInto]
+  );
+
+  const reloadWorkspaces = useCallback(async () => {
+    if (!state.email) return;
+    const apiState = await api.getCredits(state.email);
+    await loadWorkspacesInto(state.email, apiState);
+  }, [state.email, loadWorkspacesInto]);
 
   const value = useMemo(
     () => ({
@@ -164,6 +272,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       subscribeToPlan,
       setSitemapData,
       applyApiCredits,
+      switchWorkspace,
+      createClientWorkspace,
+      removeClientWorkspace,
+      reloadWorkspaces,
     }),
     [
       state,
@@ -174,6 +286,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       subscribeToPlan,
       setSitemapData,
       applyApiCredits,
+      switchWorkspace,
+      createClientWorkspace,
+      removeClientWorkspace,
+      reloadWorkspaces,
     ]
   );
 

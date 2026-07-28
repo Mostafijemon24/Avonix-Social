@@ -92,7 +92,12 @@ Include local SEO hashtags.`;
             </div>
           </div>
           {state.email && (
-            <PublishBar email={state.email} content={output} action="gbp_post" />
+            <PublishBar
+              email={state.email}
+              content={output}
+              action="gbp_post"
+              workspaceId={state.activeWorkspaceId || undefined}
+            />
           )}
         </div>
       )}

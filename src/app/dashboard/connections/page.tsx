@@ -60,7 +60,7 @@ function ConnectionsInner() {
     if (!state.email) return;
     setLoading(true);
     try {
-      const data = await api.getConnections(state.email);
+      const data = await api.getConnections(state.email, state.activeWorkspaceId || undefined);
       setAccounts(data.accounts || []);
       setByProvider(data.byProvider || {});
       setSetup(data.setup || null);
@@ -69,7 +69,7 @@ function ConnectionsInner() {
     } finally {
       setLoading(false);
     }
-  }, [state.email, showToast]);
+  }, [state.email, state.activeWorkspaceId, showToast]);
 
   useEffect(() => {
     load();
@@ -89,7 +89,11 @@ function ConnectionsInner() {
     if (!state.email) return;
     setBusy(provider);
     try {
-      const result = await api.startConnectionOAuth(state.email, provider);
+      const result = await api.startConnectionOAuth(
+        state.email,
+        provider,
+        state.activeWorkspaceId || undefined
+      );
       if (!result.authUrl) throw new Error("No auth URL returned");
       window.location.href = result.authUrl;
     } catch (err) {
@@ -107,6 +111,7 @@ function ConnectionsInner() {
         provider,
         accountUrl: manualUrl[provider] || "",
         accountName: manualName[provider] || undefined,
+        workspaceId: state.activeWorkspaceId || undefined,
       });
       showToast("Profile URL saved (link only — OAuth needed to publish)", "success");
       setManualUrl((m) => ({ ...m, [provider]: "" }));
@@ -148,8 +153,12 @@ function ConnectionsInner() {
       <div>
         <h1 className="text-xl font-black text-white mb-1">Connections</h1>
         <p className="text-xs text-slate-400">
-          Connect Facebook, Instagram, Google Business Profile, and LinkedIn. Use OAuth to
-          publish; or save a profile URL for reference until API keys are configured.
+          Connect accounts for{" "}
+          <span className="text-orange-400 font-bold">
+            {(state.workspaces || []).find((w) => w.id === state.activeWorkspaceId)?.name ||
+              "this client"}
+          </span>
+          . Each client workspace has its own Facebook, Instagram, GBP, and LinkedIn links.
         </p>
       </div>
 

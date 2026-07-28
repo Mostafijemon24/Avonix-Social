@@ -44,6 +44,21 @@ export type WorkspaceState = {
   sitemap: SitemapData | null;
   transactions: CreditTransaction[];
   loggedIn: boolean;
+  activeWorkspaceId?: string | null;
+  workspaces?: ClientWorkspaceSummary[];
+  workspaceLimit?: number;
+};
+
+export type ClientWorkspaceSummary = {
+  id: string;
+  name: string;
+  websiteUrl?: string | null;
+  domain?: string | null;
+  notes?: string | null;
+  isActive?: boolean;
+  sitemap: SitemapData | null;
+  createdAt?: string;
+  updatedAt?: string;
 };
 
 export type SpendResult =

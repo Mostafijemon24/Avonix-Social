@@ -22,6 +22,7 @@ import { DASHBOARD_NAV } from "@/lib/constants";
 import { useToast } from "@/components/ui/Toast";
 import { useWorkspace, PLAN_CONFIG } from "@/context/WorkspaceContext";
 import { api } from "@/lib/api-client";
+import { ClientWorkspaceSwitcher } from "@/components/dashboard/ClientWorkspaceSwitcher";
 
 const ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
   dashboard: LayoutDashboard,
@@ -40,7 +41,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const { showToast } = useToast();
-  const { state, logout: workspaceLogout } = useWorkspace();
+  const { state, logout: workspaceLogout, switchWorkspace } = useWorkspace();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [fbStatus, setFbStatus] = useState<"Connected" | "Linked" | "Off">("Off");
   const [gbpStatus, setGbpStatus] = useState<"Connected" | "Linked" | "Off">("Off");
@@ -48,7 +49,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!state.email) return;
     api
-      .getConnections(state.email)
+      .getConnections(state.email, state.activeWorkspaceId || undefined)
       .then((data) => {
         const fb = data.byProvider?.facebook;
         const gbp = data.byProvider?.google_business;
@@ -63,7 +64,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
         setFbStatus("Off");
         setGbpStatus("Off");
       });
-  }, [state.email]);
+  }, [state.email, state.activeWorkspaceId]);
 
   const plan = PLAN_CONFIG[state.planId];
   const unlimited = !!state.unlimitedCredits;
@@ -99,22 +100,8 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
           </button>
           <BrandLogo href="/dashboard" size="sm" />
 
-          <div className="hidden xl:flex items-center pl-6 border-l border-navy-800">
-            <label htmlFor="workspaceSelect" className="text-xs text-slate-400 font-semibold mr-2">
-              Client Workspace:
-            </label>
-            <select
-              id="workspaceSelect"
-              onChange={(e) =>
-                showToast(`Switched active client workspace to ${e.target.value.toUpperCase()}`, "info")
-              }
-              className="bg-navy-800 text-slate-200 text-xs font-bold rounded-xl px-3 py-1.5 focus:outline-none border border-navy-700 cursor-pointer"
-              defaultValue="nexadigital"
-            >
-              <option value="nexadigital">Nexa Digital Marketing Inc.</option>
-              <option value="dhali">Dhali Hospitality Group</option>
-              <option value="apex">Apex Global Tech</option>
-            </select>
+          <div className="relative">
+            <ClientWorkspaceSwitcher />
           </div>
         </div>
 
@@ -225,6 +212,30 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
           </div>
 
           <div className="p-4 border-t border-navy-800 bg-navy-950/60 text-center sm:text-left">
+            <div className="md:hidden mb-3">
+              <label className="text-[10px] font-extrabold text-slate-500 uppercase tracking-wider mb-1 block">
+                Client Workspace
+              </label>
+              <select
+                value={state.activeWorkspaceId || ""}
+                onChange={async (e) => {
+                  try {
+                    await switchWorkspace(e.target.value);
+                    setSidebarOpen(false);
+                    showToast("Client workspace switched", "success");
+                  } catch {
+                    showToast("Could not switch workspace", "error");
+                  }
+                }}
+                className="w-full bg-navy-800 text-slate-200 text-xs font-bold rounded-xl px-3 py-2 border border-navy-700"
+              >
+                {(state.workspaces || []).map((w) => (
+                  <option key={w.id} value={w.id}>
+                    {w.name}
+                  </option>
+                ))}
+              </select>
+            </div>
             <div className="text-[10px] font-extrabold text-slate-500 uppercase tracking-wider mb-2">
               Live Status
             </div>

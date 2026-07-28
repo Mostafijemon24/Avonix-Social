@@ -20,11 +20,13 @@ import { getCreditConfig } from "../credits.js";
 import { getPriceCacheStats, getAllModelPrices } from "../modelPrices.js";
 import { analyzeSite } from "../services/siteAnalyzer.js";
 import connectionsRoutes from "./connections.js";
+import workspacesRoutes from "./workspaces.js";
 import prisma from "../db.js";
 
 const router = Router();
 
 router.use("/connections", connectionsRoutes);
+router.use("/workspaces", workspacesRoutes);
 
 router.get("/health", (_req, res) => {
   res.json({
