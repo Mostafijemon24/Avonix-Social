@@ -13,6 +13,7 @@ import {
   getAuthStatus,
   loginVerifiedUser,
   isFullyVerified,
+  resendRegistrationOtps,
 } from "../services/verifyService.js";
 import { getWallet, topUpWallet } from "../services/walletService.js";
 import { setPendingReviews, runReminderSweep } from "../services/reminderService.js";
@@ -77,6 +78,16 @@ router.post("/site/analyze", async (req, res) => {
 router.post("/auth/register", async (req, res) => {
   try {
     const result = await startRegistration(req.body);
+    if (!result.ok) return res.status(400).json(result);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post("/auth/resend-otp", async (req, res) => {
+  try {
+    const result = await resendRegistrationOtps(req.body.email);
     if (!result.ok) return res.status(400).json(result);
     res.json(result);
   } catch (err) {

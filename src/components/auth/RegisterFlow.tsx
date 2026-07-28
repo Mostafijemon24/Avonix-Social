@@ -28,6 +28,40 @@ function clientPasswordOk(password: string): string | null {
   return null;
 }
 
+type DeliveryInfo = {
+  email?: string;
+  sms?: string;
+  emailError?: string | null;
+  smsError?: string | null;
+};
+
+function deliveryToastMessage(delivery?: DeliveryInfo): { text: string; ok: boolean } {
+  const emailStatus = delivery?.email;
+  const smsStatus = delivery?.sms;
+  const emailOk = emailStatus === "sent";
+  const smsOk = smsStatus === "sent";
+
+  if (emailOk && smsOk) {
+    return { text: "Codes sent to your email and phone.", ok: true };
+  }
+
+  const parts: string[] = [];
+  if (!emailOk) {
+    parts.push(
+      `Email: ${delivery?.emailError || emailStatus || "not sent"} (check spam / SMTP)`
+    );
+  }
+  if (!smsOk) {
+    parts.push(
+      `SMS: ${delivery?.smsError || smsStatus || "not sent"} (BD needs BulkSMSBD keys)`
+    );
+  }
+  return {
+    text: `OTP delivery issue — ${parts.join(" · ")}. You can Resend, or ask admin to check pm2 logs for codes.`,
+    ok: false,
+  };
+}
+
 export function RegisterFlow() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -138,23 +172,35 @@ export function RegisterFlow() {
       });
       setPassword(pwd);
       setStep("verify");
-      const emailStatus = result.delivery?.email;
-      const smsStatus = result.delivery?.sms;
-      if (emailStatus === "sent" && smsStatus === "sent") {
-        showToast("Codes sent to your email and phone.", "success");
-      } else if (emailStatus === "failed" || smsStatus === "failed") {
-        showToast(
-          "Could not deliver OTP. Check email/SMS settings or try again.",
-          "error"
-        );
-      } else {
-        showToast("Verification codes sent (check email & SMS).", "success");
-      }
+      const toast = deliveryToastMessage(result.delivery);
+      showToast(toast.text, toast.ok ? "success" : "error");
     } catch (err: unknown) {
       showToast(
         err && typeof err === "object" && "error" in err
           ? String((err as { error: string }).error)
           : "Registration failed",
+        "error"
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleResendOtp = async () => {
+    if (!email) {
+      showToast("Email missing. Go back and register again.", "error");
+      return;
+    }
+    setLoading(true);
+    try {
+      const result = await api.resendOtp(email);
+      const toast = deliveryToastMessage(result.delivery);
+      showToast(toast.text, toast.ok ? "success" : "error");
+    } catch (err: unknown) {
+      showToast(
+        err && typeof err === "object" && "error" in err
+          ? String((err as { error: string }).error)
+          : "Resend failed",
         "error"
       );
     } finally {
@@ -330,12 +376,24 @@ export function RegisterFlow() {
             <p className="text-[10px] text-slate-500">Verifying: {email}</p>
             <Field label="Email Code" name="emailCode" required maxLength={6} />
             <Field label="Phone / SMS Code" name="phoneCode" required maxLength={6} />
+            <p className="text-[10px] text-slate-500">
+              BD numbers: use +880… Check spam for email. If SMS does not arrive, tap Resend
+              after the admin configures BulkSMSBD.
+            </p>
             <button
               type="submit"
               disabled={loading}
               className="w-full bg-orange-500 hover:bg-orange-600 text-white font-bold py-3 rounded-xl"
             >
               {loading ? "Verifying..." : "Verify Codes"}
+            </button>
+            <button
+              type="button"
+              disabled={loading}
+              onClick={handleResendOtp}
+              className="w-full text-slate-400 hover:text-white font-bold py-2"
+            >
+              Resend codes
             </button>
           </form>
         )}

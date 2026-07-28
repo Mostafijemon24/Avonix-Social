@@ -123,19 +123,22 @@ export async function startRegistration({
 
   const delivery = await sendRegistrationOtps(user, { emailCode, phoneCode });
 
-  if (!IS_PRODUCTION) {
-    console.log(`[OTP email→${normalizedEmail}] ${emailCode}`);
-    console.log(`[OTP sms→${normalizedPhone}] ${phoneCode}`);
+  const emailOk = delivery.email?.status === "sent";
+  const smsOk = delivery.sms?.status === "sent";
+
+  // Always log codes when a channel fails so ops can unblock users from pm2 logs
+  if (!emailOk || !smsOk || !IS_PRODUCTION) {
+    console.log(`[OTP email→${normalizedEmail}] ${emailCode} (${delivery.email?.status})`);
+    console.log(`[OTP sms→${normalizedPhone}] ${phoneCode} (${delivery.sms?.status})`);
   }
 
-  if (IS_PRODUCTION) {
-    console.log("[OTP delivery]", {
-      email: delivery.email?.status,
-      sms: delivery.sms?.status,
-      emailError: delivery.email?.error || null,
-      smsError: delivery.sms?.error || null,
-    });
-  }
+  console.log("[OTP delivery]", {
+    email: delivery.email?.status,
+    sms: delivery.sms?.status,
+    emailError: delivery.email?.error || null,
+    smsError: delivery.sms?.error || null,
+    provider: delivery.sms?.provider || null,
+  });
 
   return {
     ok: true,
@@ -146,6 +149,77 @@ export async function startRegistration({
     delivery: {
       email: delivery.email?.status,
       sms: delivery.sms?.status,
+      emailError: delivery.email?.error || null,
+      smsError: delivery.sms?.error || null,
+      provider: delivery.sms?.provider || null,
+    },
+  };
+}
+
+/** Resend email + SMS OTPs for an incomplete registration */
+export async function resendRegistrationOtps(email) {
+  const normalizedEmail = (email || "").trim().toLowerCase();
+  const user = await prisma.user.findUnique({ where: { email: normalizedEmail } });
+  if (!user) return { ok: false, error: "User not found" };
+  if (isFullyVerified(user)) {
+    return { ok: false, error: "Account already verified. Sign in instead." };
+  }
+  if (!user.phone) {
+    return { ok: false, error: "No phone on file. Register again with a mobile number." };
+  }
+
+  const emailCode = generateOtp();
+  const phoneCode = generateOtp();
+  const expiresAt = new Date(Date.now() + OTP_TTL_MS);
+
+  await prisma.verificationCode.createMany({
+    data: [
+      {
+        userId: user.id,
+        email: normalizedEmail,
+        channel: "email",
+        code: emailCode,
+        purpose: "register",
+        expiresAt,
+      },
+      {
+        userId: user.id,
+        phone: user.phone,
+        channel: "sms",
+        code: phoneCode,
+        purpose: "register",
+        expiresAt,
+      },
+    ],
+  });
+
+  const delivery = await sendRegistrationOtps(user, { emailCode, phoneCode });
+  const emailOk = delivery.email?.status === "sent";
+  const smsOk = delivery.sms?.status === "sent";
+
+  if (!emailOk || !smsOk || !IS_PRODUCTION) {
+    console.log(`[OTP resend email→${normalizedEmail}] ${emailCode} (${delivery.email?.status})`);
+    console.log(`[OTP resend sms→${user.phone}] ${phoneCode} (${delivery.sms?.status})`);
+  }
+
+  console.log("[OTP resend delivery]", {
+    email: delivery.email?.status,
+    sms: delivery.sms?.status,
+    emailError: delivery.email?.error || null,
+    smsError: delivery.sms?.error || null,
+  });
+
+  return {
+    ok: true,
+    email: user.email,
+    phone: user.phone,
+    next: "verify_codes",
+    delivery: {
+      email: delivery.email?.status,
+      sms: delivery.sms?.status,
+      emailError: delivery.email?.error || null,
+      smsError: delivery.sms?.error || null,
+      provider: delivery.sms?.provider || null,
     },
   };
 }

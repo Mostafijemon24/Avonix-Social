@@ -29,7 +29,7 @@ export async function notifyUser(userId, { type, title, body }) {
   return { ok: true, results };
 }
 
-/** Registration OTP: email + SMS separately */
+/** Registration OTP: email + SMS (BD gateways preferred for +880; WhatsApp fallback) */
 export async function sendRegistrationOtps(user, { emailCode, phoneCode }) {
   const emailResult = await sendEmail(user, {
     type: "verify",
@@ -37,13 +37,34 @@ export async function sendRegistrationOtps(user, { emailCode, phoneCode }) {
     body: `Your email verification code is: ${emailCode}\n\nValid for 10 minutes. If you did not request this, ignore this email.`,
   });
 
+  const smsBody = `Avonix Social code: ${phoneCode}. Valid 10 min.`;
   const smsResult = await sendSms(user.phone, {
     type: "verify",
-    body: `Avonix Social code: ${phoneCode}. Valid 10 min.`,
+    body: smsBody,
     userId: user.id,
   });
 
-  return { email: emailResult, sms: smsResult };
+  // WhatsApp backup for phone OTP (especially useful for BD when US SMS is blocked)
+  let whatsapp = null;
+  if (smsResult.status !== "sent") {
+    whatsapp = await sendWhatsApp(
+      { ...user, whatsappNumber: user.whatsappNumber || user.phone },
+      {
+        type: "verify",
+        title: "Avonix Social verification",
+        body: smsBody,
+      }
+    );
+    if (whatsapp.status === "sent") {
+      smsResult.status = "sent";
+      smsResult.error = smsResult.error
+        ? `${smsResult.error} (delivered via WhatsApp)`
+        : null;
+      smsResult.provider = `${smsResult.provider || "sms"}+whatsapp`;
+    }
+  }
+
+  return { email: emailResult, sms: smsResult, whatsapp };
 }
 
 async function logNotification(userId, channel, type, title, body, status) {
@@ -52,30 +73,27 @@ async function logNotification(userId, channel, type, title, body, status) {
   });
 }
 
-async function getSmtpTransport() {
+function buildSmtpTransport({ host, port, user, pass }) {
+  const secure = port === 465;
+  return nodemailer.createTransport({
+    host,
+    port,
+    secure,
+    requireTLS: !secure && port === 587,
+    auth: { user, pass },
+    connectionTimeout: 15000,
+    greetingTimeout: 15000,
+    tls: { minVersion: "TLSv1.2", rejectUnauthorized: true },
+  });
+}
+
+async function getSmtpCredentials() {
   const smtpUrl = await getConfig("SMTP_URL", process.env.SMTP_URL || "");
   const host = await getConfig("SMTP_HOST", process.env.SMTP_HOST || "");
   const port = Number(await getConfig("SMTP_PORT", process.env.SMTP_PORT || "465"));
   const user = await getConfig("SMTP_USER", process.env.SMTP_USER || "");
   const pass = await getConfig("SMTP_PASS", process.env.SMTP_PASS || "");
-
-  if (smtpUrl) {
-    return { transport: nodemailer.createTransport(smtpUrl), host: "smtpUrl", port, user };
-  }
-  if (host && user && pass) {
-    return {
-      transport: nodemailer.createTransport({
-        host,
-        port,
-        secure: port === 465,
-        auth: { user, pass },
-      }),
-      host,
-      port,
-      user,
-    };
-  }
-  return { transport: null, host, port, user };
+  return { smtpUrl, host, port, user, pass };
 }
 
 export async function sendEmail(user, { type, title, body }) {
@@ -86,30 +104,63 @@ export async function sendEmail(user, { type, title, body }) {
 
   let status = "demo";
   let error = null;
+  let usedHost = "";
+  let usedPort = 0;
+  let smtpUser = "";
 
-  const { transport, host, port, user: smtpUser } = await getSmtpTransport();
-  if (transport) {
-    try {
-      await transport.sendMail({
-        from,
-        to: user.email,
-        subject: title,
-        text: body,
-        html: `<p style="font-family:sans-serif;font-size:15px;line-height:1.5;color:#111">${body.replace(/\n/g, "<br/>")}</p>`,
+  const { smtpUrl, host, port, user: authUser, pass } = await getSmtpCredentials();
+  smtpUser = authUser;
+
+  const attempts = [];
+  if (smtpUrl) {
+    attempts.push({
+      label: "smtpUrl",
+      transport: nodemailer.createTransport(smtpUrl),
+      host: "smtpUrl",
+      port,
+    });
+  } else if (host && authUser && pass) {
+    // Hostinger: try configured port, then 465 / 587 fallback
+    const ports = [...new Set([port, 465, 587].filter(Boolean))];
+    for (const p of ports) {
+      attempts.push({
+        label: `${host}:${p}`,
+        transport: buildSmtpTransport({ host, port: p, user: authUser, pass }),
+        host,
+        port: p,
       });
-      status = "sent";
-      console.log(`[email SENT→${user.email}] via ${host}:${port} as ${smtpUser}`);
-    } catch (err) {
-      status = "failed";
-      error = err.message;
-      console.error(
-        `[email FAILED→${user.email}] host=${host} port=${port} user=${smtpUser} →`,
-        err.message
-      );
     }
-  } else {
+  }
+
+  if (attempts.length === 0) {
     console.log(`[demo-email→${user.email}] ${title}: ${body}`);
     error = "SMTP not configured (SMTP_HOST / SMTP_USER / SMTP_PASS)";
+  } else {
+    const errors = [];
+    for (const attempt of attempts) {
+      try {
+        await attempt.transport.sendMail({
+          from,
+          to: user.email,
+          subject: title,
+          text: body,
+          html: `<p style="font-family:sans-serif;font-size:15px;line-height:1.5;color:#111">${body.replace(/\n/g, "<br/>")}</p>`,
+        });
+        status = "sent";
+        usedHost = attempt.host;
+        usedPort = attempt.port;
+        console.log(`[email SENT→${user.email}] via ${usedHost}:${usedPort} as ${smtpUser}`);
+        break;
+      } catch (err) {
+        errors.push(`${attempt.label}: ${err.message}`);
+        console.error(`[email TRY FAILED→${user.email}] ${attempt.label} →`, err.message);
+      }
+    }
+    if (status !== "sent") {
+      status = "failed";
+      error = errors.join(" | ");
+      console.error(`[email FAILED→${user.email}]`, error);
+    }
   }
 
   await logNotification(user.id, "email", type, title, body, status);
@@ -117,41 +168,62 @@ export async function sendEmail(user, { type, title, body }) {
 }
 
 /**
- * SMS via SignalWire (default/preferred) or Twilio
- * Set SMS_PROVIDER=signalwire | twilio
+ * SMS providers: bulksmsbd | smsnetbd | signalwire | twilio
+ * BD (+880) numbers auto-prefer BulkSMSBD / SMS.NET.BD when those keys exist
+ * (US SignalWire/Twilio numbers often never deliver to Bangladesh carriers).
  */
 export async function sendSms(phone, { type, body, userId }) {
-  const provider = (
-    (await getConfig("SMS_PROVIDER", process.env.SMS_PROVIDER || "")) ||
-    (process.env.SIGNALWIRE_PROJECT_ID ? "signalwire" : "twilio")
-  )
-    .toLowerCase()
-    .trim();
-
   const to = normalizePhone(phone);
   let status = "demo";
   let error = null;
   let from = "";
+  let provider = "none";
 
   if (!to) {
     error =
-      "Invalid phone number. Use country code, e.g. +8801XXXXXXXXX or +1XXXXXXXXXX";
+      "Invalid phone number. Use country code, e.g. +8801XXXXXXXXX (BD) or +1XXXXXXXXXX (US)";
     console.log(`[demo-sms→${phone}] ${body}`);
     if (userId) await logNotification(userId, "sms", type, "SMS", body, status);
     return { channel: "sms", status, to: null, from, error, provider };
   }
 
+  const configured = (
+    (await getConfig("SMS_PROVIDER", process.env.SMS_PROVIDER || "")) ||
+    ""
+  )
+    .toLowerCase()
+    .trim();
+
+  const chain = await resolveSmsProviderChain(to, configured);
+
   try {
-    if (provider === "signalwire") {
-      const result = await sendViaSignalWire(to, body);
+    const errors = [];
+    for (const p of chain) {
+      provider = p;
+      let result;
+      if (p === "bulksmsbd") result = await sendViaBulkSmsBd(to, body);
+      else if (p === "smsnetbd") result = await sendViaSmsNetBd(to, body);
+      else if (p === "signalwire") result = await sendViaSignalWire(to, body);
+      else if (p === "twilio") result = await sendViaTwilio(to, body);
+      else {
+        result = { status: "demo", from: "", error: `Unknown SMS provider: ${p}` };
+      }
+
       status = result.status;
-      from = result.from;
-      error = result.error;
-    } else {
-      const result = await sendViaTwilio(to, body);
-      status = result.status;
-      from = result.from;
-      error = result.error;
+      from = result.from || "";
+      error = result.error || null;
+
+      if (status === "sent") {
+        console.log(`[sms SENT→${to}] via ${p} from=${from || "-"}`);
+        break;
+      }
+      if (error) {
+        errors.push(`${p}: ${error}`);
+        console.error(`[sms TRY FAILED→${to}] ${p} →`, error);
+      }
+    }
+    if (status !== "sent" && errors.length) {
+      error = errors.join(" | ");
     }
   } catch (err) {
     status = "failed";
@@ -167,6 +239,142 @@ export async function sendSms(phone, { type, body, userId }) {
     await logNotification(userId, "sms", type, "SMS", body, status);
   }
   return { channel: "sms", status, to, from, error, provider };
+}
+
+async function resolveSmsProviderChain(to, configured) {
+  const isBd = to.startsWith("+880");
+  const hasBulk = !!(
+    (await getConfig("BULKSMSBD_API_KEY", process.env.BULKSMSBD_API_KEY || "")) ||
+    process.env.BULKSMSBD_API_KEY
+  );
+  const hasSmsNet = !!(
+    (await getConfig("SMSNETBD_API_KEY", process.env.SMSNETBD_API_KEY || "")) ||
+    process.env.SMSNETBD_API_KEY
+  );
+  const hasSw = !!(
+    process.env.SIGNALWIRE_PROJECT_ID ||
+    (await getConfig("SIGNALWIRE_PROJECT_ID", ""))
+  );
+  const hasTw = !!(
+    process.env.TWILIO_ACCOUNT_SID ||
+    (await getConfig("TWILIO_ACCOUNT_SID", ""))
+  );
+
+  const chain = [];
+  const push = (p) => {
+    if (p && !chain.includes(p)) chain.push(p);
+  };
+
+  if (configured) push(configured);
+
+  // Bangladesh: local gateways first — US numbers rarely deliver to BD SIMs
+  if (isBd) {
+    if (hasBulk) push("bulksmsbd");
+    if (hasSmsNet) push("smsnetbd");
+  }
+
+  if (hasSw) push("signalwire");
+  if (hasTw) push("twilio");
+  if (!isBd) {
+    if (hasBulk) push("bulksmsbd");
+    if (hasSmsNet) push("smsnetbd");
+  }
+
+  if (chain.length === 0) {
+    push(hasSw ? "signalwire" : "twilio");
+  }
+  return chain;
+}
+
+/** BulkSMSBD — https://bulksmsbd.net (recommended for Bangladesh) */
+async function sendViaBulkSmsBd(to, body) {
+  const apiKey = await getConfig("BULKSMSBD_API_KEY", process.env.BULKSMSBD_API_KEY || "");
+  const senderid = await getConfig("BULKSMSBD_SENDER_ID", process.env.BULKSMSBD_SENDER_ID || "");
+  const apiUrl =
+    (await getConfig("BULKSMSBD_API_URL", process.env.BULKSMSBD_API_URL || "")) ||
+    "https://bulksmsbd.net/api/smsapi";
+
+  if (!apiKey || !senderid) {
+    return {
+      status: "demo",
+      from: senderid,
+      error: "BulkSMSBD not configured (BULKSMSBD_API_KEY / BULKSMSBD_SENDER_ID)",
+    };
+  }
+
+  // BulkSMSBD expects 8801XXXXXXXXX without +
+  const number = to.replace(/\D/g, "");
+  const res = await fetch(apiUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      api_key: apiKey,
+      senderid,
+      number,
+      message: body,
+    }),
+  });
+  const text = await res.text();
+  let json = null;
+  try {
+    json = JSON.parse(text);
+  } catch {
+    /* plain text */
+  }
+
+  // API returns response_code 202 = success (varies by account); also accept "SMS Submitted"
+  const code = json?.response_code ?? json?.responseCode;
+  const ok =
+    res.ok &&
+    (code === 202 ||
+      code === "202" ||
+      code === 200 ||
+      /success|submitted|sent/i.test(text));
+
+  if (!ok) {
+    return {
+      status: "failed",
+      from: senderid,
+      error: `BulkSMSBD ${res.status}: ${text.slice(0, 200)}`,
+    };
+  }
+  return { status: "sent", from: senderid, error: null };
+}
+
+/** SMS.NET.BD — https://sms.net.bd */
+async function sendViaSmsNetBd(to, body) {
+  const apiKey = await getConfig("SMSNETBD_API_KEY", process.env.SMSNETBD_API_KEY || "");
+  if (!apiKey) {
+    return {
+      status: "demo",
+      from: "",
+      error: "SMS.NET.BD not configured (SMSNETBD_API_KEY)",
+    };
+  }
+
+  const number = to.replace(/\D/g, "");
+  const url = new URL("https://api.sms.net.bd/sendsms");
+  url.searchParams.set("api_key", apiKey);
+  url.searchParams.set("msg", body);
+  url.searchParams.set("to", number);
+
+  const res = await fetch(url.toString(), { method: "GET" });
+  const text = await res.text();
+  let json = null;
+  try {
+    json = JSON.parse(text);
+  } catch {
+    /* ignore */
+  }
+  const ok = res.ok && (json?.error === 0 || json?.error === "0" || /success/i.test(text));
+  if (!ok) {
+    return {
+      status: "failed",
+      from: "",
+      error: `SMS.NET.BD ${res.status}: ${text.slice(0, 200)}`,
+    };
+  }
+  return { status: "sent", from: "sms.net.bd", error: null };
 }
 
 async function sendViaSignalWire(to, body) {
@@ -239,17 +447,34 @@ async function sendViaTwilio(to, body) {
 
 /**
  * Normalize to E.164 for any country.
- * Accepts: +8801712345678, +15551234567, 01712345678 (BD local → +880), 5551234567 (US 10-digit → +1)
+ * Accepts: +8801712345678, 01712345678, 8801712345678, +15551234567
+ * Set SMS_DEFAULT_REGION=BD to treat ambiguous 10-digit 1[3-9]… as Bangladesh mobile.
  */
 export function normalizePhone(phone) {
   if (!phone) return null;
   const raw = String(phone).trim();
   const digits = raw.replace(/\D/g, "");
+  const defaultRegion = (
+    process.env.SMS_DEFAULT_REGION ||
+    process.env.DEFAULT_PHONE_REGION ||
+    "BD"
+  )
+    .toUpperCase()
+    .trim();
 
   if (!digits || digits.length < 8 || digits.length > 15) return null;
 
   // Already has + country code
   if (raw.startsWith("+") && digits.length >= 8 && digits.length <= 15) {
+    // Fix +8800… accidental double zero
+    if (digits.startsWith("8800") && digits.length === 14) {
+      return `+880${digits.slice(4)}`;
+    }
+    return `+${digits}`;
+  }
+
+  // 8801XXXXXXXXX (13+) without +
+  if (digits.startsWith("880") && digits.length >= 13) {
     return `+${digits}`;
   }
 
@@ -257,21 +482,26 @@ export function normalizePhone(phone) {
   if (digits.length === 11 && digits.startsWith("01")) {
     return `+880${digits.slice(1)}`;
   }
-  // Bangladesh without leading 0: 1XXXXXXXXX (10 digits) — ambiguous, treat as BD mobile if starts with 1 and length 10
-  // Prefer US for plain 10-digit (common Twilio default)
+
+  // BD mobile without leading 0: 1[3-9]XXXXXXXX (10 digits) — operator prefixes
+  if (
+    digits.length === 10 &&
+    /^1[3-9]\d{8}$/.test(digits) &&
+    defaultRegion === "BD"
+  ) {
+    return `+880${digits}`;
+  }
+
+  // Prefer US for plain 10-digit when region is not BD
   if (digits.length === 10) {
     return `+1${digits}`;
   }
-  // 11 digits starting with 1 → US
+  // 11 digits starting with 1 → US/NANP
   if (digits.length === 11 && digits.startsWith("1")) {
     return `+${digits}`;
   }
-  // 13 digits starting with 880 → BD
-  if (digits.startsWith("880") && digits.length >= 13) {
-    return `+${digits}`;
-  }
 
-  // Fallback: if looks like country code already (no +)
+  // Fallback: looks like country code already (no +)
   if (digits.length >= 11 && digits.length <= 15) {
     return `+${digits}`;
   }
