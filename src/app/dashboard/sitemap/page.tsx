@@ -279,7 +279,7 @@ export default function SitemapPage() {
                 href="/dashboard/social-post"
                 className="inline-flex items-center text-xs font-bold text-orange-400 hover:text-orange-300 px-2"
               >
-                Generate social posts →
+                Generate with Avonix Social →
               </Link>
             </div>
           </div>

@@ -24,6 +24,14 @@ import { getCreditConfig } from "../credits.js";
 import { getPriceCacheStats, getAllModelPrices } from "../modelPrices.js";
 import { analyzeSite } from "../services/siteAnalyzer.js";
 import { generateSocialSuite } from "../services/socialSuiteService.js";
+import {
+  generateAutoPosterSuite,
+  listStudioPosts,
+  publishStudioPost,
+  scheduleStudioPost,
+  rewriteStudioPost,
+  TONE_PRESETS,
+} from "../services/autoPosterService.js";
 import connectionsRoutes from "./connections.js";
 import workspacesRoutes from "./workspaces.js";
 import { assertSessionMatchesEmail } from "../middleware/userAuth.js";
@@ -339,6 +347,98 @@ router.post("/generate/social-suite", async (req, res) => {
     res.json(result);
   } catch (err) {
     console.error("[generate/social-suite]", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/** Avonix Social — scan ≤15 URLs, keywords, multi-platform posts + images */
+router.post("/auto-poster/generate", async (req, res) => {
+  try {
+    const { email, workspaceId, urls, location, tone } = req.body;
+    if (!email) return res.status(400).json({ error: "email is required" });
+    const gate = assertSessionMatchesEmail(req, email);
+    if (!gate.ok) return res.status(gate.status).json({ error: gate.error });
+    const result = await generateAutoPosterSuite({
+      email,
+      workspaceId,
+      urls,
+      location,
+      tone,
+    });
+    if (!result.ok) return res.status(result.status || 400).json(result);
+    res.json(result);
+  } catch (err) {
+    console.error("[auto-poster/generate]", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.get("/auto-poster/posts", async (req, res) => {
+  try {
+    const email = req.query.email;
+    if (!email) return res.status(400).json({ error: "email is required" });
+    const gate = assertSessionMatchesEmail(req, email);
+    if (!gate.ok) return res.status(gate.status).json({ error: gate.error });
+    const result = await listStudioPosts({
+      email,
+      workspaceId: req.query.workspaceId || undefined,
+      status: req.query.status || undefined,
+    });
+    if (!result.ok) return res.status(result.status || 400).json(result);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.get("/auto-poster/tones", (_req, res) => {
+  res.json({ ok: true, tones: TONE_PRESETS });
+});
+
+router.post("/auto-poster/publish", async (req, res) => {
+  try {
+    const { email, postId, alsoLive } = req.body;
+    if (!email || !postId) {
+      return res.status(400).json({ error: "email and postId are required" });
+    }
+    const gate = assertSessionMatchesEmail(req, email);
+    if (!gate.ok) return res.status(gate.status).json({ error: gate.error });
+    const result = await publishStudioPost({ email, postId, alsoLive: !!alsoLive });
+    if (!result.ok) return res.status(result.status || 400).json(result);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post("/auto-poster/schedule", async (req, res) => {
+  try {
+    const { email, postId, scheduledAt } = req.body;
+    if (!email || !postId || !scheduledAt) {
+      return res.status(400).json({ error: "email, postId, and scheduledAt are required" });
+    }
+    const gate = assertSessionMatchesEmail(req, email);
+    if (!gate.ok) return res.status(gate.status).json({ error: gate.error });
+    const result = await scheduleStudioPost({ email, postId, scheduledAt });
+    if (!result.ok) return res.status(result.status || 400).json(result);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post("/auto-poster/rewrite", async (req, res) => {
+  try {
+    const { email, postId, tone } = req.body;
+    if (!email || !postId) {
+      return res.status(400).json({ error: "email and postId are required" });
+    }
+    const gate = assertSessionMatchesEmail(req, email);
+    if (!gate.ok) return res.status(gate.status).json({ error: gate.error });
+    const result = await rewriteStudioPost({ email, postId, tone });
+    if (!result.ok) return res.status(result.status || 400).json(result);
+    res.json(result);
+  } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });

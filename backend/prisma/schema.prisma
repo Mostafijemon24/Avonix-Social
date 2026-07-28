@@ -259,3 +259,33 @@ model Lead {
   @@index([email, createdAt])
   @@index([status])
 }
+
+/** Content Studio auto-poster records (draft / scheduled / published+locked) */
+model StudioPost {
+  id             String    @id @default(cuid())
+  userId         String
+  workspaceId    String?
+  fingerprint    String // url|platform|primaryKeyword — prevents duplicate publish
+  sourceUrl      String
+  platform       String // Facebook | Instagram | LinkedIn | GMB
+  tone           String
+  location       String
+  primaryKeyword String
+  secondaryKeyword String
+  generalKeywords String // JSON array of 4
+  heading        String
+  content        String
+  contentHtml    String?
+  imageUrl       String?
+  status         String    @default("draft") // draft | scheduled | published
+  locked         Boolean   @default(false)
+  scheduledAt    DateTime?
+  publishedAt    DateTime?
+  rewriteOfId    String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([userId, fingerprint])
+  @@index([userId, workspaceId, status])
+  @@index([status, scheduledAt])
+}

@@ -58,6 +58,30 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   return data as T;
 }
 
+export type StudioPostRecord = {
+  id: string;
+  url: string;
+  platform: string;
+  tone: string;
+  location: string;
+  keywords: {
+    primary: string;
+    secondary: string;
+    general: string[];
+  };
+  heading: string;
+  content: string;
+  contentHtml: string;
+  image: string | null;
+  status: "draft" | "scheduled" | "published" | string;
+  locked: boolean;
+  scheduledDate: string | null;
+  publishedAt: string | null;
+  fingerprint: string;
+  createdAt: string;
+  workspaceId: string | null;
+};
+
 export const api = {
   register: (payload: {
     email: string;
@@ -424,6 +448,63 @@ export const api = {
     }>(`/workspaces/${encodeURIComponent(workspaceId)}/sitemap`, {
       method: "PUT",
       body: JSON.stringify({ email, sitemap }),
+    }),
+
+  /** Avonix Social — scan ≤15 URLs + multi-platform posts */
+  generateAutoPoster: (payload: {
+    email: string;
+    workspaceId?: string;
+    urls: string[] | string;
+    location: string;
+    tone?: string;
+  }) =>
+    request<{
+      ok: boolean;
+      workspaceId: string | null;
+      location: string;
+      tone: string;
+      analyzed: Array<{
+        url: string;
+        reachable: boolean;
+        title?: string;
+        keywords: {
+          primary: string;
+          secondary: string;
+          general: string[];
+        };
+      }>;
+      posts: StudioPostRecord[];
+      skippedLocked: Array<{ url: string; platform: string; reason: string }>;
+      tones: string[];
+      error?: string;
+    }>("/auto-poster/generate", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
+  listStudioPosts: (email: string, workspaceId?: string, status?: string) =>
+    request<{ ok: boolean; posts: StudioPostRecord[] }>(
+      `/auto-poster/posts?email=${encodeURIComponent(email)}${
+        workspaceId ? `&workspaceId=${encodeURIComponent(workspaceId)}` : ""
+      }${status ? `&status=${encodeURIComponent(status)}` : ""}`
+    ),
+
+  publishStudioPost: (payload: { email: string; postId: string; alsoLive?: boolean }) =>
+    request<{ ok: boolean; post: StudioPostRecord; live?: unknown; error?: string }>(
+      "/auto-poster/publish",
+      { method: "POST", body: JSON.stringify(payload) }
+    ),
+
+  scheduleStudioPost: (payload: { email: string; postId: string; scheduledAt: string }) =>
+    request<{ ok: boolean; post: StudioPostRecord; error?: string }>("/auto-poster/schedule", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
+    rewriteStudioPost: (payload: { email: string; postId: string; tone?: string }) =>
+    request<{ ok: boolean; post: StudioPostRecord; error?: string }>("/auto-poster/rewrite", {
+      method: "POST",
+      body: JSON.stringify(payload),
     }),
 };
 

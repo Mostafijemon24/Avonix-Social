@@ -1,9 +1,11 @@
 /**
  * Reminder jobs: missed social/GBP posts & missed GMB review replies
  * Runs on an interval from server bootstrap.
+ * Also processes due Avonix Social scheduled posts.
  */
 import prisma from "../db.js";
 import { notifyMissedPost, notifyMissedReview } from "./notifyService.js";
+import { processDueScheduledPosts } from "./autoPosterService.js";
 
 const POST_REMINDER_HOURS = Number(process.env.POST_REMINDER_HOURS || 24);
 const REVIEW_REMINDER_HOURS = Number(process.env.REVIEW_REMINDER_HOURS || 12);
@@ -24,6 +26,12 @@ async function alreadyNotifiedToday(userId, type) {
 }
 
 export async function runReminderSweep() {
+  try {
+    await processDueScheduledPosts();
+  } catch (err) {
+    console.error("[reminders] scheduled posts:", err.message);
+  }
+
   const users = await prisma.user.findMany({
     where: {
       accountStatus: { in: ["trial", "active"] },
