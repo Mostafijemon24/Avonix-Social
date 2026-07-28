@@ -7,7 +7,7 @@ import { SupportTicketForm } from "@/components/support/SupportTicketForm";
 const QUICK = [
   { href: "/dashboard/connections", label: "Connections" },
   { href: "/dashboard/billing", label: "Plan & Price" },
-  { href: "/dashboard/sitemap", label: "Sitemap & Keywords" },
+  { href: "/dashboard/social-post", label: "Content Studio" },
   { href: "/support", label: "Public FAQ" },
 ];
 

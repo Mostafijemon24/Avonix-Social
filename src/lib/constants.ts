@@ -12,10 +12,8 @@ export const PUBLIC_NAV = [
 
 export const DASHBOARD_NAV = [
   { href: "/dashboard", label: "Dashboard", id: "dashboard" },
-  { href: "/dashboard/analytics", label: "Analytics", id: "analytics" },
-  { href: "/dashboard/sitemap", label: "Keywords", id: "sitemap" },
+  { href: "/dashboard/social-post", label: "Content Studio", id: "socialpost" },
   { href: "/dashboard/connections", label: "Connections", id: "connections" },
-  { href: "/dashboard/social-post", label: "Avonix Social", id: "socialpost" },
   { href: "/dashboard/review-reply", label: "Review Reply", id: "reviewreply" },
   { href: "/dashboard/notification", label: "Notification", id: "notification" },
   { href: "/dashboard/report", label: "Report", id: "report" },

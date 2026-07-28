@@ -5,8 +5,6 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import {
   LayoutDashboard,
-  BarChart3,
-  Search,
   PenLine,
   MapPin,
   MessageSquare,
@@ -27,10 +25,8 @@ import { ClientWorkspaceSwitcher } from "@/components/dashboard/ClientWorkspaceS
 
 const ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
   dashboard: LayoutDashboard,
-  analytics: BarChart3,
-  sitemap: Search,
-  connections: Link2,
   socialpost: PenLine,
+  connections: Link2,
   gbppost: MapPin,
   reviewreply: MessageSquare,
   notification: Bell,
