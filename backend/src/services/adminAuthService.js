@@ -60,8 +60,6 @@ function verifyTotp(secret, token) {
   }
 }
 
-import { validatePasswordStrength } from "../password.js";
-
 export async function getAdminCount() {
   return prisma.admin.count({ where: { role: "super_admin" } });
 }
