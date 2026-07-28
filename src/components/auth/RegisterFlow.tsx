@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { useToast } from "@/components/ui/Toast";
@@ -58,7 +58,17 @@ export function RegisterFlow() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [emailCode, setEmailCode] = useState("");
   const [initialized, setInitialized] = useState(false);
+  const verifyingRef = useRef(false);
+  const emailCodeRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (step === "verify") {
+      setEmailCode("");
+      requestAnimationFrame(() => emailCodeRef.current?.focus());
+    }
+  }, [step]);
 
   useEffect(() => {
     const paramEmail = searchParams.get("email")?.trim().toLowerCase() || "";
@@ -193,26 +203,44 @@ export function RegisterFlow() {
     }
   };
 
+  const submitEmailVerify = useCallback(
+    async (code: string) => {
+      const digits = code.replace(/\D/g, "").slice(0, 6);
+      if (digits.length !== 6 || verifyingRef.current || !email) return;
+
+      verifyingRef.current = true;
+      setLoading(true);
+      try {
+        await api.verify({ email, emailCode: digits });
+        setStep("card");
+        showToast("Email verified. Add a card to activate Free Trial.", "success");
+      } catch (err: unknown) {
+        showToast(
+          err && typeof err === "object" && "error" in err
+            ? String((err as { error: string }).error)
+            : "Verification failed",
+          "error"
+        );
+        setEmailCode("");
+        requestAnimationFrame(() => emailCodeRef.current?.focus());
+      } finally {
+        verifyingRef.current = false;
+        setLoading(false);
+      }
+    },
+    [email, showToast]
+  );
+
   const handleVerify = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    setLoading(true);
-    const form = new FormData(e.currentTarget);
-    try {
-      await api.verify({
-        email,
-        emailCode: form.get("emailCode") as string,
-      });
-      setStep("card");
-      showToast("Email verified. Add a card to activate Free Trial.", "success");
-    } catch (err: unknown) {
-      showToast(
-        err && typeof err === "object" && "error" in err
-          ? String((err as { error: string }).error)
-          : "Verification failed",
-        "error"
-      );
-    } finally {
-      setLoading(false);
+    await submitEmailVerify(emailCode);
+  };
+
+  const handleEmailCodeChange = (raw: string) => {
+    const digits = raw.replace(/\D/g, "").slice(0, 6);
+    setEmailCode(digits);
+    if (digits.length === 6) {
+      void submitEmailVerify(digits);
     }
   };
 
@@ -351,16 +379,38 @@ export function RegisterFlow() {
         )}
 
         {step === "verify" && (
-          <form onSubmit={handleVerify} className="space-y-3 text-xs">
-            <p className="text-[10px] text-slate-500">Verifying: {email}</p>
-            <Field label="Email Code" name="emailCode" required maxLength={6} inputMode="numeric" />
+          <form onSubmit={handleVerify} className="space-y-3 text-xs" autoComplete="off">
+            <p className="text-[10px] text-slate-500">Account: {email}</p>
+            <div>
+              <label className="block font-bold text-slate-300 mb-1">Email Code</label>
+              <input
+                ref={emailCodeRef}
+                type="text"
+                name="register-email-code"
+                id="register-email-code"
+                required
+                inputMode="numeric"
+                pattern="[0-9]{6}"
+                maxLength={6}
+                value={emailCode}
+                onChange={(e) => handleEmailCodeChange(e.target.value)}
+                autoComplete="off"
+                autoCorrect="off"
+                autoCapitalize="off"
+                spellCheck={false}
+                data-lpignore="true"
+                data-1p-ignore
+                placeholder=""
+                className="w-full border border-navy-700 rounded-xl p-3 bg-navy-950 font-bold text-white text-center text-lg tracking-[0.4em] font-mono"
+              />
+            </div>
             <p className="text-[10px] text-slate-500">
-              Check your inbox and spam folder. Code expires in 10 minutes.
+              Check inbox and spam. Code expires in 10 minutes. Auto-verifies at 6 digits.
             </p>
             <button
               type="submit"
-              disabled={loading}
-              className="w-full bg-orange-500 hover:bg-orange-600 text-white font-bold py-3 rounded-xl"
+              disabled={loading || emailCode.length !== 6}
+              className="w-full bg-orange-500 hover:bg-orange-600 text-white font-bold py-3 rounded-xl disabled:opacity-50"
             >
               {loading ? "Verifying..." : "Verify Email"}
             </button>
