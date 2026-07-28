@@ -466,8 +466,8 @@ export function normalizePhone(phone) {
 
   // Mistyped "+01…" — leading 0 is never a valid country code / E.164
   if (digits.startsWith("0") && !digits.startsWith("00")) {
-    if (digits.startsWith("01") && digits.length >= 11) {
-      digits = digits.slice(0, 11); // 01XXXXXXXXX
+    // BD local must be exactly 01XXXXXXXXX (11 digits)
+    if (digits.length === 11 && digits.startsWith("01")) {
       return `+880${digits.slice(1)}`;
     }
     return null;
