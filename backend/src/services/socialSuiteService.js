@@ -62,6 +62,33 @@ Business context:
 Return ONLY the post text.`;
 }
 
+function buildImagePrompt({
+  primaryKeyword,
+  secondaryKeywords,
+  location,
+  intent,
+  postSample,
+}) {
+  const themes = (secondaryKeywords || []).slice(0, 5).join(", ");
+  const context = String(postSample || "").slice(0, 280);
+  return `Create a bold, vibrant social media hero image for this exact business post.
+
+Business focus: ${primaryKeyword}
+Location vibe: ${location || "local professional market"}
+Secondary themes: ${themes || "trust, quality, local expertise"}
+Content intent: ${intent || "Educational"}
+Post message (visualize this story): ${context || primaryKeyword}
+
+Art direction (strict):
+- Eye-catching saturated colors, rich contrast, modern editorial / campaign look
+- NOT generic stock photo — unique scene tied to the service and location
+- Show the industry visually (workspace, tools, people at work, or symbolic metaphor)
+- Dynamic composition, golden-hour or studio rim light, shallow depth of field
+- Square 1:1 framing for Facebook and Instagram
+- Photorealistic premium quality OR polished 3D illustration — never bland clip art
+- NO text, NO letters, NO logos, NO watermarks, NO UI mockups`;
+}
+
 function parseSecondary(raw) {
   if (!raw) return [];
   try {
@@ -202,11 +229,22 @@ export async function generateSocialSuite({
     usageParts.push(result.usageDetails);
   }
 
-  // One shared image for the suite (Instagram publish needs it)
+  // Shared image after posts — use Facebook/IG copy so creative matches the caption
   let image = null;
   try {
-    const imgPrompt = `Professional marketing photo for a local business social post. Topic: ${primaryKeyword}. Location vibe: ${location || "general"}. Clean, realistic, no text, no logos, no watermarks.`;
-    image = await generateImage({ prompt: imgPrompt });
+    const postSample =
+      posts.facebook?.content ||
+      posts.instagram?.content ||
+      Object.values(posts)[0]?.content ||
+      "";
+    const imgPrompt = buildImagePrompt({
+      primaryKeyword,
+      secondaryKeywords,
+      location,
+      intent,
+      postSample,
+    });
+    image = await generateImage({ prompt: imgPrompt, aspectRatio: "1:1" });
   } catch (err) {
     console.error("[socialSuite image]", err.message);
     image = { ok: false, error: err.message };

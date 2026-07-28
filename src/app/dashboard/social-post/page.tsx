@@ -244,6 +244,9 @@ export default function SocialPostPage() {
             {state.sitemap.location ? ` · ${state.sitemap.location}` : ""}
           </p>
         )}
+        <p className="text-[10px] text-slate-500 mt-1 text-left">
+          Facebook and Instagram publish with the generated image when available.
+        </p>
         {tokenInfo && <p className="text-[10px] text-slate-500 mt-1 text-left">{tokenInfo}</p>}
       </div>
 

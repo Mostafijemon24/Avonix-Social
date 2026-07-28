@@ -48,7 +48,13 @@ export async function persistImageUrl(imageUrl) {
 /**
  * Call OpenRouter API for text generation
  */
-export async function callOpenRouter({ model, messages, maxTokens = 1024, modalities }) {
+export async function callOpenRouter({
+  model,
+  messages,
+  maxTokens = 1024,
+  modalities,
+  imageConfig,
+}) {
   const apiKey = process.env.OPENROUTER_API_KEY;
 
   if (!apiKey) {
@@ -57,6 +63,7 @@ export async function callOpenRouter({ model, messages, maxTokens = 1024, modali
 
   const body = { model, messages, max_tokens: maxTokens };
   if (modalities) body.modalities = modalities;
+  if (imageConfig) body.image_config = imageConfig;
 
   const response = await fetch(OPENROUTER_URL, {
     method: "POST",
@@ -111,7 +118,7 @@ export function enforceWordLimit(text, maxWords) {
  * Generate a related image via OpenRouter image-capable model.
  * Returns { ok, url } where url is a public HTTPS or persisted upload URL.
  */
-export async function generateImage({ prompt }) {
+export async function generateImage({ prompt, aspectRatio = "1:1" }) {
   const apiKey = process.env.OPENROUTER_API_KEY;
 
   if (!apiKey) {
@@ -142,6 +149,7 @@ export async function generateImage({ prompt }) {
         model,
         maxTokens: 1024,
         modalities: ["image", "text"],
+        imageConfig: { aspect_ratio: aspectRatio },
         messages: [{ role: "user", content: prompt }],
       });
 

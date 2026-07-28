@@ -66,11 +66,38 @@ async function refreshGoogleToken(account) {
   return data.access_token;
 }
 
-async function publishFacebook(account, message) {
+async function publishFacebook(account, message, imageUrl) {
   const pageId = parseMeta(account).pageId || account.accountId;
   if (!pageId || !account.accessToken) {
     throw new Error("Facebook Page token missing — reconnect in Connections");
   }
+
+  // Photo post (caption + image) — preferred when we have creative
+  if (imageUrl) {
+    const photoRes = await fetch(`https://graph.facebook.com/v21.0/${pageId}/photos`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        url: imageUrl,
+        message,
+        access_token: account.accessToken,
+      }),
+    });
+    const photoData = await photoRes.json();
+    if (photoRes.ok && photoData.id && !photoData.error) {
+      return {
+        provider: "facebook",
+        externalId: photoData.id,
+        url: photoData.post_id
+          ? `https://www.facebook.com/${photoData.post_id}`
+          : account.accountUrl,
+        withImage: true,
+      };
+    }
+    // Fall through to text-only if photo upload fails (e.g. URL not reachable)
+    console.warn("[publishFacebook photo]", photoData.error?.message || "photo upload failed");
+  }
+
   const res = await fetch(`https://graph.facebook.com/v21.0/${pageId}/feed`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -84,6 +111,7 @@ async function publishFacebook(account, message) {
     provider: "facebook",
     externalId: data.id,
     url: data.id ? `https://www.facebook.com/${data.id}` : account.accountUrl,
+    withImage: false,
   };
 }
 
@@ -382,7 +410,7 @@ export async function publishContent(opts) {
           : "social_post";
 
       if (account.provider === "facebook") {
-        result = await publishFacebook(account, message);
+        result = await publishFacebook(account, message, imageUrl);
       } else if (account.provider === "instagram") {
         result = await publishInstagram(account, message, imageUrl);
       } else if (account.provider === "linkedin") {
