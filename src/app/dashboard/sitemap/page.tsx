@@ -6,6 +6,7 @@ import { MapPin, Globe2, Sparkles } from "lucide-react";
 import { useToast } from "@/components/ui/Toast";
 import { useWorkspace } from "@/context/WorkspaceContext";
 import { api } from "@/lib/api-client";
+import { canAffordUsage } from "@/lib/credits";
 import { CreditCostBadge, InsufficientCreditsBanner } from "@/components/ui/CreditCostBadge";
 
 type Step = "domain" | "keywords";
@@ -30,7 +31,7 @@ export default function SitemapPage() {
   } | null>(null);
 
   const cost = 1;
-  const affordable = state.credits >= cost || !!state.unlimitedCredits;
+  const affordable = canAffordUsage(state, cost);
 
   const analyzeDomain = async () => {
     if (!domain.trim()) {
@@ -68,7 +69,7 @@ export default function SitemapPage() {
           urlCount: result.urlCount,
         },
       });
-      applyApiCredits(spend.creditsLeft);
+      applyApiCredits(spend.creditsLeft, spend.walletBalanceUsd);
 
       setPrimaryKeyword(result.primaryKeyword);
       setSecondaryText(result.secondaryKeywords.join(", "));

@@ -70,12 +70,13 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
 
   const plan = PLAN_CONFIG[state.planId];
   const unlimited = !!state.unlimitedCredits;
+  const hasWallet = (state.walletBalanceUsd ?? 0) > 0;
   const creditPct =
     unlimited || state.creditLimit <= 0
       ? 100
       : Math.round((state.credits / state.creditLimit) * 100);
   const isLowCredits =
-    !unlimited && state.credits <= Math.ceil(state.creditLimit * 0.1);
+    !unlimited && state.credits <= Math.ceil(state.creditLimit * 0.1) && !hasWallet;
 
   const isActive = (href: string) => {
     if (href === "/dashboard") return pathname === "/dashboard";
@@ -131,6 +132,14 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
             )}
             <span className="text-slate-600 mx-1.5">·</span>
             <span className="text-slate-500">{plan.name}</span>
+            {hasWallet && (
+              <>
+                <span className="text-slate-600 mx-1.5">·</span>
+                <span className="text-emerald-400 font-black">
+                  ${state.walletBalanceUsd!.toFixed(2)} wallet
+                </span>
+              </>
+            )}
           </div>
           <Link
             href="/dashboard/billing"

@@ -7,6 +7,7 @@ import { Send } from "lucide-react";
 import { useToast } from "@/components/ui/Toast";
 import { useWorkspace } from "@/context/WorkspaceContext";
 import { api, isApiError, type ConnectedAccount } from "@/lib/api-client";
+import { canAffordUsage } from "@/lib/credits";
 import { InsufficientCreditsBanner } from "@/components/ui/CreditCostBadge";
 
 const INTENTS = [
@@ -47,7 +48,7 @@ export default function SocialPostPage() {
   const [selected, setSelected] = useState<Record<string, boolean>>({});
   const [tokenInfo, setTokenInfo] = useState("");
 
-  const affordable = state.credits > 0 || !!state.unlimitedCredits;
+  const affordable = canAffordUsage(state);
   const hasKeywords = !!state.sitemap?.primaryKeyword;
   const postList = Object.values(posts);
 
@@ -97,7 +98,7 @@ export default function SocialPostPage() {
       setSkipped(result.skipped || []);
       setImageUrl(result.imageUrl || null);
       setImageError(result.imageError || null);
-      applyApiCredits(result.creditsLeft);
+      applyApiCredits(result.creditsLeft, result.walletBalanceUsd);
       setTokenInfo(
         `${result.creditsDeducted} credits used · ${Object.keys(result.posts || {}).length} platform(s)`
       );

@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useToast } from "@/components/ui/Toast";
 import { useWorkspace } from "@/context/WorkspaceContext";
-import { getCreditCost, type CreditAction } from "@/lib/credits";
+import { getCreditCost, canAffordUsage, type CreditAction } from "@/lib/credits";
 
 export function useCreditAction(action: CreditAction) {
   const { state } = useWorkspace();
@@ -11,12 +11,12 @@ export function useCreditAction(action: CreditAction) {
   const router = useRouter();
   const cost = getCreditCost(action);
 
-  const canAfford = state.credits >= cost;
+  const canAfford = canAffordUsage(state, cost);
 
   const requireCredits = (): boolean => {
     if (!canAfford) {
       showToast(
-        `Insufficient credits! Need ~${cost}, you have ${state.credits}. Upgrade your plan.`,
+        `Insufficient balance! Need ~${cost} credits or wallet top-up. You have ${state.credits} credits and $${(state.walletBalanceUsd ?? 0).toFixed(2)} wallet.`,
         "error"
       );
       router.push("/dashboard/billing");

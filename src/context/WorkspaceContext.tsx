@@ -79,7 +79,7 @@ type WorkspaceContextValue = {
   refreshState: () => Promise<void>;
   subscribeToPlan: (planId: PlanId, gateway: string) => Promise<void>;
   setSitemapData: (data: SitemapData) => Promise<void>;
-  applyApiCredits: (creditsLeft: number) => void;
+  applyApiCredits: (creditsLeft: number, walletBalanceUsd?: number) => void;
   switchWorkspace: (workspaceId: string) => Promise<void>;
   createClientWorkspace: (payload: {
     name: string;
@@ -214,8 +214,12 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     [state.email, state.activeWorkspaceId]
   );
 
-  const applyApiCredits = useCallback((creditsLeft: number) => {
-    setState((prev) => ({ ...prev, credits: creditsLeft }));
+  const applyApiCredits = useCallback((creditsLeft: number, walletBalanceUsd?: number) => {
+    setState((prev) => ({
+      ...prev,
+      credits: creditsLeft,
+      ...(walletBalanceUsd !== undefined ? { walletBalanceUsd } : {}),
+    }));
   }, []);
 
   const switchWorkspace = useCallback(

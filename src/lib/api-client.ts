@@ -249,6 +249,7 @@ export const api = {
       imageError: string | null;
       creditsDeducted: number;
       creditsLeft: number;
+      walletBalanceUsd?: number;
       error?: string;
     }>("/generate/social-suite", {
       method: "POST",
@@ -256,7 +257,13 @@ export const api = {
     }),
 
   spendFixed: (payload: { email: string; action: string; metadata?: Record<string, unknown> }) =>
-    request<{ ok: boolean; creditsDeducted: number; creditsLeft: number }>("/credits/spend", {
+    request<{
+      ok: boolean;
+      creditsDeducted: number;
+      creditsLeft: number;
+      walletBalanceUsd?: number;
+      paidVia?: string;
+    }>("/credits/spend", {
       method: "POST",
       body: JSON.stringify(payload),
     }),

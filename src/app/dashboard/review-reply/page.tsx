@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useToast } from "@/components/ui/Toast";
 import { useWorkspace } from "@/context/WorkspaceContext";
 import { api, isApiError } from "@/lib/api-client";
+import { canAffordUsage } from "@/lib/credits";
 import { CreditCostBadge, InsufficientCreditsBanner } from "@/components/ui/CreditCostBadge";
 import { PublishBar } from "@/components/dashboard/PublishBar";
 
@@ -15,7 +16,7 @@ export default function ReviewReplyPage() {
   const [mode, setMode] = useState<"confirm" | "auto">("confirm");
   const [draft, setDraft] = useState("");
   const [loading, setLoading] = useState(false);
-  const affordable = state.credits > 0;
+  const affordable = canAffordUsage(state);
 
   const setGbpMode = (next: "confirm" | "auto") => {
     setMode(next);
@@ -47,7 +48,7 @@ Brand: Avonix Social SEO agency`;
       });
 
       setDraft(result.content);
-      applyApiCredits(result.creditsLeft);
+      applyApiCredits(result.creditsLeft, result.walletBalanceUsd);
       await refreshState();
       showToast(`${result.creditsDeducted} credits used. Balance: ${result.creditsLeft}`, "success");
     } catch (err) {

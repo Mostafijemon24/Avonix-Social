@@ -54,3 +54,15 @@ export function getCreditCost(action: CreditAction): number {
 export function getPlanCredits(planId: PlanId) {
   return PLAN_CONFIG[planId];
 }
+
+/** Plan credits first; wallet USD is fallback when trial/plan credits are used up */
+export function canAffordUsage(
+  state: { credits: number; walletBalanceUsd?: number; unlimitedCredits?: boolean },
+  minCredits = 1
+) {
+  return (
+    !!state.unlimitedCredits ||
+    state.credits >= minCredits ||
+    (state.walletBalanceUsd ?? 0) >= 0.01
+  );
+}

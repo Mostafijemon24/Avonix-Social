@@ -46,6 +46,17 @@ export function getFixedCost(action) {
   return FIXED_ACTION_COSTS[action] ?? null;
 }
 
+/** USD debited from wallet when plan credits are exhausted (1 credit ≈ $0.01) */
+export function fixedActionUsd(action) {
+  const credits = getFixedCost(action);
+  if (!credits) return null;
+  return Math.max(0.01, credits / CREDITS_PER_DOLLAR);
+}
+
+export function creditsToUsd(credits) {
+  return Math.max(0.01, credits / CREDITS_PER_DOLLAR);
+}
+
 export function getCreditConfig() {
   return {
     mode: "usd_cost",

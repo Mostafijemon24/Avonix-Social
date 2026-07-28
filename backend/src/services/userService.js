@@ -1,5 +1,5 @@
 import prisma from "../db.js";
-import { usdCostToCredits, getFixedCost } from "../credits.js";
+import { usdCostToCredits, getFixedCost, fixedActionUsd } from "../credits.js";
 import { recordPayment } from "./adminService.js";
 import { callOpenRouter, extractUsage } from "../openrouter.js";
 import { ACTION_MODELS } from "../credits.js";
@@ -161,27 +161,85 @@ export async function generateContent({ email, action, prompt, model, metadata =
 
   const { promptTokens, completionTokens, totalTokens, apiCostUsd } = usageData;
   const creditsToDeduct = unlimited ? 0 : usdCostToCredits(apiCostUsd);
+  const walletUsd = user.walletBalanceUsd || 0;
 
-  if (!unlimited && user.remainingCredits < creditsToDeduct) {
-    return {
-      ok: false,
-      status: 402,
-      error: `This request requires ${creditsToDeduct} credits ($${apiCostUsd.toFixed(6)} USD) but you only have ${user.remainingCredits}.`,
-      creditsRequired: creditsToDeduct,
-      creditsLeft: user.remainingCredits,
-      usageDetails: {
-        modelUsed: selectedModel,
-        promptTokens,
-        completionTokens,
-        actualCostUSD: apiCostUsd.toFixed(6),
-        creditsDeducted: creditsToDeduct,
-      },
-    };
-  }
+  let creditsDeducted = 0;
+  let creditsLeft = user.remainingCredits;
+  let walletBalanceUsd = walletUsd;
+  let paidVia = unlimited ? "unlimited" : "credits";
 
-  const newBalance = unlimited ? user.remainingCredits : user.remainingCredits - creditsToDeduct;
-
-  if (unlimited) {
+  if (!unlimited) {
+    if (user.remainingCredits >= creditsToDeduct) {
+      paidVia = "credits";
+      creditsDeducted = creditsToDeduct;
+      creditsLeft = user.remainingCredits - creditsToDeduct;
+      await prisma.$transaction([
+        prisma.user.update({
+          where: { id: user.id },
+          data: { remainingCredits: creditsLeft },
+        }),
+        prisma.usageLog.create({
+          data: {
+            userId: user.id,
+            action,
+            model: selectedModel,
+            promptTokens,
+            completionTokens,
+            totalTokens,
+            apiCostUsd,
+            creditsDeducted,
+            metadata: JSON.stringify({ ...metadata, modelName: usageData.modelName, paidVia }),
+          },
+        }),
+      ]);
+    } else if (walletUsd >= apiCostUsd) {
+      paidVia = "wallet";
+      const walletResult = await debitWalletForUsage(user.id, apiCostUsd, {
+        action,
+        model: selectedModel,
+        paidVia: "wallet",
+      });
+      if (!walletResult.ok) {
+        return {
+          ok: false,
+          status: 402,
+          error: walletResult.error || "Wallet debit failed",
+          creditsLeft: user.remainingCredits,
+          walletBalanceUsd: user.walletBalanceUsd,
+        };
+      }
+      walletBalanceUsd = walletResult.walletBalanceUsd;
+      await prisma.usageLog.create({
+        data: {
+          userId: user.id,
+          action,
+          model: selectedModel,
+          promptTokens,
+          completionTokens,
+          totalTokens,
+          apiCostUsd,
+          creditsDeducted: 0,
+          metadata: JSON.stringify({ ...metadata, modelName: usageData.modelName, paidVia: "wallet" }),
+        },
+      });
+    } else {
+      return {
+        ok: false,
+        status: 402,
+        error: `Insufficient balance. Need ${creditsToDeduct} credits or $${apiCostUsd.toFixed(4)} in wallet (you have ${user.remainingCredits} credits, $${walletUsd.toFixed(2)} wallet).`,
+        creditsRequired: creditsToDeduct,
+        creditsLeft: user.remainingCredits,
+        walletBalanceUsd: walletUsd,
+        usageDetails: {
+          modelUsed: selectedModel,
+          promptTokens,
+          completionTokens,
+          actualCostUSD: apiCostUsd.toFixed(6),
+          creditsDeducted: creditsToDeduct,
+        },
+      };
+    }
+  } else {
     await prisma.usageLog.create({
       data: {
         userId: user.id,
@@ -200,43 +258,20 @@ export async function generateContent({ email, action, prompt, model, metadata =
         }),
       },
     });
-  } else {
-    await prisma.$transaction([
-      prisma.user.update({
-        where: { id: user.id },
-        data: { remainingCredits: newBalance },
-      }),
-      prisma.usageLog.create({
-        data: {
-          userId: user.id,
-          action,
-          model: selectedModel,
-          promptTokens,
-          completionTokens,
-          totalTokens,
-          apiCostUsd,
-          creditsDeducted: creditsToDeduct,
-          metadata: JSON.stringify({ ...metadata, modelName: usageData.modelName }),
-        },
-      }),
-    ]);
   }
 
   const content = data.choices?.[0]?.message?.content || "";
 
-  const walletResult = await debitWalletForUsage(user.id, apiCostUsd, {
-    action,
-    model: selectedModel,
-  });
   await stampActivity(user.id, action);
 
   return {
     ok: true,
     content,
-    creditsDeducted: creditsToDeduct,
-    creditsLeft: unlimited ? 999999 : newBalance,
+    creditsDeducted,
+    creditsLeft: unlimited ? 999999 : creditsLeft,
     unlimitedCredits: unlimited,
-    walletBalanceUsd: walletResult.walletBalanceUsd,
+    walletBalanceUsd,
+    paidVia,
     usage: { promptTokens, completionTokens, totalTokens, apiCostUsd },
     usageDetails: {
       modelUsed: selectedModel,
@@ -244,7 +279,8 @@ export async function generateContent({ email, action, prompt, model, metadata =
       promptTokens,
       completionTokens,
       actualCostUSD: apiCostUsd.toFixed(6),
-      creditsDeducted: creditsToDeduct,
+      creditsDeducted,
+      paidVia,
       promptPricePerToken: pricing.promptPrice,
       completionPricePerToken: pricing.completionPrice,
       unlimited,
@@ -271,18 +307,24 @@ export async function spendFixedCredits({ email, action, metadata = {} }) {
     return { ok: false, status: 400, error: `Unknown fixed action: ${action}` };
   }
 
-  if (!unlimited && user.remainingCredits < cost) {
+  const walletUsd = user.walletBalanceUsd || 0;
+  const usdCost = fixedActionUsd(action) || 0.01;
+
+  if (!unlimited && user.remainingCredits < cost && walletUsd < usdCost) {
     return {
       ok: false,
       status: 403,
-      error: "Insufficient credits. Please upgrade your package.",
+      error: `Insufficient balance. Need ${cost} credits or $${usdCost.toFixed(2)} wallet.`,
       creditsRequired: cost,
       creditsLeft: user.remainingCredits,
+      walletBalanceUsd: walletUsd,
     };
   }
 
-  const deduct = unlimited ? 0 : cost;
-  const newBalance = unlimited ? user.remainingCredits : user.remainingCredits - cost;
+  let deduct = 0;
+  let creditsLeft = user.remainingCredits;
+  let walletBalanceUsd = walletUsd;
+  let paidVia = unlimited ? "unlimited" : "credits";
 
   if (unlimited) {
     await prisma.usageLog.create({
@@ -293,28 +335,59 @@ export async function spendFixedCredits({ email, action, metadata = {} }) {
         metadata: JSON.stringify({ ...metadata, unlimited: true, wouldHaveCost: cost }),
       },
     });
-  } else {
+  } else if (user.remainingCredits >= cost) {
+    deduct = cost;
+    creditsLeft = user.remainingCredits - cost;
+    paidVia = "credits";
     await prisma.$transaction([
       prisma.user.update({
         where: { id: user.id },
-        data: { remainingCredits: newBalance },
+        data: { remainingCredits: creditsLeft },
       }),
       prisma.usageLog.create({
         data: {
           userId: user.id,
           action,
           creditsDeducted: deduct,
-          metadata: JSON.stringify(metadata),
+          metadata: JSON.stringify({ ...metadata, paidVia }),
         },
       }),
     ]);
+  } else {
+    paidVia = "wallet";
+    const walletResult = await debitWalletForUsage(user.id, usdCost, {
+      action,
+      paidVia: "wallet",
+      fixedAction: true,
+    });
+    if (!walletResult.ok) {
+      return {
+        ok: false,
+        status: 402,
+        error: walletResult.error || "Wallet debit failed",
+        creditsLeft: user.remainingCredits,
+        walletBalanceUsd: user.walletBalanceUsd,
+      };
+    }
+    walletBalanceUsd = walletResult.walletBalanceUsd;
+    await prisma.usageLog.create({
+      data: {
+        userId: user.id,
+        action,
+        creditsDeducted: 0,
+        apiCostUsd: usdCost,
+        metadata: JSON.stringify({ ...metadata, paidVia: "wallet" }),
+      },
+    });
   }
 
   return {
     ok: true,
     creditsDeducted: deduct,
-    creditsLeft: unlimited ? 999999 : newBalance,
+    creditsLeft: unlimited ? 999999 : creditsLeft,
     unlimitedCredits: unlimited,
+    walletBalanceUsd,
+    paidVia,
   };
 }
 

@@ -174,6 +174,7 @@ export async function generateSocialSuite({
 
   const posts = {};
   let creditsLeft = user.remainingCredits;
+  let walletBalanceUsd = user.walletBalanceUsd || 0;
   let totalCredits = 0;
   const usageParts = [];
 
@@ -226,6 +227,9 @@ export async function generateSocialSuite({
 
     totalCredits += result.creditsDeducted || 0;
     creditsLeft = result.creditsLeft;
+    if (result.walletBalanceUsd !== undefined) {
+      walletBalanceUsd = result.walletBalanceUsd;
+    }
     usageParts.push(result.usageDetails);
   }
 
@@ -263,6 +267,7 @@ export async function generateSocialSuite({
     imageError: image?.ok ? null : image?.error || null,
     creditsDeducted: totalCredits,
     creditsLeft,
+    walletBalanceUsd,
     usageParts,
   };
 }
