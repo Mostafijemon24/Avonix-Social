@@ -453,7 +453,7 @@ async function sendViaTwilio(to, body) {
 export function normalizePhone(phone) {
   if (!phone) return null;
   const raw = String(phone).trim();
-  const digits = raw.replace(/\D/g, "");
+  let digits = raw.replace(/\D/g, "");
   const defaultRegion = (
     process.env.SMS_DEFAULT_REGION ||
     process.env.DEFAULT_PHONE_REGION ||
@@ -464,45 +464,54 @@ export function normalizePhone(phone) {
 
   if (!digits || digits.length < 8 || digits.length > 15) return null;
 
-  // Already has + country code
-  if (raw.startsWith("+") && digits.length >= 8 && digits.length <= 15) {
-    // Fix +8800… accidental double zero
-    if (digits.startsWith("8800") && digits.length === 14) {
-      return `+880${digits.slice(4)}`;
+  // Mistyped "+01…" — leading 0 is never a valid country code / E.164
+  if (digits.startsWith("0") && !digits.startsWith("00")) {
+    if (digits.startsWith("01") && digits.length >= 11) {
+      digits = digits.slice(0, 11); // 01XXXXXXXXX
+      return `+880${digits.slice(1)}`;
+    }
+    return null;
+  }
+
+  if (digits.startsWith("00") && digits.length >= 10) {
+    digits = digits.slice(2);
+  }
+
+  // +8800… (country + local leading 0)
+  if (digits.startsWith("8800") && digits.length >= 14) {
+    return `+880${digits.slice(4)}`;
+  }
+
+  if (digits.startsWith("880") && digits.length >= 13) {
+    const national = digits.slice(3);
+    if (national.startsWith("0")) {
+      return `+880${national.replace(/^0+/, "")}`;
+    }
+    if (/^1[3-9]\d{8}/.test(national)) {
+      return `+880${national.slice(0, 10)}`;
     }
     return `+${digits}`;
   }
 
-  // 8801XXXXXXXXX (13+) without +
-  if (digits.startsWith("880") && digits.length >= 13) {
-    return `+${digits}`;
-  }
-
-  // Bangladesh local: 01XXXXXXXXX (11 digits)
+  // Bangladesh local: 01XXXXXXXXX
   if (digits.length === 11 && digits.startsWith("01")) {
     return `+880${digits.slice(1)}`;
   }
 
-  // BD mobile without leading 0: 1[3-9]XXXXXXXX (10 digits) — operator prefixes
-  if (
-    digits.length === 10 &&
-    /^1[3-9]\d{8}$/.test(digits) &&
-    defaultRegion === "BD"
-  ) {
+  // BD mobile without leading 0: 1[3-9]XXXXXXXX
+  if (digits.length === 10 && /^1[3-9]\d{8}$/.test(digits) && defaultRegion === "BD") {
     return `+880${digits}`;
   }
 
-  // Prefer US for plain 10-digit when region is not BD
   if (digits.length === 10) {
     return `+1${digits}`;
   }
-  // 11 digits starting with 1 → US/NANP
   if (digits.length === 11 && digits.startsWith("1")) {
     return `+${digits}`;
   }
 
-  // Fallback: looks like country code already (no +)
-  if (digits.length >= 11 && digits.length <= 15) {
+  // Valid international (must not start with 0)
+  if (!digits.startsWith("0") && digits.length >= 11 && digits.length <= 15) {
     return `+${digits}`;
   }
 
