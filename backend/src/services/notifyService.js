@@ -35,6 +35,8 @@ export async function sendRegistrationEmailOtp(user, { emailCode }) {
     type: "verify",
     title: "Avonix Social — Email verification code",
     body: `Your email verification code is: ${emailCode}\n\nValid for 10 minutes. If you did not request this, ignore this email.`,
+    code: emailCode,
+    codeLabel: "Verification code",
   });
   return { email: emailResult };
 }
@@ -45,8 +47,22 @@ export async function sendPasswordResetEmail(user, { emailCode }) {
     type: "password_reset",
     title: "Avonix Social — Password reset code",
     body: `Your password reset code is: ${emailCode}\n\nValid for 10 minutes. If you did not request a reset, ignore this email and your password will stay the same.`,
+    code: emailCode,
+    codeLabel: "Password reset code",
   });
   return { email: emailResult };
+}
+
+/** Welcome email when Super Admin creates a user */
+export async function sendAdminWelcomeEmail(user, { appUrl = "" } = {}) {
+  const signInUrl = `${(appUrl || process.env.APP_URL || "https://social.avonixai.com").replace(/\/$/, "")}/register?step=signin`;
+  return sendEmail(user, {
+    type: "admin_welcome",
+    title: "Avonix Social — Your account is ready",
+    body: `An administrator created your Avonix Social account.\n\nEmail: ${user.email}\n\nSign in here: ${signInUrl}\n\nUse the password your administrator shared with you. If you did not expect this email, contact support.`,
+    ctaUrl: signInUrl,
+    ctaLabel: "Sign in to Avonix Social",
+  });
 }
 
 /** @deprecated use sendRegistrationEmailOtp */
@@ -83,20 +99,22 @@ async function getSmtpCredentials() {
   return { smtpUrl, host, port, user, pass };
 }
 
-export async function sendEmail(user, { type, title, body }) {
+export async function sendEmail(user, { type, title, body, code, codeLabel, ctaUrl, ctaLabel }) {
+  const { smtpUrl, host, port, user: authUser, pass } = await getSmtpCredentials();
+
+  // Hostinger and most SMTP providers require From to match the authenticated mailbox
+  const configuredFrom =
+    (await getConfig("SMTP_FROM", process.env.SMTP_FROM || "")) || "";
   const from =
-    (await getConfig("SMTP_FROM", process.env.SMTP_FROM || "")) ||
-    process.env.SMTP_USER ||
-    "noreply@avonixsocial.com";
+    configuredFrom ||
+    (authUser ? `Avonix Social <${authUser}>` : "") ||
+    "Avonix Social <noreply@avonixai.com>";
 
   let status = "demo";
   let error = null;
   let usedHost = "";
   let usedPort = 0;
-  let smtpUser = "";
-
-  const { smtpUrl, host, port, user: authUser, pass } = await getSmtpCredentials();
-  smtpUser = authUser;
+  let smtpUser = authUser || "";
 
   const attempts = [];
   if (smtpUrl) {
@@ -119,9 +137,11 @@ export async function sendEmail(user, { type, title, body }) {
     }
   }
 
+  const html = buildEmailHtml({ title, body, code, codeLabel, ctaUrl, ctaLabel });
+
   if (attempts.length === 0) {
     console.log(`[demo-email→${user.email}] ${title}: ${body}`);
-    error = "SMTP not configured (SMTP_HOST / SMTP_USER / SMTP_PASS)";
+    error = "SMTP not configured (SMTP_HOST / SMTP_USER / SMTP_PASS). Set them in Admin → Settings or backend/.env";
   } else {
     const errors = [];
     for (const attempt of attempts) {
@@ -131,7 +151,11 @@ export async function sendEmail(user, { type, title, body }) {
           to: user.email,
           subject: title,
           text: body,
-          html: `<p style="font-family:sans-serif;font-size:15px;line-height:1.5;color:#111">${body.replace(/\n/g, "<br/>")}</p>`,
+          html,
+          // Helps some providers accept mail when display name differs
+          envelope: authUser
+            ? { from: authUser, to: user.email }
+            : undefined,
         });
         status = "sent";
         usedHost = attempt.host;
@@ -152,6 +176,61 @@ export async function sendEmail(user, { type, title, body }) {
 
   await logNotification(user.id, "email", type, title, body, status);
   return { channel: "email", status, to: user.email, from, error };
+}
+
+function escapeHtml(value) {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function buildEmailHtml({ title, body, code, codeLabel, ctaUrl, ctaLabel }) {
+  const paragraphs = String(body || "")
+    .split(/\n{2,}/)
+    .map((p) => `<p style="margin:0 0 14px;font-size:15px;line-height:1.55;color:#334155">${escapeHtml(p).replace(/\n/g, "<br/>")}</p>`)
+    .join("");
+
+  const codeBlock = code
+    ? `<div style="margin:22px 0;padding:18px 16px;background:#0f172a;border-radius:12px;text-align:center">
+        <p style="margin:0 0 8px;font-size:12px;letter-spacing:0.08em;text-transform:uppercase;color:#94a3b8;font-weight:700">${escapeHtml(codeLabel || "Code")}</p>
+        <p style="margin:0;font-size:32px;letter-spacing:0.28em;font-weight:800;color:#ffffff;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace">${escapeHtml(code)}</p>
+        <p style="margin:10px 0 0;font-size:12px;color:#64748b">Valid for 10 minutes</p>
+      </div>`
+    : "";
+
+  const ctaBlock =
+    ctaUrl && ctaLabel
+      ? `<p style="margin:24px 0 8px;text-align:center">
+          <a href="${escapeHtml(ctaUrl)}" style="display:inline-block;background:#f97316;color:#ffffff;text-decoration:none;font-weight:700;font-size:14px;padding:12px 22px;border-radius:10px">${escapeHtml(ctaLabel)}</a>
+        </p>`
+      : "";
+
+  return `<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/></head>
+<body style="margin:0;padding:0;background:#f1f5f9">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f1f5f9;padding:28px 12px">
+    <tr><td align="center">
+      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:560px;background:#ffffff;border-radius:16px;overflow:hidden;border:1px solid #e2e8f0">
+        <tr><td style="background:#0f172a;padding:20px 24px">
+          <p style="margin:0;font-size:18px;font-weight:800;color:#ffffff;letter-spacing:-0.02em">Avonix Social</p>
+          <p style="margin:6px 0 0;font-size:12px;color:#94a3b8">${escapeHtml(title)}</p>
+        </td></tr>
+        <tr><td style="padding:28px 24px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif">
+          ${paragraphs}
+          ${codeBlock}
+          ${ctaBlock}
+        </td></tr>
+        <tr><td style="padding:14px 24px 20px;border-top:1px solid #e2e8f0">
+          <p style="margin:0;font-size:11px;line-height:1.5;color:#94a3b8">This message was sent by Avonix Social. If you did not expect it, you can ignore this email.</p>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
 }
 
 /**

@@ -1,5 +1,8 @@
 import prisma from "../db.js";
+import bcrypt from "bcryptjs";
 import { setConfig, getAllConfig, syncConfigToEnv, clearConfigCache } from "./configService.js";
+import { validatePasswordStrength, PASSWORD_HINT } from "../password.js";
+import { sendAdminWelcomeEmail } from "./notifyService.js";
 
 export {
   adminLoginStep1,
@@ -139,6 +142,10 @@ export async function getUserDetail(userId) {
       lastUpdated: user.updatedAt,
       plan: user.package?.name,
       unlimitedCredits: user.unlimitedCredits,
+      hasPassword: !!user.passwordHash,
+      emailVerified: !!user.emailVerified,
+      cardOnFile: !!user.cardOnFile,
+      accountStatus: user.accountStatus,
     },
   };
 }
@@ -178,9 +185,19 @@ export async function createUser({
   unlimitedCredits = false,
   notes,
   source = "admin",
+  password,
+  sendWelcomeEmail = true,
 }) {
   const normalized = (email || "").trim().toLowerCase();
   if (!normalized.includes("@")) return { ok: false, error: "Valid email required" };
+
+  if (!password) {
+    return { ok: false, error: "Password is required so the user can sign in" };
+  }
+  const strength = validatePasswordStrength(password);
+  if (!strength.ok) {
+    return { ok: false, error: `${strength.error}. ${PASSWORD_HINT}` };
+  }
 
   const existing = await prisma.user.findUnique({ where: { email: normalized } });
   if (existing) return { ok: false, error: "User already exists" };
@@ -188,22 +205,77 @@ export async function createUser({
   const plan = await prisma.package.findUnique({ where: { slug: planSlug } });
   if (!plan) return { ok: false, error: "Plan not found" };
 
+  const passwordHash = await bcrypt.hash(password, 12);
+  const accountStatus = plan.slug === "free" ? "trial" : "active";
+
   const user = await prisma.user.create({
     data: {
       email: normalized,
       name: name || normalized.split("@")[0],
       phone: phone || null,
       company: company || null,
+      passwordHash,
       packageId: plan.id,
       remainingCredits: credits != null ? Number(credits) : plan.monthlyCredits,
       unlimitedCredits: !!unlimitedCredits,
       notes: notes || null,
       source,
+      // Admin-provisioned users can sign in immediately (no OTP/card funnel)
+      emailVerified: true,
+      cardOnFile: true,
+      accountStatus,
     },
     include: { package: true },
   });
 
-  return { ok: true, user: formatUserSummary(user) };
+  let emailDelivery = null;
+  if (sendWelcomeEmail !== false) {
+    emailDelivery = await sendAdminWelcomeEmail(user, { appUrl: process.env.APP_URL || "" });
+  }
+
+  return {
+    ok: true,
+    user: formatUserSummary(user),
+    delivery: {
+      email: emailDelivery?.status || null,
+      emailError: emailDelivery?.error || null,
+    },
+  };
+}
+
+/** Set / reset password for an existing user (admin). Activates login if needed. */
+export async function setUserPassword(userId, password) {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    include: { package: true },
+  });
+  if (!user) return { ok: false, error: "User not found" };
+
+  const strength = validatePasswordStrength(password);
+  if (!strength.ok) {
+    return { ok: false, error: `${strength.error}. ${PASSWORD_HINT}` };
+  }
+
+  const passwordHash = await bcrypt.hash(password, 12);
+  const accountStatus =
+    user.accountStatus === "pending_verification" || user.accountStatus === "pending_card"
+      ? user.package?.slug === "free"
+        ? "trial"
+        : "active"
+      : user.accountStatus;
+
+  const updated = await prisma.user.update({
+    where: { id: userId },
+    data: {
+      passwordHash,
+      emailVerified: true,
+      cardOnFile: true,
+      accountStatus,
+    },
+    include: { package: true },
+  });
+
+  return { ok: true, user: formatUserSummary(updated) };
 }
 
 export async function updateUser(userId, data) {
@@ -450,6 +522,10 @@ function formatUserSummary(user) {
     creditLimit: user.unlimitedCredits ? 999999 : user.package?.monthlyCredits,
     unlimitedCredits: !!user.unlimitedCredits,
     priceUsd: user.package?.priceUsd,
+    hasPassword: !!user.passwordHash,
+    emailVerified: !!user.emailVerified,
+    cardOnFile: !!user.cardOnFile,
+    accountStatus: user.accountStatus || null,
     createdAt: user.createdAt,
     updatedAt: user.updatedAt,
   };

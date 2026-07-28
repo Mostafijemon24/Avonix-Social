@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { adminApi, type UserDetail, type AdminPlan } from "@/lib/admin-api";
+import { PasswordField } from "@/components/ui/PasswordField";
 
 export default function AdminUserDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -13,6 +14,9 @@ export default function AdminUserDetailPage() {
   const [reason, setReason] = useState("");
   const [planSlug, setPlanSlug] = useState("");
   const [msg, setMsg] = useState("");
+  const [err, setErr] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
 
   const load = () =>
     Promise.all([adminApi.user(id), adminApi.plans()]).then(([u, p]) => {
@@ -34,23 +38,53 @@ export default function AdminUserDetailPage() {
   const adjustCredits = async () => {
     try {
       await adminApi.adjustCredits(id, Number(credits), reason || "Admin adjustment");
+      setErr("");
       setMsg("Credits updated");
       load();
     } catch {
-      setMsg("Failed to update credits");
+      setMsg("");
+      setErr("Failed to update credits");
     }
   };
 
   const toggleUnlimited = async () => {
     await adminApi.setUnlimited(id, !user.unlimitedCredits);
+    setErr("");
     setMsg(user.unlimitedCredits ? "Unlimited revoked" : "Unlimited granted");
     load();
   };
 
   const changePlan = async () => {
     await adminApi.updateUser(id, { planSlug, resetCreditsOnPlanChange: true });
+    setErr("");
     setMsg("Plan updated");
     load();
+  };
+
+  const savePassword = async () => {
+    setMsg("");
+    setErr("");
+    if (!password) {
+      setErr("Password is required");
+      return;
+    }
+    if (password !== confirmPassword) {
+      setErr("Password and confirmation do not match");
+      return;
+    }
+    try {
+      await adminApi.setUserPassword(id, password);
+      setPassword("");
+      setConfirmPassword("");
+      setMsg("Password saved — user can sign in now");
+      load();
+    } catch (e: unknown) {
+      setErr(
+        e && typeof e === "object" && "error" in e
+          ? String((e as { error: string }).error)
+          : "Failed to set password"
+      );
+    }
   };
 
   const remove = async () => {
@@ -70,6 +104,9 @@ export default function AdminUserDetailPage() {
               <span className="text-emerald-400 font-bold">Unlimited credits</span>
             ) : (
               `${user.credits}/${user.creditLimit} credits`
+            )}
+            {(user.hasPassword === false || r?.hasPassword === false) && (
+              <span className="text-amber-400 font-bold"> · No password set</span>
             )}
           </p>
         </div>
@@ -96,6 +133,11 @@ export default function AdminUserDetailPage() {
           {msg}
         </div>
       )}
+      {err && (
+        <div className="bg-red-950/40 border border-red-500/40 text-red-300 text-xs p-3 rounded-xl">
+          {err}
+        </div>
+      )}
 
       {r && (
         <div className="glass-card p-6 rounded-2xl border border-navy-800">
@@ -108,6 +150,9 @@ export default function AdminUserDetailPage() {
               ["Source", r.source || "signup"],
               ["Plan", r.plan],
               ["Unlimited", r.unlimitedCredits ? "Yes" : "No"],
+              ["Password", r.hasPassword ? "Set" : "Missing"],
+              ["Email verified", r.emailVerified ? "Yes" : "No"],
+              ["Status", r.accountStatus || "—"],
               ["Registered", new Date(r.registeredAt).toLocaleString()],
               ["Updated", new Date(r.lastUpdated).toLocaleString()],
             ].map(([label, val]) => (
@@ -139,7 +184,42 @@ export default function AdminUserDetailPage() {
         ))}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <div className="glass-card p-6 rounded-2xl border border-navy-800">
+          <h2 className="text-sm font-bold text-white mb-4">Set / Reset Password</h2>
+          <div className="space-y-3 text-xs">
+            <PasswordField
+              label="New password"
+              name="admin-set-password"
+              autoComplete="new-password"
+              showGenerate
+              value={password}
+              onChange={setPassword}
+              onGenerate={(pwd) => {
+                setPassword(pwd);
+                setConfirmPassword(pwd);
+              }}
+            />
+            <PasswordField
+              label="Confirm password"
+              name="admin-set-confirm"
+              autoComplete="new-password"
+              value={confirmPassword}
+              onChange={setConfirmPassword}
+            />
+            <button
+              type="button"
+              onClick={savePassword}
+              className="bg-orange-500 hover:bg-orange-600 text-white font-bold rounded-xl px-4 py-2.5"
+            >
+              Save Password
+            </button>
+            <p className="text-[10px] text-slate-500">
+              Also activates email verification so the user can sign in immediately.
+            </p>
+          </div>
+        </div>
+
         <div className="glass-card p-6 rounded-2xl border border-navy-800">
           <h2 className="text-sm font-bold text-white mb-4">Adjust Credits</h2>
           <div className="space-y-3 text-xs">

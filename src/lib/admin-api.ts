@@ -88,10 +88,22 @@ export const adminApi = {
     credits?: number;
     unlimitedCredits?: boolean;
     notes?: string;
+    password: string;
+    sendWelcomeEmail?: boolean;
   }) =>
-    adminRequest<{ ok: boolean; user: AdminUser }>("/users", {
+    adminRequest<{
+      ok: boolean;
+      user: AdminUser;
+      delivery?: { email?: string | null; emailError?: string | null };
+    }>("/users", {
       method: "POST",
       body: JSON.stringify(data),
+    }),
+
+  setUserPassword: (id: string, password: string) =>
+    adminRequest<{ ok: boolean; user: AdminUser }>(`/users/${id}/password`, {
+      method: "PUT",
+      body: JSON.stringify({ password }),
     }),
 
   updateUser: (
@@ -312,6 +324,10 @@ export type AdminUser = {
   creditLimit: number;
   unlimitedCredits?: boolean;
   priceUsd: number;
+  hasPassword?: boolean;
+  emailVerified?: boolean;
+  cardOnFile?: boolean;
+  accountStatus?: string | null;
   createdAt: string;
   updatedAt?: string;
   usageCount?: number;
@@ -330,6 +346,10 @@ export type UserDetail = AdminUser & {
     lastUpdated: string;
     plan: string;
     unlimitedCredits: boolean;
+    hasPassword?: boolean;
+    emailVerified?: boolean;
+    cardOnFile?: boolean;
+    accountStatus?: string | null;
   };
   usageStats: {
     totalCredits: number;

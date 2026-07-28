@@ -3,6 +3,10 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { adminApi, type AdminUser, type AdminPlan } from "@/lib/admin-api";
+import { PasswordField } from "@/components/ui/PasswordField";
+
+const PASSWORD_HINT =
+  "Min 12 chars, uppercase, lowercase, number, and special character.";
 
 export default function AdminUsersPage() {
   const [users, setUsers] = useState<AdminUser[]>([]);
@@ -10,6 +14,7 @@ export default function AdminUsersPage() {
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
   const [msg, setMsg] = useState("");
+  const [err, setErr] = useState("");
   const [form, setForm] = useState({
     email: "",
     name: "",
@@ -19,6 +24,8 @@ export default function AdminUsersPage() {
     credits: "",
     unlimitedCredits: false,
     notes: "",
+    password: "",
+    confirmPassword: "",
   });
 
   const load = () =>
@@ -32,8 +39,22 @@ export default function AdminUsersPage() {
   }, []);
 
   const create = async () => {
+    setMsg("");
+    setErr("");
+    if (!form.email.trim()) {
+      setErr("Email is required");
+      return;
+    }
+    if (!form.password) {
+      setErr("Password is required so the user can sign in");
+      return;
+    }
+    if (form.password !== form.confirmPassword) {
+      setErr("Password and confirmation do not match");
+      return;
+    }
     try {
-      await adminApi.createUser({
+      const result = await adminApi.createUser({
         email: form.email,
         name: form.name || undefined,
         phone: form.phone || undefined,
@@ -42,8 +63,18 @@ export default function AdminUsersPage() {
         credits: form.credits ? Number(form.credits) : undefined,
         unlimitedCredits: form.unlimitedCredits,
         notes: form.notes || undefined,
+        password: form.password,
       });
-      setMsg("User created");
+      const emailStatus = result.delivery?.email;
+      if (emailStatus === "sent") {
+        setMsg("User created and welcome email sent. Share the password with them to sign in.");
+      } else if (emailStatus) {
+        setMsg(
+          `User created (can sign in now). Welcome email not sent: ${result.delivery?.emailError || emailStatus}`
+        );
+      } else {
+        setMsg("User created. Share the password with them to sign in.");
+      }
       setShowCreate(false);
       setForm({
         email: "",
@@ -54,10 +85,13 @@ export default function AdminUsersPage() {
         credits: "",
         unlimitedCredits: false,
         notes: "",
+        password: "",
+        confirmPassword: "",
       });
       await load();
     } catch (e: unknown) {
-      setMsg(
+      setMsg("");
+      setErr(
         e && typeof e === "object" && "error" in e
           ? String((e as { error: string }).error)
           : "Failed to create user"
@@ -69,10 +103,12 @@ export default function AdminUsersPage() {
     if (!confirm(`Delete user ${email}? This cannot be undone.`)) return;
     try {
       await adminApi.deleteUser(id);
+      setErr("");
       setMsg(`Deleted ${email}`);
       await load();
     } catch {
-      setMsg("Failed to delete user");
+      setMsg("");
+      setErr("Failed to delete user");
     }
   };
 
@@ -81,7 +117,8 @@ export default function AdminUsersPage() {
       await adminApi.setUnlimited(u.id, !u.unlimitedCredits, "Admin toggle");
       await load();
     } catch {
-      setMsg("Failed to update unlimited flag");
+      setMsg("");
+      setErr("Failed to update unlimited flag");
     }
   };
 
@@ -93,7 +130,7 @@ export default function AdminUsersPage() {
         <div>
           <h1 className="text-2xl font-black text-white">All Users ({users.length})</h1>
           <p className="text-xs text-slate-400 mt-1">
-            Create, delete, grant unlimited credits, view registration data.
+            Create users with a password so they can sign in immediately.
           </p>
         </div>
         <button
@@ -108,6 +145,11 @@ export default function AdminUsersPage() {
       {msg && (
         <div className="bg-emerald-950/40 border border-emerald-500/40 text-emerald-300 text-xs p-3 rounded-xl">
           {msg}
+        </div>
+      )}
+      {err && (
+        <div className="bg-red-950/40 border border-red-500/40 text-red-300 text-xs p-3 rounded-xl">
+          {err}
         </div>
       )}
 
@@ -154,7 +196,28 @@ export default function AdminUsersPage() {
               className="w-full border border-navy-700 bg-navy-950 rounded-xl p-2.5 text-white"
             />
           </div>
-          <label className="flex items-center gap-2 text-slate-300 font-bold mt-6">
+          <div className="md:col-span-3 grid grid-cols-1 md:grid-cols-2 gap-3">
+            <PasswordField
+              label="Password *"
+              name="create-user-password"
+              autoComplete="new-password"
+              showGenerate
+              value={form.password}
+              onChange={(v) => setForm((f) => ({ ...f, password: v }))}
+              onGenerate={(pwd) =>
+                setForm((f) => ({ ...f, password: pwd, confirmPassword: pwd }))
+              }
+            />
+            <PasswordField
+              label="Confirm password *"
+              name="create-user-confirm"
+              autoComplete="new-password"
+              value={form.confirmPassword}
+              onChange={(v) => setForm((f) => ({ ...f, confirmPassword: v }))}
+            />
+          </div>
+          <p className="md:col-span-3 text-[10px] text-slate-500">{PASSWORD_HINT}</p>
+          <label className="flex items-center gap-2 text-slate-300 font-bold">
             <input
               type="checkbox"
               checked={form.unlimitedCredits}
@@ -192,6 +255,9 @@ export default function AdminUsersPage() {
                     {u.email}
                   </Link>
                   <p className="text-slate-500">{u.name || "—"}</p>
+                  {u.hasPassword === false && (
+                    <p className="text-amber-400 text-[10px] font-bold mt-1">No password — cannot sign in</p>
+                  )}
                 </td>
                 <td className="p-4">
                   <span className="bg-navy-800 px-2 py-0.5 rounded-lg">{u.planName}</span>

@@ -10,12 +10,21 @@ import {
 } from "@/lib/admin-api";
 import { PasswordField } from "@/components/ui/PasswordField";
 
-const CONFIG_FIELDS: { key: string; label: string }[] = [
+const CONFIG_FIELDS: { key: string; label: string; hint?: string }[] = [
   { key: "OPENROUTER_API_KEY", label: "OpenRouter API Key" },
   { key: "STRIPE_SECRET_KEY", label: "Stripe Secret Key" },
   { key: "STRIPE_WEBHOOK_SECRET", label: "Stripe Webhook Secret" },
   { key: "PAYPAL_CLIENT_ID", label: "PayPal Client ID" },
   { key: "PAYPAL_CLIENT_SECRET", label: "PayPal Client Secret" },
+  { key: "SMTP_HOST", label: "SMTP Host", hint: "e.g. smtp.hostinger.com" },
+  { key: "SMTP_PORT", label: "SMTP Port", hint: "Usually 465" },
+  { key: "SMTP_USER", label: "SMTP User (mailbox email)" },
+  { key: "SMTP_PASS", label: "SMTP Password (mailbox password)" },
+  {
+    key: "SMTP_FROM",
+    label: "SMTP From",
+    hint: 'e.g. Avonix Social <noreply@avonixai.com> — must match mailbox domain',
+  },
 ];
 
 export default function AdminSettingsPage() {
@@ -157,18 +166,23 @@ export default function AdminSettingsPage() {
       </div>
 
       <div className="glass-card p-6 rounded-2xl border border-navy-800">
-        <h2 className="text-sm font-bold text-white mb-4">API Keys & Payment Config</h2>
+        <h2 className="text-sm font-bold text-white mb-1">API Keys, Payments & Email (SMTP)</h2>
+        <p className="text-[10px] text-slate-500 mb-4">
+          Verification, password-reset, and welcome emails need SMTP Host / User / Pass.
+          Prefer Hostinger mailbox credentials in VPS <code className="text-orange-400">backend/.env</code> or save here.
+        </p>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
-          {CONFIG_FIELDS.map(({ key, label }) => (
+          {CONFIG_FIELDS.map(({ key, label, hint }) => (
             <div key={key}>
               <label className="block font-bold text-slate-400 mb-1">{label}</label>
               <input
                 type="password"
-                placeholder={savedConfig[key] ? `${savedConfig[key]} (saved)` : "Enter key..."}
+                placeholder={savedConfig[key] ? `${savedConfig[key]} (saved)` : hint || "Enter value..."}
                 value={draftConfig[key] ?? ""}
                 onChange={(e) => setDraftConfig((c) => ({ ...c, [key]: e.target.value }))}
                 className="w-full border border-navy-700 bg-navy-950 rounded-xl p-3 text-white"
               />
+              {hint && <p className="text-[10px] text-slate-600 mt-1">{hint}</p>}
             </div>
           ))}
         </div>

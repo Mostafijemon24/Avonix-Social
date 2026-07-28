@@ -12,6 +12,7 @@ import {
   adjustUserCredits,
   createUser,
   updateUser,
+  setUserPassword,
   setUnlimitedCredits,
   deleteUser,
   getAllSubscriptions,
@@ -162,6 +163,16 @@ router.post("/users", requireSuperAdmin, async (req, res) => {
 router.put("/users/:id", requireSuperAdmin, async (req, res) => {
   try {
     const result = await updateUser(req.params.id, req.body);
+    if (!result.ok) return res.status(400).json(result);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.put("/users/:id/password", requireSuperAdmin, async (req, res) => {
+  try {
+    const result = await setUserPassword(req.params.id, req.body.password);
     if (!result.ok) return res.status(400).json(result);
     res.json(result);
   } catch (err) {
