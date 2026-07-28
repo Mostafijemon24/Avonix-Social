@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, Suspense } from "react";
+import { useCallback, useEffect, useRef, useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   adminApi,
@@ -19,8 +19,56 @@ function AdminLoginForm() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [emailHint, setEmailHint] = useState("");
+  const [totpCode, setTotpCode] = useState("");
+  const verifyingRef = useRef(false);
+  const totpInputRef = useRef<HTMLInputElement>(null);
 
   const idleReason = searchParams.get("reason") === "idle";
+
+  useEffect(() => {
+    if (step === "2fa") {
+      setTotpCode("");
+      setError("");
+      requestAnimationFrame(() => totpInputRef.current?.focus());
+    }
+  }, [step]);
+
+  const verifyTotp = useCallback(
+    async (code: string) => {
+      const digits = code.replace(/\D/g, "").slice(0, 6);
+      if (digits.length !== 6 || verifyingRef.current) return;
+
+      const preAuthToken = getPreAuthToken();
+      if (!preAuthToken) {
+        setError("2FA session expired. Sign in again.");
+        setStep("password");
+        return;
+      }
+
+      verifyingRef.current = true;
+      setLoading(true);
+      setError("");
+
+      try {
+        const result = await adminApi.verify2fa(preAuthToken, digits);
+        clearPreAuthToken();
+        saveAdminToken(result.token);
+        router.push("/admin");
+      } catch (err: unknown) {
+        const msg =
+          err && typeof err === "object" && "error" in err
+            ? String((err as { error: string }).error)
+            : "Invalid authenticator code";
+        setError(msg);
+        setTotpCode("");
+        requestAnimationFrame(() => totpInputRef.current?.focus());
+      } finally {
+        verifyingRef.current = false;
+        setLoading(false);
+      }
+    },
+    [router]
+  );
 
   const handlePassword = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -54,33 +102,14 @@ function AdminLoginForm() {
 
   const handle2fa = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    setLoading(true);
-    setError("");
+    await verifyTotp(totpCode);
+  };
 
-    const form = new FormData(e.currentTarget);
-    const code = form.get("code") as string;
-    const preAuthToken = getPreAuthToken();
-
-    if (!preAuthToken) {
-      setError("2FA session expired. Sign in again.");
-      setStep("password");
-      setLoading(false);
-      return;
-    }
-
-    try {
-      const result = await adminApi.verify2fa(preAuthToken, code);
-      clearPreAuthToken();
-      saveAdminToken(result.token);
-      router.push("/admin");
-    } catch (err: unknown) {
-      const msg =
-        err && typeof err === "object" && "error" in err
-          ? String((err as { error: string }).error)
-          : "Invalid authenticator code";
-      setError(msg);
-    } finally {
-      setLoading(false);
+  const handleTotpChange = (raw: string) => {
+    const digits = raw.replace(/\D/g, "").slice(0, 6);
+    setTotpCode(digits);
+    if (digits.length === 6) {
+      void verifyTotp(digits);
     }
   };
 
@@ -146,20 +175,29 @@ function AdminLoginForm() {
                 6-digit Authenticator Code
               </label>
               <input
+                ref={totpInputRef}
                 type="text"
-                name="code"
+                name="admin-totp-code"
+                id="admin-totp-code"
                 required
                 inputMode="numeric"
                 pattern="[0-9]{6}"
                 maxLength={6}
-                autoComplete="one-time-code"
-                placeholder="000000"
-                className="w-full border border-navy-700 rounded-xl p-3 bg-navy-950 text-white text-center text-lg tracking-[0.4em] font-mono"
+                value={totpCode}
+                onChange={(e) => handleTotpChange(e.target.value)}
+                autoComplete="off"
+                autoCorrect="off"
+                autoCapitalize="off"
+                spellCheck={false}
+                data-lpignore="true"
+                data-1p-ignore
+                placeholder=""
+                className="w-full border border-navy-700 rounded-xl p-3 bg-navy-950 text-white text-center text-lg tracking-[0.4em] font-mono placeholder:text-slate-600"
               />
             </div>
             <button
               type="submit"
-              disabled={loading}
+              disabled={loading || totpCode.length !== 6}
               className="w-full bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white font-bold py-3 rounded-xl"
             >
               {loading ? "Verifying..." : "Verify & Sign In"}
@@ -168,6 +206,7 @@ function AdminLoginForm() {
               type="button"
               onClick={() => {
                 clearPreAuthToken();
+                setTotpCode("");
                 setStep("password");
                 setError("");
               }}
