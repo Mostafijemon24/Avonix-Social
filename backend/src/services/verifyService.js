@@ -7,6 +7,7 @@ import prisma from "../db.js";
 import { sendRegistrationEmailOtp, sendPasswordResetEmail, normalizePhone } from "./notifyService.js";
 import { validatePasswordStrength, PASSWORD_HINT } from "../password.js";
 import { signUserSession } from "../middleware/userAuth.js";
+import { validateRegistrationEmail } from "../emailPolicy.js";
 
 const OTP_TTL_MS = 10 * 60 * 1000; // 10 minutes
 const IS_PRODUCTION = process.env.NODE_ENV === "production";
@@ -31,12 +32,12 @@ export async function startRegistration({
   password,
   confirmPassword,
 }) {
-  const normalizedEmail = (email || "").trim().toLowerCase();
-  const normalizedPhone = phone ? normalizePhone(phone) : null;
-
-  if (!normalizedEmail.includes("@")) {
-    return { ok: false, error: "Valid email required" };
+  const emailCheck = validateRegistrationEmail(email);
+  if (!emailCheck.ok) {
+    return emailCheck;
   }
+  const normalizedEmail = emailCheck.email;
+  const normalizedPhone = phone ? normalizePhone(phone) : null;
 
   if (password !== confirmPassword) {
     return { ok: false, error: "Password and confirmation do not match" };
