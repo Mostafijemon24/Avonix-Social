@@ -9,6 +9,9 @@ import {
 } from "../middleware/adminAuth.js";
 import { validatePasswordStrength } from "../password.js";
 
+/** Hard limit — cannot create more than 2 super admins */
+export const MAX_SUPER_ADMINS = 2;
+
 const ISSUER = "Avonix Social Admin";
 
 const loginAttempts = new Map();
