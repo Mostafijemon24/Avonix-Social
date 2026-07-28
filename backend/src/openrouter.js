@@ -77,8 +77,13 @@ export async function callOpenRouter({ model, messages, maxTokens = 1024, modali
   return response.json();
 }
 
-/** Strip URLs, emails, hashtags, and emoji characters from generated copy */
+/** Strip URLs, emails, hashtags, emoji, and non-Latin script from English post copy */
 export function stripLinksAndEmojis(text) {
+  return sanitizeEnglishPost(String(text || ""));
+}
+
+/** Keep Latin business copy; drop CJK/Arabic/Cyrillic glitches from model output */
+export function sanitizeEnglishPost(text) {
   return String(text || "")
     .replace(/https?:\/\/\S+/gi, "")
     .replace(/\bwww\.\S+/gi, "")
@@ -88,6 +93,8 @@ export function stripLinksAndEmojis(text) {
       /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE00}-\u{FE0F}\u{1F1E0}-\u{1F1FF}]/gu,
       ""
     )
+    // CJK, Hangul, Arabic, Cyrillic — models sometimes inject these mid-word
+    .replace(/[\u3000-\u303F\u3040-\u30FF\u4E00-\u9FFF\uAC00-\uD7AF\u0600-\u06FF\u0400-\u04FF]/gu, "")
     .replace(/[ \t]+\n/g, "\n")
     .replace(/\n{3,}/g, "\n\n")
     .replace(/ {2,}/g, " ")
@@ -102,15 +109,12 @@ export function enforceWordLimit(text, maxWords) {
 
 /**
  * Generate a related image via OpenRouter image-capable model.
- * Returns { ok, url } where url is a data: or https URL.
+ * Returns { ok, url } where url is a public HTTPS or persisted upload URL.
  */
 export async function generateImage({ prompt }) {
   const apiKey = process.env.OPENROUTER_API_KEY;
-  const model =
-    process.env.IMAGE_MODEL || "google/gemini-2.5-flash-image-preview";
 
   if (!apiKey) {
-    // Deterministic placeholder SVG so UI/publish paths still work in demo mode
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1080">
       <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
         <stop offset="0%" stop-color="#0f172a"/><stop offset="100%" stop-color="#ea580c"/>
@@ -124,41 +128,57 @@ export async function generateImage({ prompt }) {
     return { ok: true, url, mock: true };
   }
 
-  const data = await callOpenRouter({
-    model,
-    maxTokens: 1024,
-    modalities: ["image", "text"],
-    messages: [{ role: "user", content: prompt }],
-  });
+  const models = [
+    process.env.IMAGE_MODEL,
+    "google/gemini-2.5-flash-image",
+    "google/gemini-3.1-flash-image-preview",
+    "google/gemini-2.5-flash-image-preview",
+  ].filter(Boolean);
 
-  const message = data?.choices?.[0]?.message;
-  const images = message?.images || [];
-  if (images[0]?.image_url?.url) {
-    const url = await persistImageUrl(images[0].image_url.url);
-    return { ok: true, url, mock: false };
-  }
-  if (images[0]?.imageUrl) {
-    const url = await persistImageUrl(images[0].imageUrl);
-    return { ok: true, url, mock: false };
-  }
+  let lastErr = null;
+  for (const model of models) {
+    try {
+      const data = await callOpenRouter({
+        model,
+        maxTokens: 1024,
+        modalities: ["image", "text"],
+        messages: [{ role: "user", content: prompt }],
+      });
 
-  // Some models put data URLs in content parts
-  const content = message?.content;
-  if (Array.isArray(content)) {
-    for (const part of content) {
-      const u = part?.image_url?.url || part?.imageUrl || part?.url;
-      if (u) {
-        const url = await persistImageUrl(u);
-        return { ok: true, url, mock: false };
+      const message = data?.choices?.[0]?.message;
+      const images = message?.images || [];
+      if (images[0]?.image_url?.url) {
+        const url = await persistImageUrl(images[0].image_url.url);
+        return { ok: true, url, mock: false, model };
       }
-      if (part?.type === "image_url" && part?.image_url?.url) {
-        const url = await persistImageUrl(part.image_url.url);
-        return { ok: true, url, mock: false };
+      if (images[0]?.imageUrl) {
+        const url = await persistImageUrl(images[0].imageUrl);
+        return { ok: true, url, mock: false, model };
       }
+
+      const content = message?.content;
+      if (Array.isArray(content)) {
+        for (const part of content) {
+          const u = part?.image_url?.url || part?.imageUrl || part?.url;
+          if (u) {
+            const url = await persistImageUrl(u);
+            return { ok: true, url, mock: false, model };
+          }
+          if (part?.type === "image_url" && part?.image_url?.url) {
+            const url = await persistImageUrl(part.image_url.url);
+            return { ok: true, url, mock: false, model };
+          }
+        }
+      }
+
+      lastErr = new Error(`Image model ${model} returned no image URL`);
+    } catch (err) {
+      lastErr = err;
+      if (!String(err.message).includes("404")) break;
     }
   }
 
-  throw new Error("Image model returned no image URL. Check IMAGE_MODEL on the server.");
+  throw lastErr || new Error("Image generation failed. Set IMAGE_MODEL in backend/.env");
 }
 
 function mockOpenRouterResponse({ model, messages, modalities }) {

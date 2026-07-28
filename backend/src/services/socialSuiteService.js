@@ -44,6 +44,7 @@ function buildPrompt({ provider, primaryKeyword, secondaryKeywords, location, ad
   return `Write one ${rules.label} post.
 
 Rules (strict):
+- English only — Latin alphabet only (no Japanese, Chinese, or other scripts)
 - Zero emojis
 - Zero URLs / links / www / http
 - Zero hashtags
