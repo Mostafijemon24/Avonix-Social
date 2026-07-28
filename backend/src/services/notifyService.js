@@ -29,6 +29,15 @@ export async function notifyUser(userId, { type, title, body }) {
   return { ok: true, results };
 }
 
+/** BulkSMSBD OTP text — must match: "Your {Brand} OTP is XXXX" */
+function formatOtpSms(phoneCode) {
+  const brand =
+    process.env.BULKSMSBD_OTP_BRAND ||
+    process.env.OTP_SMS_BRAND ||
+    "Avonix Social";
+  return `Your ${brand} OTP is ${phoneCode}`;
+}
+
 /** Registration OTP: email + SMS (BD gateways preferred for +880; WhatsApp fallback) */
 export async function sendRegistrationOtps(user, { emailCode, phoneCode }) {
   const emailResult = await sendEmail(user, {
@@ -37,7 +46,7 @@ export async function sendRegistrationOtps(user, { emailCode, phoneCode }) {
     body: `Your email verification code is: ${emailCode}\n\nValid for 10 minutes. If you did not request this, ignore this email.`,
   });
 
-  const smsBody = `Avonix Social code: ${phoneCode}. Valid 10 min.`;
+  const smsBody = formatOtpSms(phoneCode);
   const smsResult = await sendSms(user.phone, {
     type: "verify",
     body: smsBody,
@@ -289,16 +298,27 @@ async function resolveSmsProviderChain(to, configured) {
 /** BulkSMSBD — https://bulksmsbd.net (recommended for Bangladesh) */
 async function sendViaBulkSmsBd(to, body) {
   const apiKey = await getConfig("BULKSMSBD_API_KEY", process.env.BULKSMSBD_API_KEY || "");
-  const senderid = await getConfig("BULKSMSBD_SENDER_ID", process.env.BULKSMSBD_SENDER_ID || "");
+  const senderid = (
+    await getConfig("BULKSMSBD_SENDER_ID", process.env.BULKSMSBD_SENDER_ID || "")
+  ).trim();
   const apiUrl =
     (await getConfig("BULKSMSBD_API_URL", process.env.BULKSMSBD_API_URL || "")) ||
     "https://bulksmsbd.net/api/smsapi";
 
-  if (!apiKey || !senderid) {
+  if (!apiKey) {
     return {
       status: "demo",
       from: senderid,
-      error: "BulkSMSBD not configured (BULKSMSBD_API_KEY / BULKSMSBD_SENDER_ID)",
+      error: "BulkSMSBD not configured (BULKSMSBD_API_KEY missing)",
+    };
+  }
+
+  if (!senderid) {
+    return {
+      status: "failed",
+      from: "",
+      error:
+        "BULKSMSBD_SENDER_ID is empty. Register & get Approved Sender ID at bulksmsbd.net → Sender ID Management, then set it in backend/.env (not the API key).",
     };
   }
 
