@@ -115,7 +115,9 @@ export function enforceWordLimit(text, maxWords) {
 }
 
 /**
- * Generate a related image via OpenRouter image-capable model.
+ * Generate a related image via OpenRouter.
+ * Prefers ChatGPT image models (openai/gpt-image-1) via the Images API,
+ * then falls back to multimodal chat models.
  * Returns { ok, url } where url is a public HTTPS or persisted upload URL.
  */
 export async function generateImage({ prompt, aspectRatio = "1:1" }) {
@@ -135,15 +137,49 @@ export async function generateImage({ prompt, aspectRatio = "1:1" }) {
     return { ok: true, url, mock: true };
   }
 
-  const models = [
-    process.env.IMAGE_MODEL,
-    "google/gemini-2.5-flash-image",
-    "google/gemini-3.1-flash-image-preview",
-    "google/gemini-2.5-flash-image-preview",
-  ].filter(Boolean);
+  // 1) ChatGPT / OpenAI dedicated Images API (preferred)
+  const preferred = process.env.IMAGE_MODEL || "openai/gpt-image-1";
+  const chatGptModels = [
+    ...new Set(
+      [
+        preferred.startsWith("openai/") ? preferred : null,
+        "openai/gpt-image-1",
+        "openai/gpt-5-image",
+        "openai/gpt-5-image-mini",
+      ].filter(Boolean)
+    ),
+  ];
 
   let lastErr = null;
-  for (const model of models) {
+  for (const model of chatGptModels) {
+    try {
+      const result = await generateViaImagesApi({
+        apiKey,
+        model,
+        prompt,
+        aspectRatio,
+      });
+      if (result?.ok) return result;
+      lastErr = new Error(result?.error || `${model} returned no image`);
+    } catch (err) {
+      lastErr = err;
+      console.error(`[generateImage Images API ${model}]`, err.message);
+    }
+  }
+
+  // 2) Multimodal chat completions fallback (Gemini etc.)
+  const chatModels = [
+    ...new Set(
+      [
+        preferred.startsWith("google/") ? preferred : null,
+        "google/gemini-2.5-flash-image",
+        "google/gemini-3.1-flash-image-preview",
+        "google/gemini-2.5-flash-image-preview",
+      ].filter(Boolean)
+    ),
+  ];
+
+  for (const model of chatModels) {
     try {
       const data = await callOpenRouter({
         model,
@@ -182,11 +218,74 @@ export async function generateImage({ prompt, aspectRatio = "1:1" }) {
       lastErr = new Error(`Image model ${model} returned no image URL`);
     } catch (err) {
       lastErr = err;
-      if (!String(err.message).includes("404")) break;
+      if (!String(err.message).includes("404")) continue;
     }
   }
 
-  throw lastErr || new Error("Image generation failed. Set IMAGE_MODEL in backend/.env");
+  throw lastErr || new Error("Image generation failed. Set IMAGE_MODEL=openai/gpt-image-1");
+}
+
+/** OpenRouter dedicated Images API — ChatGPT gpt-image-1 etc. */
+async function generateViaImagesApi({ apiKey, model, prompt, aspectRatio }) {
+  const ratio = normalizeAspectRatio(aspectRatio);
+  const body = {
+    model,
+    prompt,
+    aspect_ratio: ratio,
+    quality: process.env.IMAGE_QUALITY || "high",
+    output_format: "png",
+    n: 1,
+  };
+
+  const response = await fetch("https://openrouter.ai/api/v1/images", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+      "HTTP-Referer": process.env.APP_URL || "http://localhost:3000",
+      "X-Title": "Avonix Social",
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    const err = await response.text();
+    throw new Error(`OpenRouter Images API (${response.status}): ${err.slice(0, 400)}`);
+  }
+
+  const data = await response.json();
+  const item = data?.data?.[0];
+  if (!item) return { ok: false, error: "Empty image response" };
+
+  if (item.b64_json) {
+    const mime = item.media_type || "image/png";
+    const dataUrl = `data:${mime};base64,${item.b64_json}`;
+    const url = await persistImageUrl(dataUrl);
+    return {
+      ok: true,
+      url,
+      mock: false,
+      model,
+      usage: data.usage || null,
+      cost: data.usage?.cost ?? null,
+    };
+  }
+
+  const remote =
+    item.url || item.image_url?.url || item.imageUrl || null;
+  if (remote) {
+    const url = await persistImageUrl(remote);
+    return { ok: true, url, mock: false, model, usage: data.usage || null };
+  }
+
+  return { ok: false, error: "No b64_json or url in Images API response" };
+}
+
+function normalizeAspectRatio(ratio) {
+  const r = String(ratio || "1:1").trim();
+  if (r === "1.91:1" || r === "1.91") return "16:9";
+  if (["1:1", "16:9", "9:16", "4:3", "3:4"].includes(r)) return r;
+  return "1:1";
 }
 
 function mockOpenRouterResponse({ model, messages, modalities }) {

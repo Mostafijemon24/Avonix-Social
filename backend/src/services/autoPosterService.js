@@ -455,32 +455,27 @@ No illustrations, no cartoon, no CGI logo mockups — only realistic natural pho
 }
 
 /**
- * Photoreal natural images (no text/logos in frame).
- * Set STUDIO_USE_OPENROUTER_IMAGES=true to prefer OpenRouter image models.
+ * Photoreal natural images via ChatGPT (openai/gpt-image-1) through OpenRouter.
+ * Falls back to Pollinations only if OpenRouter is unavailable.
  */
 export async function generateStudioImage({ keyword, location, platform, heading }) {
   const cfg = PLATFORM_CONFIG[platform] || PLATFORM_CONFIG.Facebook;
   const { width, height } = cfg.image;
   const prompt = buildPhotorealImagePrompt(keyword, location, heading);
+  const aspectRatio = platform === "Instagram" ? "1:1" : "16:9";
 
-  const preferOr =
-    process.env.STUDIO_USE_OPENROUTER_IMAGES === "true" && process.env.OPENROUTER_API_KEY;
-
-  if (preferOr) {
+  if (process.env.OPENROUTER_API_KEY) {
     try {
-      const img = await generateImage({
-        prompt,
-        aspectRatio: platform === "Instagram" ? "1:1" : "16:9",
-      });
+      const img = await generateImage({ prompt, aspectRatio });
       if (img?.ok && img.url) return img.url;
     } catch (err) {
-      console.error("[autoPoster image OpenRouter]", err.message);
+      console.error("[autoPoster ChatGPT image]", err.message);
     }
   }
 
+  // Emergency fallback only
   const encoded = encodeURIComponent(prompt.slice(0, 1800));
   const seed = Math.floor(Math.random() * 1e9);
-  // model=flux tends to follow photoreal + no-text instructions better
   return `https://image.pollinations.ai/prompt/${encoded}?width=${width}&height=${height}&nologo=true&enhance=true&model=flux&seed=${seed}`;
 }
 
