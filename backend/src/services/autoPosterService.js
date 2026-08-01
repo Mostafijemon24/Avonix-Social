@@ -44,32 +44,39 @@ const STOP_WORDS = new Set(
   get started today free best top`.split(/\s+/)
 );
 
-/** Platform update rules (auto-applied) */
+/**
+ * Platform rules for SEO-led social posts.
+ * minWords is a hard floor (never shorter). maxWords allows a small overshoot only.
+ */
 export const PLATFORM_CONFIG = {
   Facebook: {
     key: "facebook",
-    maxWords: 150,
+    minWords: 120,
+    maxWords: 160,
     allowLinks: true,
     allowHashtags: true,
     image: { width: 1200, height: 630, aspect: "16:9" },
   },
   Instagram: {
     key: "instagram",
-    maxWords: 80,
+    minWords: 70,
+    maxWords: 100,
     allowLinks: false,
     allowHashtags: true,
     image: { width: 1080, height: 1080, aspect: "1:1" },
   },
   LinkedIn: {
     key: "linkedin",
-    maxWords: 180,
+    minWords: 150,
+    maxWords: 200,
     allowLinks: true,
     allowHashtags: true,
     image: { width: 1200, height: 627, aspect: "16:9" },
   },
   GMB: {
     key: "google_business",
-    maxWords: 100,
+    minWords: 90,
+    maxWords: 130,
     allowLinks: false,
     allowHashtags: false,
     image: { width: 1024, height: 576, aspect: "16:9" },
@@ -368,7 +375,21 @@ function hashtagify(...parts) {
     .join(" ");
 }
 
-function enforceWords(text, max) {
+function stripTags(text) {
+  return String(text || "")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+export function countWords(text) {
+  const plain = stripTags(text);
+  if (!plain) return 0;
+  return plain.split(/\s+/).filter(Boolean).length;
+}
+
+function enforceMaxWords(text, max) {
   const paragraphs = String(text || "")
     .trim()
     .split(/\n+/)
@@ -377,21 +398,47 @@ function enforceWords(text, max) {
   let count = 0;
   const out = [];
   for (const para of paragraphs) {
-    const words = para.split(/\s+/).filter(Boolean);
+    const words = stripTags(para).split(/\s+/).filter(Boolean);
+    const rawWords = para.split(/\s+/).filter(Boolean);
     if (count >= max) break;
     if (count + words.length <= max) {
-      out.push(words.join(" "));
+      out.push(rawWords.join(" "));
       count += words.length;
     } else {
-      out.push(words.slice(0, max - count).join(" "));
+      const keep = Math.max(0, max - count);
+      out.push(rawWords.slice(0, keep).join(" "));
       break;
     }
   }
   return out.join("\n\n");
 }
 
+/** Expand body until it meets minWords (SEO floor). Never leave content shorter than min. */
+function padToMinWords(text, min, ctx) {
+  let body = String(text || "").trim();
+  if (countWords(body) >= min) return body;
+
+  const { primary, secondary, offering, proof, promo, place, provider } = ctx;
+  const pads = [
+    `Businesses searching for ${primary} in ${place} need clear answers, reliable delivery, and proof that the work will last. That is why our process starts with listening, then moves into a practical plan built around ${secondary}.`,
+    `We emphasize ${offering} so every project stays on brief, on timeline, and aligned with local search intent. Clients also value ${proof}, which helps convert browsers into booked conversations.`,
+    `If you are comparing options for ${promo}, ask about scope, materials or methods, communication cadence, and how success is measured after launch. Strong ${provider} support reduces rework and protects your ranking signals over time.`,
+    `Consistent publishing around ${primary} and ${secondary} helps search engines and customers understand what you do, where you serve, and why your offer is relevant in ${place}. Reach out when you are ready for the next step.`,
+  ];
+
+  for (const para of pads) {
+    if (countWords(body) >= min) break;
+    body = `${body}\n\n${para}`.trim();
+  }
+
+  while (countWords(body) < min) {
+    body = `${body} ${primary} in ${place} pairs naturally with ${secondary} for customers who want dependable ${offering}.`.trim();
+  }
+  return body;
+}
+
 /**
- * Professional heading + body per platform rules (no location duplication, clean grammar).
+ * Professional heading + SEO body per platform (hard min word count).
  */
 export function generatePostContent(platform, keywords, location, url, tone) {
   const place = normalizeLocation(location) || "your area";
@@ -407,6 +454,7 @@ export function generatePostContent(platform, keywords, location, url, tone) {
   const offering = asOffering(g[1]);
   const proof = asOffering(g[2]);
   const promo = asOffering(g[3]);
+  const padCtx = { primary, secondary, offering, proof, promo, place, provider };
 
   let heading = "";
   let plain = "";
@@ -414,11 +462,40 @@ export function generatePostContent(platform, keywords, location, url, tone) {
 
   if (platform === "Facebook") {
     heading = `Discover ${primaryLocal}`;
-    plain = `${opener}\n\nLooking for ${secondary}? Our team delivers ${offering} with care and clarity. Clients trust us for ${proof}.\n\nExplore ${promo} and see why local businesses rely on ${asOffering(g[0])}.\n\nLearn more: ${primary}\n${url}\n\n${hashtagify(place, primary)}`;
-    html = `${opener}\n\nLooking for ${secondary}? Our team delivers ${offering} with care and clarity. Clients trust us for ${proof}.\n\nExplore ${promo} and see why local businesses rely on ${asOffering(g[0])}.\n\nLearn more: ${keywordLinkHtml(url, primary)}\n\n${hashtagify(place, primary)}`;
+    plain = `${opener}
+
+Looking for ${secondary}? Our team in ${place} delivers ${offering} with care, clarity, and a process built for local search visibility. Customers choose us when they need dependable ${proof} without guesswork.
+
+We help people comparing ${promo} understand scope, timeline, and expected outcomes up front. That transparency builds trust and supports stronger rankings for ${primary} queries across ${place}.
+
+Explore how ${provider} support can move your project forward, then take the next step with a clear call to action.
+
+Learn more: ${primary}
+${url}
+
+${hashtagify(place, primary)}`;
+    html = `${opener}
+
+Looking for ${secondary}? Our team in ${place} delivers ${offering} with care, clarity, and a process built for local search visibility. Customers choose us when they need dependable ${proof} without guesswork.
+
+We help people comparing ${promo} understand scope, timeline, and expected outcomes up front. That transparency builds trust and supports stronger rankings for ${primary} queries across ${place}.
+
+Explore how ${provider} support can move your project forward, then take the next step with a clear call to action.
+
+Learn more: ${keywordLinkHtml(url, primary)}
+
+${hashtagify(place, primary)}`;
   } else if (platform === "Instagram") {
     heading = `${primary} — crafted with care`;
-    plain = `${opener}\n\n${secondary} for businesses in ${place}.\n\nWe focus on ${offering} and ${proof}. Ready for ${promo}?\n\nLink in bio.\n\n${hashtagify(primary, secondary, place, "LocalBusiness", "BrandDesign")}`;
+    plain = `${opener}
+
+${secondary} for businesses and homeowners in ${place}.
+
+We focus on ${offering} and ${proof}, so every detail supports both real-world results and search-friendly messaging around ${primary}. Ready for ${promo}?
+
+Save this post, share it with someone who needs ${provider} help, and check the link in bio for the full story.
+
+${hashtagify(primary, secondary, place, "LocalBusiness", "SEO")}`;
     html = plain;
   } else if (platform === "LinkedIn") {
     heading = phraseHasLocation(primary, place)
@@ -426,21 +503,63 @@ export function generatePostContent(platform, keywords, location, url, tone) {
       : `${primary} for teams in ${place}`;
     const bridge =
       tone === "Storytelling"
-        ? "Strong brands are built through clear positioning and steady execution."
-        : "In competitive markets, clear positioning and reliable delivery separate leaders from the rest.";
-    plain = `${opener} ${bridge}\n\nWe support organizations with ${offering}, backed by ${proof}. Our specialists help clients move from idea to polished identity through ${provider}.\n\nDiscover ${promo}:\n${url}\n\n${hashtagify("BusinessGrowth", primary, "Leadership", place)}`;
-    html = `${opener} ${bridge}\n\nWe support organizations with ${offering}, backed by ${proof}. Our specialists help clients move from idea to polished identity through ${provider}.\n\nDiscover ${promo}: ${keywordLinkHtml(url, primary)}\n\n${hashtagify("BusinessGrowth", primary, "Leadership", place)}`;
+        ? "Strong brands are built through clear positioning, useful content, and steady execution in the markets they serve."
+        : "In competitive markets, clear positioning, useful content, and reliable delivery separate category leaders from everyone else.";
+    plain = `${opener} ${bridge}
+
+We support organizations with ${offering}, backed by ${proof}. Our specialists help clients move from idea to polished identity through ${provider}, while aligning messaging to high-intent searches for ${primary} and ${secondary} in ${place}.
+
+Leaders evaluating ${promo} should prioritize process transparency, measurable milestones, and content that reinforces topical authority. That combination improves both customer trust and organic discoverability.
+
+Discover ${promo}:
+${url}
+
+${hashtagify("BusinessGrowth", primary, "Leadership", place)}`;
+    html = `${opener} ${bridge}
+
+We support organizations with ${offering}, backed by ${proof}. Our specialists help clients move from idea to polished identity through ${provider}, while aligning messaging to high-intent searches for ${primary} and ${secondary} in ${place}.
+
+Leaders evaluating ${promo} should prioritize process transparency, measurable milestones, and content that reinforces topical authority. That combination improves both customer trust and organic discoverability.
+
+Discover ${promo}: ${keywordLinkHtml(url, primary)}
+
+${hashtagify("BusinessGrowth", primary, "Leadership", place)}`;
   } else {
-    // GMB
     heading = phraseHasLocation(primary, place)
       ? `${primary} — open and ready to help`
       : `${primary} in ${place} — open and ready to help`;
-    plain = `${opener} Looking for ${secondary}? We provide ${offering} for local customers. Ask us about ${promo} and how ${proof} can support your next project.\n\nVisit or message us to learn more about ${primary}.`;
+    plain = `${opener} Looking for ${secondary}? We provide ${offering} for local customers across ${place}, with clear communication from first message to finished work.
+
+Ask us about ${promo} and how ${proof} can support your next project. Consistent service pages and updates about ${primary} help nearby customers find the right provider faster.
+
+Visit or message us to learn more about ${primary} and schedule a conversation with our team.`;
     html = plain;
   }
 
-  plain = enforceWords(plain, cfg.maxWords + 25);
-  return { heading, content: plain, contentHtml: html || plain };
+  const applyRange = (body) => {
+    let next = padToMinWords(body, cfg.minWords, padCtx);
+    if (countWords(next) > cfg.maxWords) {
+      const clipped = enforceMaxWords(next, cfg.maxWords);
+      // SEO floor wins: never clip below minWords (slight overshoot OK)
+      next = countWords(clipped) >= cfg.minWords ? clipped : next;
+    }
+    if (countWords(next) < cfg.minWords) {
+      next = padToMinWords(next, cfg.minWords, padCtx);
+    }
+    return next;
+  };
+
+  plain = applyRange(plain);
+  html = applyRange(html);
+
+  return {
+    heading,
+    content: plain,
+    contentHtml: html || plain,
+    wordCount: countWords(plain),
+    minWords: cfg.minWords,
+    maxWords: cfg.maxWords,
+  };
 }
 
 /** Scene-based photoreal prompt — never ask the model to render keyword text/logos */
@@ -705,6 +824,7 @@ function serializePost(row) {
     heading: row.heading,
     content: row.content,
     contentHtml: row.contentHtml || row.content,
+    wordCount: countWords(row.content || row.contentHtml || ""),
     image: row.imageUrl,
     status: row.status,
     locked: row.locked,
@@ -732,7 +852,7 @@ export async function listStudioPosts({ email, workspaceId, status }) {
   return { ok: true, posts: rows.map(serializePost) };
 }
 
-export async function publishStudioPost({ email, postId, alsoLive = false }) {
+export async function publishStudioPost({ email, postId, alsoLive = true }) {
   const auth = await resolveUser(email);
   if (!auth.ok) return auth;
 
@@ -762,23 +882,38 @@ export async function publishStudioPost({ email, postId, alsoLive = false }) {
     };
   }
 
+  const provider = PLATFORM_CONFIG[post.platform]?.key;
+  if (!provider) {
+    return { ok: false, status: 400, error: `Unknown platform: ${post.platform}` };
+  }
+
+  // Live OAuth publish is required by default — do not fake-success in DB only
   let live = null;
-  if (alsoLive) {
-    const provider = PLATFORM_CONFIG[post.platform]?.key;
-    if (provider) {
-      try {
-        live = await publishContent({
-          email: auth.email,
-          content: post.content,
-          action: provider === "google_business" ? "gbp_post" : "social_suite",
-          providers: [provider],
-          contentByProvider: { [provider]: post.content },
-          imageUrl: post.imageUrl || undefined,
-          workspaceId: post.workspaceId || undefined,
-        });
-      } catch (err) {
-        live = { ok: false, error: err.message };
-      }
+  if (alsoLive !== false) {
+    try {
+      live = await publishContent({
+        email: auth.email,
+        content: post.content,
+        action: provider === "google_business" ? "gbp_post" : "social_suite",
+        providers: [provider],
+        contentByProvider: { [provider]: post.content },
+        imageUrl: post.imageUrl || undefined,
+        workspaceId: post.workspaceId || undefined,
+      });
+    } catch (err) {
+      live = { ok: false, status: 502, error: err.message || "Live publish failed" };
+    }
+
+    if (!live?.ok) {
+      return {
+        ok: false,
+        status: live?.status || 502,
+        error:
+          live?.error ||
+          live?.message ||
+          "Live publish failed. Connect this platform under Connections for the active client, then try again.",
+        live,
+      };
     }
   }
 
@@ -914,6 +1049,36 @@ export async function processDueScheduledPosts() {
       continue;
     }
 
+    const user = await prisma.user.findUnique({ where: { id: post.userId } });
+    if (!user?.email) continue;
+
+    const provider = PLATFORM_CONFIG[post.platform]?.key;
+    if (!provider) continue;
+
+    let live;
+    try {
+      live = await publishContent({
+        email: user.email,
+        content: post.content,
+        action: provider === "google_business" ? "gbp_post" : "social_suite",
+        providers: [provider],
+        contentByProvider: { [provider]: post.content },
+        imageUrl: post.imageUrl || undefined,
+        workspaceId: post.workspaceId || undefined,
+      });
+    } catch (err) {
+      console.error(`[autoPoster] scheduled live publish failed ${post.id}`, err.message);
+      continue;
+    }
+
+    if (!live?.ok) {
+      console.error(
+        `[autoPoster] scheduled live publish blocked ${post.id}:`,
+        live?.error || live?.message
+      );
+      continue;
+    }
+
     await prisma.studioPost.update({
       where: { id: post.id },
       data: {
@@ -924,10 +1089,7 @@ export async function processDueScheduledPosts() {
       },
     });
 
-    const user = await prisma.user.findUnique({ where: { id: post.userId } });
-    if (user) {
-      await stampPostActivity(user.id, post.platform).catch(() => {});
-    }
+    await stampPostActivity(user.id, post.platform).catch(() => {});
     n += 1;
   }
 

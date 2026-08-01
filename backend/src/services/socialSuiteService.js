@@ -15,25 +15,29 @@ export const PLATFORM_RULES = {
   facebook: {
     label: "Facebook",
     action: "social_post",
-    maxWords: 150,
+    minWords: 120,
+    maxWords: 160,
     tone: "conversational B2B Facebook Page post; short paragraphs; strong hook in first line",
   },
   instagram: {
     label: "Instagram",
     action: "social_post",
-    maxWords: 80,
+    minWords: 70,
+    maxWords: 100,
     tone: "Instagram Business caption; punchy and visual-led; 2-4 short lines",
   },
   google_business: {
     label: "Google Business Profile",
     action: "gbp_post",
-    maxWords: 100,
+    minWords: 90,
+    maxWords: 130,
     tone: "Google Business Profile local update; helpful and local; include city naturally in prose (no URL)",
   },
   linkedin: {
     label: "LinkedIn",
     action: "social_post",
-    maxWords: 180,
+    minWords: 150,
+    maxWords: 200,
     tone: "LinkedIn Company Page post; professional insight-led; first person plural or brand voice",
   },
 };
@@ -49,6 +53,7 @@ Rules (strict):
 - Zero URLs / links / www / http
 - Zero hashtags
 - Zero markdown
+- At least ${rules.minWords} words (never shorter — SEO ranking content)
 - Maximum ${rules.maxWords} words
 - ${rules.tone}
 
@@ -212,7 +217,14 @@ export async function generateSocialSuite({
     }
 
     let text = stripLinksAndEmojis(result.content || "");
-    text = enforceWordLimit(text, rules.maxWords);
+    const words = text.split(/\s+/).filter(Boolean);
+    if (words.length > rules.maxWords) {
+      text = enforceWordLimit(text, rules.maxWords);
+    }
+    // SEO floor — never ship shorter than minWords
+    while (text.split(/\s+/).filter(Boolean).length < rules.minWords) {
+      text = `${text} ${primaryKeyword || "local service"} in ${location || "your area"} helps customers find reliable support with clear next steps.`.trim();
+    }
 
     posts[provider] = {
       provider,

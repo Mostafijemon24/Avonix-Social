@@ -403,7 +403,12 @@ router.post("/auto-poster/publish", async (req, res) => {
     }
     const gate = assertSessionMatchesEmail(req, email);
     if (!gate.ok) return res.status(gate.status).json({ error: gate.error });
-    const result = await publishStudioPost({ email, postId, alsoLive: !!alsoLive });
+    const result = await publishStudioPost({
+      email,
+      postId,
+      // Default true — live OAuth publish unless explicitly disabled
+      alsoLive: alsoLive !== false && alsoLive !== "false",
+    });
     if (!result.ok) return res.status(result.status || 400).json(result);
     res.json(result);
   } catch (err) {

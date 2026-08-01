@@ -24,7 +24,10 @@ export function ClientWorkspaceSwitcher() {
     try {
       await switchWorkspace(id);
       const ws = workspaces.find((w) => w.id === id);
-      showToast(`Switched to ${ws?.name || "client"}`, "success");
+      showToast(
+        `Switched to ${ws?.name || "client"} — connections & studio content updated`,
+        "success"
+      );
     } catch (err) {
       showToast(isApiError(err) ? err.error : "Could not switch workspace", "error");
     }

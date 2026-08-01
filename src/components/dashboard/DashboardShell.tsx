@@ -41,27 +41,58 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
   const { showToast } = useToast();
   const { state, logout: workspaceLogout, switchWorkspace } = useWorkspace();
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [fbStatus, setFbStatus] = useState<"Connected" | "Linked" | "Off">("Off");
-  const [gbpStatus, setGbpStatus] = useState<"Connected" | "Linked" | "Off">("Off");
+  const [connStatus, setConnStatus] = useState<
+    Record<"facebook" | "instagram" | "linkedin" | "google_business", "Connected" | "Linked" | "Off">
+  >({
+    facebook: "Off",
+    instagram: "Off",
+    linkedin: "Off",
+    google_business: "Off",
+  });
 
   useEffect(() => {
-    if (!state.email) return;
+    // Reset immediately so UI reflects the newly selected client before fetch returns
+    setConnStatus({
+      facebook: "Off",
+      instagram: "Off",
+      linkedin: "Off",
+      google_business: "Off",
+    });
+    if (!state.email || !state.activeWorkspaceId) return;
+
+    let cancelled = false;
     api
-      .getConnections(state.email, state.activeWorkspaceId || undefined)
+      .getConnections(state.email, state.activeWorkspaceId)
       .then((data) => {
-        const fb = data.byProvider?.facebook;
-        const gbp = data.byProvider?.google_business;
-        setFbStatus(
-          fb?.publishReady ? "Connected" : fb ? "Linked" : "Off"
-        );
-        setGbpStatus(
-          gbp?.publishReady ? "Connected" : gbp ? "Linked" : "Off"
-        );
+        if (cancelled) return;
+        const next: Record<
+          "facebook" | "instagram" | "linkedin" | "google_business",
+          "Connected" | "Linked" | "Off"
+        > = {
+          facebook: "Off",
+          instagram: "Off",
+          linkedin: "Off",
+          google_business: "Off",
+        };
+        (["facebook", "instagram", "linkedin", "google_business"] as const).forEach((key) => {
+          const acc = data.byProvider?.[key];
+          next[key] = acc?.publishReady ? "Connected" : acc ? "Linked" : "Off";
+        });
+        setConnStatus(next);
       })
       .catch(() => {
-        setFbStatus("Off");
-        setGbpStatus("Off");
+        if (!cancelled) {
+          setConnStatus({
+            facebook: "Off",
+            instagram: "Off",
+            linkedin: "Off",
+            google_business: "Off",
+          });
+        }
       });
+    return () => {
+      cancelled = true;
+    };
   }, [state.email, state.activeWorkspaceId]);
 
   const plan = PLAN_CONFIG[state.planId];
@@ -248,34 +279,32 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
             <div className="text-[10px] font-extrabold text-slate-500 uppercase tracking-wider mb-2">
               Live Status
             </div>
-            <div className="flex items-center justify-between text-[11px] mb-1">
-              <span className="text-slate-400">Facebook Page</span>
-              <span
-                className={`font-bold ${
-                  fbStatus === "Connected"
-                    ? "text-emerald-400"
-                    : fbStatus === "Linked"
-                      ? "text-amber-400"
-                      : "text-slate-500"
-                }`}
-              >
-                {fbStatus === "Off" ? "Not connected" : fbStatus}
-              </span>
-            </div>
-            <div className="flex items-center justify-between text-[11px] mb-2">
-              <span className="text-slate-400">Google Business</span>
-              <span
-                className={`font-bold ${
-                  gbpStatus === "Connected"
-                    ? "text-emerald-400"
-                    : gbpStatus === "Linked"
-                      ? "text-amber-400"
-                      : "text-slate-500"
-                }`}
-              >
-                {gbpStatus === "Off" ? "Not connected" : gbpStatus}
-              </span>
-            </div>
+            {(
+              [
+                ["facebook", "Facebook Page"],
+                ["instagram", "Instagram"],
+                ["linkedin", "LinkedIn"],
+                ["google_business", "Google Business"],
+              ] as const
+            ).map(([key, label]) => {
+              const status = connStatus[key];
+              return (
+                <div key={key} className="flex items-center justify-between text-[11px] mb-1">
+                  <span className="text-slate-400">{label}</span>
+                  <span
+                    className={`font-bold ${
+                      status === "Connected"
+                        ? "text-emerald-400"
+                        : status === "Linked"
+                          ? "text-amber-400"
+                          : "text-slate-500"
+                    }`}
+                  >
+                    {status === "Off" ? "Not connected" : status}
+                  </span>
+                </div>
+              );
+            })}
             <Link
               href="/dashboard/connections"
               onClick={() => setSidebarOpen(false)}

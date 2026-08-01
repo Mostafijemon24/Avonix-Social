@@ -22,7 +22,10 @@ export function getStoredEmail() {
   return localStorage.getItem(EMAIL_KEY);
 }
 
-async function request<T>(path: string, options?: RequestInit): Promise<T> {
+async function request<T>(
+  path: string,
+  options?: RequestInit & { timeoutMs?: number }
+): Promise<T> {
   let res: Response;
   const token = typeof window !== "undefined" ? getSessionToken() : null;
   const headers: Record<string, string> = {
@@ -31,13 +34,29 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   };
   if (token) headers.Authorization = `Bearer ${token}`;
 
+  const { timeoutMs, ...fetchOptions } = options || {};
+  const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
+  const timer =
+    controller && timeoutMs
+      ? setTimeout(() => controller.abort(), timeoutMs)
+      : null;
+
   try {
     res = await fetch(`${API_BASE}${path}`, {
-      ...options,
+      ...fetchOptions,
       headers,
+      signal: controller?.signal || fetchOptions.signal,
     });
-  } catch {
+  } catch (err) {
+    if (err instanceof DOMException && err.name === "AbortError") {
+      throw {
+        status: 0,
+        error: "Request timed out. Generation may still finish on the server — refresh in a moment.",
+      };
+    }
     throw { status: 0, error: `Cannot reach API (${API_BASE}). Is the backend running?` };
+  } finally {
+    if (timer) clearTimeout(timer);
   }
 
   const text = await res.text();
@@ -72,6 +91,7 @@ export type StudioPostRecord = {
   heading: string;
   content: string;
   contentHtml: string;
+  wordCount?: number;
   image: string | null;
   status: "draft" | "scheduled" | "published" | string;
   locked: boolean;
@@ -480,6 +500,7 @@ export const api = {
     }>("/auto-poster/generate", {
       method: "POST",
       body: JSON.stringify(payload),
+      timeoutMs: 5 * 60 * 1000,
     }),
 
   listStudioPosts: (email: string, workspaceId?: string, status?: string) =>
