@@ -44,10 +44,16 @@ export const IMAGE_CANDIDATES = [
     id: "pollinations",
     model: null,
     source: "free",
-    label: "Pollinations Flux (free)",
-    strengths: "free unlimited fallback, no API cost",
+    label: "Free stack (Pollinations + Pexels/Unsplash)",
+    strengths: "fully free AI + stock fallback, optional free API keys",
   },
 ];
+
+function preferFreeImages() {
+  if (process.env.STUDIO_FREE_IMAGES_ONLY === "1") return true;
+  const def = String(process.env.STUDIO_IMAGE_DEFAULT || "free").toLowerCase();
+  return def === "free";
+}
 
 function heuristicPick({ location, masterIntent, dominantIntent, includeImages }) {
   const blob = `${masterIntent || ""} ${dominantIntent || ""} ${location || ""}`.toLowerCase();
@@ -61,8 +67,13 @@ function heuristicPick({ location, masterIntent, dominantIntent, includeImages }
     writing = WRITING_CANDIDATES.find((c) => c.id === "gemini-flash") || writing;
   }
 
+  // Default: fully free image stack (Pollinations / Pexels / Unsplash)
   let image = IMAGE_CANDIDATES.find((c) => c.id === "pollinations");
-  if (includeImages && process.env.OPENROUTER_API_KEY) {
+  if (
+    includeImages &&
+    !preferFreeImages() &&
+    process.env.OPENROUTER_API_KEY
+  ) {
     if (/photo|real|studio|people|hands|premium/.test(blob)) {
       image = IMAGE_CANDIDATES.find((c) => c.id === "gpt-image") || image;
     } else {
@@ -77,7 +88,9 @@ function heuristicPick({ location, masterIntent, dominantIntent, includeImages }
     reason: {
       writing: `Heuristic: matched intent/location to ${writing.label}`,
       image: includeImages
-        ? `Heuristic: selected ${image.label} for visual quality vs cost`
+        ? preferFreeImages()
+          ? `Heuristic: free stack (${image.label}) — $0 cost`
+          : `Heuristic: selected ${image.label} for visual quality vs cost`
         : "Images disabled for this run",
     },
   };
@@ -129,7 +142,7 @@ export async function selectBestStudioProviders({
         {
           role: "system",
           content:
-            "You are a routing analyst for Avonix Social. Pick ONE writing candidate and ONE image candidate that will produce the best SEO social posts for this batch. Return ONLY JSON: {writingId, imageId, writingReason, imageReason}. No markdown.",
+            "You are a routing analyst for Avonix Social. Prefer free image providers when quality is good enough. Pick ONE writing candidate and ONE image candidate. Return ONLY JSON: {writingId, imageId, writingReason, imageReason}. No markdown.",
         },
         {
           role: "user",
@@ -138,6 +151,7 @@ Location: ${location || "n/a"}
 Master intent: ${masterIntent || "n/a"}
 Dominant intent: ${dominantIntent || "n/a"}
 Include images: ${includeImages ? "yes" : "no"}
+Prefer free images: ${preferFreeImages() ? "YES — choose pollinations unless quality is clearly insufficient" : "optional"}
 
 Writing candidates:
 ${writingList}

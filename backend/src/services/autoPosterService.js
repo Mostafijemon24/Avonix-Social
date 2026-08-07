@@ -16,6 +16,10 @@ import {
   urlPriority,
 } from "./siteAnalyzer.js";
 import { selectBestStudioProviders } from "./studioProviderRouter.js";
+import {
+  resolveFreeImage,
+  freeImageRateLimitPause,
+} from "./freeImageService.js";
 import prisma from "../db.js";
 
 async function stampPostActivity(userId, platform) {
@@ -868,30 +872,10 @@ Strictly forbidden: any text, letters, words, typography, watermarks, logos, bra
 No illustrations, no cartoon, no CGI logo mockups — only realistic natural photography.`;
 }
 
-function freePollinationsUrl({ prompt, width, height, seed }) {
-  const encoded = encodeURIComponent(String(prompt || "").slice(0, 1800));
-  const s = seed || Math.floor(Math.random() * 1e9);
-  return `https://image.pollinations.ai/prompt/${encoded}?width=${width}&height=${height}&nologo=true&enhance=true&model=flux&seed=${s}`;
-}
-
 /**
- * Free stock-style fallback (no API key): Pollinations Flux.
- * Optional Unsplash Source-style random related photo when keyword is short.
- */
-function freeResourceImageUrl({ keyword, location, platform, heading }) {
-  const cfg = PLATFORM_CONFIG[platform] || PLATFORM_CONFIG.Facebook;
-  const { width, height } = cfg.image;
-  const prompt = buildPhotorealImagePrompt(keyword, location, heading);
-  return {
-    url: freePollinationsUrl({ prompt, width, height }),
-    source: "free",
-    provider: "pollinations",
-  };
-}
-
-/**
- * Photoreal images — AI (OpenRouter) and/or free resources.
+ * Photoreal images — free stack (Pollinations / Pexels / Unsplash) or paid OpenRouter.
  * Part 6: preferredModel / imageSource can come from AI router decision.
+ * Default prefer free when STUDIO_IMAGE_DEFAULT=free (recommended).
  * @param {"auto"|"ai"|"free"} [imageSource="auto"]
  */
 export async function generateStudioImage({
@@ -907,9 +891,22 @@ export async function generateStudioImage({
   const prompt = buildPhotorealImagePrompt(keyword, location, heading);
   const aspectRatio = platform === "Instagram" ? "1:1" : "16:9";
   const mode = ["auto", "ai", "free"].includes(imageSource) ? imageSource : "auto";
+  const freeOnly =
+    process.env.STUDIO_FREE_IMAGES_ONLY === "1" ||
+    String(process.env.STUDIO_IMAGE_DEFAULT || "free").toLowerCase() === "free";
 
-  if (mode === "free") {
-    return freeResourceImageUrl({ keyword, location, platform, heading });
+  const useFreeFirst = mode === "free" || (mode === "auto" && freeOnly);
+
+  if (useFreeFirst || mode === "free") {
+    const free = await resolveFreeImage({
+      prompt,
+      keyword,
+      location,
+      heading,
+      width,
+      height,
+    });
+    return free;
   }
 
   if (process.env.OPENROUTER_API_KEY && (mode === "auto" || mode === "ai")) {
@@ -935,8 +932,15 @@ export async function generateStudioImage({
     return { url: null, source: "ai", provider: null, error: "AI image unavailable" };
   }
 
-  // auto fallback → free
-  const free = freeResourceImageUrl({ keyword, location, platform, heading });
+  // auto fallback → free stack
+  const free = await resolveFreeImage({
+    prompt,
+    keyword,
+    location,
+    heading,
+    width,
+    height,
+  });
   return { ...free, fallbackFromAi: true };
 }
 
@@ -951,10 +955,15 @@ async function resolveImageUrl(opts) {
 export function getRealisticImageUrl(keyword, platform) {
   const cfg = PLATFORM_CONFIG[platform] || PLATFORM_CONFIG.Facebook;
   const { width, height } = cfg.image;
-  const prompt = encodeURIComponent(
-    buildPhotorealImagePrompt(keyword, "", keyword).slice(0, 1200)
-  );
-  return `https://image.pollinations.ai/prompt/${prompt}?width=${width}&height=${height}&nologo=true&enhance=true&seed=${Date.now()}`;
+  const prompt = buildPhotorealImagePrompt(keyword, "", keyword);
+  return resolveFreeImage({
+    prompt,
+    keyword,
+    location: "",
+    heading: keyword,
+    width,
+    height,
+  }).then((r) => r.url);
 }
 
 function packKeywordResult(keywords, page, location) {
@@ -1405,6 +1414,9 @@ export async function generateAutoPosterSuite({
           imageSource: resolvedImageSource,
           preferredModel: preferredImageModel,
         });
+        if (resolvedImageSource === "free") {
+          await freeImageRateLimitPause();
+        }
       }
 
       const secondaryPack =
@@ -1990,7 +2002,8 @@ export async function attachImagesToStudioPosts({
   let attached = 0;
   let failed = 0;
 
-  for (const post of rows) {
+  for (let i = 0; i < rows.length; i++) {
+    const post = rows[i];
     try {
       const result = await generateStudioImage({
         keyword: post.primaryKeyword,
@@ -2011,6 +2024,10 @@ export async function attachImagesToStudioPosts({
       });
       posts.push(serializePost(updated));
       attached += 1;
+      // Free Pollinations rate limits — pause between gens
+      if (resolvedSource === "free" && i < rows.length - 1) {
+        await freeImageRateLimitPause();
+      }
     } catch (err) {
       console.error("[attachImages]", post.id, err.message);
       failed += 1;

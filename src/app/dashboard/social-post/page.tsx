@@ -120,7 +120,7 @@ export default function ContentStudioPage() {
 
   // —— Part 3: images ——
   const [includeImages, setIncludeImages] = useState(false);
-  const [imageSource, setImageSource] = useState<ImageSource>("auto");
+  const [imageSource, setImageSource] = useState<ImageSource>("free");
   const [isAttachingImages, setIsAttachingImages] = useState(false);
   const [imageBusyId, setImageBusyId] = useState<string | null>(null);
   const [actionBusyId, setActionBusyId] = useState<string | null>(null);
@@ -840,9 +840,12 @@ export default function ContentStudioPage() {
               <div className="flex flex-wrap gap-2">
                 {(
                   [
+                    {
+                      id: "free" as const,
+                      label: "Free (recommended)",
+                    },
                     { id: "auto" as const, label: "AI picks best" },
-                    { id: "ai" as const, label: "AI only" },
-                    { id: "free" as const, label: "Free (Pollinations)" },
+                    { id: "ai" as const, label: "Paid AI only" },
                   ] as const
                 ).map((opt) => (
                   <button
@@ -860,8 +863,8 @@ export default function ContentStudioPage() {
                 ))}
               </div>
               <p className="text-[10px] text-slate-500 mt-2">
-                Part 6: “AI picks best” analyzes writing models + image providers, then uses the
-                winners for the whole batch.
+                Free = Pollinations Flux (AI) + Pexels/Unsplash stock fallback — $0. Optional free
+                API keys on the server raise rate limits.
               </p>
             </div>
           </div>
