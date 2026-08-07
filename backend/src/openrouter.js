@@ -21,11 +21,60 @@ function publicUploadUrl(filename) {
   return `${base}/api/uploads/generated/${filename}`;
 }
 
+function extFromContentType(ct) {
+  const t = String(ct || "").toLowerCase();
+  if (t.includes("png")) return "png";
+  if (t.includes("webp")) return "webp";
+  if (t.includes("gif")) return "gif";
+  return "jpg";
+}
+
+/**
+ * Download a remote image (Pollinations / Pexels / Unsplash) into local uploads.
+ * Hotlinked Pollinations URLs often break in the browser; local HTTPS is stable.
+ */
+export async function persistRemoteImage(imageUrl, { timeoutMs = 90000 } = {}) {
+  if (!imageUrl) return null;
+  if (String(imageUrl).startsWith("data:")) {
+    return persistImageUrl(imageUrl);
+  }
+  if (!/^https?:\/\//i.test(imageUrl)) return imageUrl;
+  if (/\/api\/uploads\/generated\//i.test(imageUrl) || /\/uploads\/generated\//i.test(imageUrl)) {
+    return imageUrl;
+  }
+
+  ensureUploadDir();
+  const res = await fetch(imageUrl, {
+    redirect: "follow",
+    signal: AbortSignal.timeout(timeoutMs),
+    headers: {
+      Accept: "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+      "User-Agent": "AvonixSocial/1.0 (+https://social.avonixai.com)",
+    },
+  });
+  if (!res.ok) {
+    throw new Error(`Remote image fetch failed (${res.status})`);
+  }
+  const buf = Buffer.from(await res.arrayBuffer());
+  if (buf.length < 500) {
+    throw new Error("Remote image too small / empty");
+  }
+  const ext = extFromContentType(res.headers.get("content-type"));
+  const filename = `img-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+  fs.writeFileSync(path.join(UPLOAD_DIR, filename), buf);
+  return publicUploadUrl(filename);
+}
+
 /** Persist data-URL / remote image to uploads so Meta can fetch a public HTTPS URL */
 export async function persistImageUrl(imageUrl) {
   if (!imageUrl) return null;
   if (/^https?:\/\//i.test(imageUrl) && !imageUrl.startsWith("data:")) {
-    return imageUrl;
+    try {
+      return await persistRemoteImage(imageUrl);
+    } catch (err) {
+      console.error("[persistImageUrl remote]", err.message);
+      return imageUrl;
+    }
   }
 
   ensureUploadDir();

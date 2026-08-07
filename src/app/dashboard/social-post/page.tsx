@@ -1044,9 +1044,9 @@ export default function ContentStudioPage() {
               )}
             </div>
             <p className="text-[10px] text-slate-500 mt-2 max-w-xl mx-auto">
-              Published posts stay locked (text + image). Regenerate unlocks and rewrites so you
-              can publish again. Schedule queues auto-publish when due. New website batches move
-              previous posts to Archive.
+              Drafts show <span className="text-slate-300">Unlocked</span>. After you press Publish,
+              the post gets a green <span className="text-emerald-400">Locked</span> padlock (text +
+              image). Regenerate unlocks it so you can publish again.
             </p>
           </div>
 
@@ -1381,15 +1381,36 @@ function PostListRow({
           <div className="relative w-12 h-12 rounded-lg overflow-hidden bg-navy-900 shrink-0 border border-navy-700">
             {post.image ? (
               // eslint-disable-next-line @next/next/no-img-element
-              <img src={post.image} alt="" className="w-full h-full object-cover" />
-            ) : (
-              <div className="w-full h-full flex items-center justify-center text-slate-600">
-                <ImageIcon className="w-4 h-4" />
-              </div>
-            )}
-            {locked && (
+              <img
+                src={post.image}
+                alt=""
+                className="w-full h-full object-cover"
+                onError={(e) => {
+                  const el = e.currentTarget;
+                  el.style.display = "none";
+                  const fallback = el.nextElementSibling;
+                  if (fallback instanceof HTMLElement) fallback.style.display = "flex";
+                }}
+              />
+            ) : null}
+            <div
+              className={`w-full h-full flex items-center justify-center text-slate-600 ${
+                post.image ? "hidden" : ""
+              }`}
+              style={post.image ? { display: "none" } : undefined}
+            >
+              <ImageIcon className="w-4 h-4" />
+            </div>
+            {locked ? (
               <span className="absolute inset-0 bg-navy-950/55 flex items-center justify-center">
                 <Lock className="w-4 h-4 text-emerald-400" />
+              </span>
+            ) : (
+              <span
+                className="absolute bottom-0.5 right-0.5 bg-navy-950/80 rounded p-0.5 border border-navy-600"
+                title="Unlocked draft — locks after publish"
+              >
+                <Unlock className="w-3 h-3 text-slate-400" />
               </span>
             )}
           </div>
@@ -1419,9 +1440,13 @@ function PostListRow({
                   No image
                 </span>
               )}
-              {locked && (
-                <span className="text-[10px] font-bold text-emerald-400 inline-flex items-center gap-1">
+              {locked ? (
+                <span className="text-[10px] font-bold text-emerald-400 inline-flex items-center gap-1 bg-emerald-950/40 border border-emerald-800/50 px-1.5 py-0.5 rounded">
                   <Lock className="w-3 h-3" /> Locked
+                </span>
+              ) : (
+                <span className="text-[10px] font-bold text-slate-400 inline-flex items-center gap-1 bg-navy-900 border border-navy-600 px-1.5 py-0.5 rounded">
+                  <Unlock className="w-3 h-3" /> Unlocked
                 </span>
               )}
               {post.status === "scheduled" && post.scheduledDate && (

@@ -1,14 +1,15 @@
 /**
  * Fully free image stack for Content Studio.
  *
- * Priority (best free AI → free stock):
- *  1. Pollinations Flux — AI generate, free (optional free API key for higher limits / no logo)
- *  2. Pexels — free stock (PEXELS_API_KEY)
- *  3. Unsplash — free stock (UNSPLASH_ACCESS_KEY)
+ * Priority:
+ *  1. Pexels / Unsplash when free API keys are set (fast, reliable stock)
+ *  2. Pollinations Flux (free AI) — downloaded & mirrored to /api/uploads/generated
  *
- * Keys are free to create; leave blank and Pollinations still works anonymously
- * (slower rate limits).
+ * Hotlinked Pollinations URLs often show as broken in the browser; we always
+ * persist to our own HTTPS path when possible.
  */
+
+import { persistRemoteImage } from "../openrouter.js";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -24,6 +25,22 @@ function searchQuery({ keyword, location, heading }) {
   return parts.join(" ").replace(/\s+/g, " ").slice(0, 120) || "professional business workplace";
 }
 
+/** Short prompt — long Pollinations URLs often fail in browsers */
+export function buildShortImagePrompt({ keyword, location, heading }) {
+  const topic = String(keyword || "professional service").slice(0, 80);
+  const place = String(location || "").slice(0, 40);
+  const mood = String(heading || "").slice(0, 60);
+  return [
+    `Photorealistic photo of ${topic}`,
+    place ? `in ${place}` : "",
+    mood ? `, mood: ${mood}` : "",
+    ", real people working, natural light, shallow depth of field, no text, no logo, no watermark",
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .slice(0, 280);
+}
+
 /**
  * Pollinations GET image URL (Flux). Optional POLLINATIONS_API_KEY (free signup).
  * @see https://enter.pollinations.ai/keys
@@ -32,7 +49,7 @@ export function buildPollinationsUrl({ prompt, width, height, seed }) {
   const w = clampSize(width, 1200);
   const h = clampSize(height, 630);
   const s = seed || Math.floor(Math.random() * 1e9);
-  const encoded = encodeURIComponent(String(prompt || "").slice(0, 1800));
+  const encoded = encodeURIComponent(String(prompt || "").slice(0, 400));
   const key = (process.env.POLLINATIONS_API_KEY || "").trim();
   const model = process.env.POLLINATIONS_MODEL || "flux";
   const params = new URLSearchParams({
@@ -120,8 +137,24 @@ async function unsplashImageUrl({ keyword, location, heading }) {
   };
 }
 
+async function mirrorLocal(hit) {
+  if (!hit?.url) return null;
+  try {
+    const local = await persistRemoteImage(hit.url, { timeoutMs: 90000 });
+    return {
+      ...hit,
+      url: local || hit.url,
+      mirrored: !!(local && local !== hit.url),
+    };
+  } catch (err) {
+    console.error(`[freeImage mirror ${hit.provider}]`, err.message);
+    return null;
+  }
+}
+
 /**
- * Resolve one free image. Prefer AI (Pollinations), then stock APIs.
+ * Resolve one free image. Prefer stock when keys exist (instant), else Pollinations AI.
+ * Always try to mirror to /api/uploads/generated for stable dashboard display.
  */
 export async function resolveFreeImage({
   prompt,
@@ -132,48 +165,62 @@ export async function resolveFreeImage({
   height,
   preferStock = false,
 }) {
-  const order = preferStock
-    ? ["pexels", "unsplash", "pollinations"]
-    : ["pollinations", "pexels", "unsplash"];
+  const hasPexels = !!(process.env.PEXELS_API_KEY || "").trim();
+  const hasUnsplash = !!(process.env.UNSPLASH_ACCESS_KEY || "").trim();
+  const shortPrompt =
+    buildShortImagePrompt({ keyword, location, heading }) ||
+    String(prompt || "").slice(0, 280);
+
+  const order =
+    preferStock || hasPexels || hasUnsplash
+      ? ["pexels", "unsplash", "pollinations"]
+      : ["pollinations", "pexels", "unsplash"];
 
   for (const provider of order) {
     try {
+      let hit = null;
       if (provider === "pollinations") {
-        return {
-          url: buildPollinationsUrl({ prompt, width, height }),
+        hit = {
+          url: buildPollinationsUrl({ prompt: shortPrompt, width, height }),
           source: "free",
           provider: "pollinations",
         };
+      } else if (provider === "pexels") {
+        hit = await pexelsImageUrl({ keyword, location, heading, width, height });
+      } else if (provider === "unsplash") {
+        hit = await unsplashImageUrl({ keyword, location, heading });
       }
-      if (provider === "pexels") {
-        const hit = await pexelsImageUrl({ keyword, location, heading, width, height });
-        if (hit?.url) return hit;
-      }
-      if (provider === "unsplash") {
-        const hit = await unsplashImageUrl({ keyword, location, heading });
-        if (hit?.url) return hit;
-      }
+      if (!hit?.url) continue;
+
+      const mirrored = await mirrorLocal(hit);
+      if (mirrored?.url) return mirrored;
+
+      if (provider === "pollinations") return hit;
     } catch (err) {
       console.error(`[freeImage ${provider}]`, err.message);
     }
   }
 
-  // Last resort: Pollinations URL even if earlier path failed oddly
-  return {
-    url: buildPollinationsUrl({ prompt, width, height }),
+  const fallback = {
+    url: buildPollinationsUrl({ prompt: shortPrompt, width, height }),
     source: "free",
     provider: "pollinations",
   };
+  const mirrored = await mirrorLocal(fallback);
+  return mirrored || fallback;
 }
 
 /**
  * Delay between free AI gens to respect anonymous rate limits (~15s)
- * or faster when POLLINATIONS_API_KEY is set (~3–5s).
+ * or faster when POLLINATIONS_API_KEY / stock keys are set.
  */
 export async function freeImageRateLimitPause() {
   const hasKey = !!(process.env.POLLINATIONS_API_KEY || "").trim();
+  const hasStock =
+    !!(process.env.PEXELS_API_KEY || "").trim() ||
+    !!(process.env.UNSPLASH_ACCESS_KEY || "").trim();
   const ms = Number(
-    process.env.FREE_IMAGE_DELAY_MS || (hasKey ? 4000 : 12000)
+    process.env.FREE_IMAGE_DELAY_MS || (hasStock ? 800 : hasKey ? 4000 : 12000)
   );
   if (ms > 0) await sleep(ms);
 }
