@@ -120,7 +120,7 @@ export default function ContentStudioPage() {
 
   // —— Part 3: images ——
   const [includeImages, setIncludeImages] = useState(false);
-  const [imageSource, setImageSource] = useState<ImageSource>("free");
+  const [imageSource, setImageSource] = useState<ImageSource>("auto");
   const [isAttachingImages, setIsAttachingImages] = useState(false);
   const [imageBusyId, setImageBusyId] = useState<string | null>(null);
   const [actionBusyId, setActionBusyId] = useState<string | null>(null);
@@ -841,11 +841,11 @@ export default function ContentStudioPage() {
                 {(
                   [
                     {
-                      id: "free" as const,
-                      label: "Free (recommended)",
+                      id: "auto" as const,
+                      label: "AI picks best (recommended)",
                     },
-                    { id: "auto" as const, label: "AI picks best" },
                     { id: "ai" as const, label: "Paid AI only" },
+                    { id: "free" as const, label: "Free only ($0)" },
                   ] as const
                 ).map((opt) => (
                   <button
@@ -863,10 +863,9 @@ export default function ContentStudioPage() {
                 ))}
               </div>
               <p className="text-[10px] text-slate-500 mt-2">
-                Free = topic-matched Pollinations Flux (HD) first, then scored Pexels/Unsplash.
-                Sizes differ by platform: Facebook 1920×1008 · LinkedIn 1920×1005 · GMB 1200×900.
-                For near-perfect relevance use Paid AI (gpt-image). After deploy, Regenerate image
-                on old posts.
+                Recommended: AI picks ChatGPT Images (paid, HD, topic-matched). Free Pollinations is
+                $0 but often generic/low quality. Platform sizes: FB 1920×1008 · LI 1920×1005 · GMB
+                1200×900. Needs OPENROUTER_API_KEY on the server.
               </p>
             </div>
           </div>

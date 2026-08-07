@@ -870,9 +870,9 @@ function buildPhotorealImagePrompt(keyword, location, heading, platform) {
 }
 
 /**
- * Photoreal images — free stack (Pollinations / Pexels / Unsplash) or paid OpenRouter.
- * Part 6: preferredModel / imageSource can come from AI router decision.
- * Default prefer free when STUDIO_IMAGE_DEFAULT=free (recommended).
+ * Photoreal images — quality-first (paid ChatGPT/Gemini) with free fallback.
+ * Part 6: preferredModel / imageSource from AI router.
+ * Default STUDIO_IMAGE_DEFAULT=quality → AI decides best paid model.
  * @param {"auto"|"ai"|"free"} [imageSource="auto"]
  */
 export async function generateStudioImage({
@@ -895,11 +895,10 @@ export async function generateStudioImage({
   const mode = ["auto", "ai", "free"].includes(imageSource) ? imageSource : "auto";
   const freeOnly =
     process.env.STUDIO_FREE_IMAGES_ONLY === "1" ||
-    String(process.env.STUDIO_IMAGE_DEFAULT || "free").toLowerCase() === "free";
+    String(process.env.STUDIO_IMAGE_DEFAULT || "quality").toLowerCase() === "free";
 
-  const useFreeFirst = mode === "free" || (mode === "auto" && freeOnly);
-
-  if (useFreeFirst || mode === "free") {
+  // Only use free-first when user/env explicitly wants $0
+  if (mode === "free" || (mode === "auto" && freeOnly)) {
     const free = await resolveFreeImage({
       prompt,
       keyword,
@@ -912,12 +911,13 @@ export async function generateStudioImage({
     return free;
   }
 
+  // Quality path: paid OpenRouter image models (gpt-image-1 etc.)
   if (process.env.OPENROUTER_API_KEY && (mode === "auto" || mode === "ai")) {
     try {
       const img = await generateImage({
         prompt,
         aspectRatio,
-        preferredModel: preferredModel || undefined,
+        preferredModel: preferredModel || process.env.IMAGE_MODEL || "openai/gpt-image-1",
       });
       if (img?.ok && img.url) {
         return {
@@ -937,7 +937,7 @@ export async function generateStudioImage({
     return { url: null, source: "ai", provider: null, error: "AI image unavailable" };
   }
 
-  // auto fallback → free stack
+  // auto fallback → free stack if paid failed
   const free = await resolveFreeImage({
     prompt,
     keyword,

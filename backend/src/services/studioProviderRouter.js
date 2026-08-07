@@ -1,6 +1,6 @@
 /**
  * Part 6 — AI picks the best writing model + image provider for a studio batch.
- * Multiple candidates; one decision used for the whole run.
+ * Quality-first: prefer paid photoreal image models unless user forces free.
  */
 import { callOpenRouter } from "../openrouter.js";
 
@@ -25,38 +25,60 @@ export const WRITING_CANDIDATES = [
   },
 ];
 
+/** Ranked best → cheapest. gpt-image is the quality winner for marketing creatives. */
 export const IMAGE_CANDIDATES = [
   {
     id: "gpt-image",
     model: process.env.IMAGE_MODEL || "openai/gpt-image-1",
     source: "ai",
-    label: "ChatGPT Images",
-    strengths: "photoreal professional scenes, high detail",
+    label: "ChatGPT Images (best quality)",
+    strengths:
+      "highest photoreal detail, topic-faithful scenes, HD branding/service creatives (paid)",
+    qualityRank: 1,
   },
   {
     id: "gemini-image",
-    model: "google/gemini-2.5-flash-image",
+    model: process.env.IMAGE_MODEL_GEMINI || "google/gemini-2.5-flash-image",
     source: "ai",
     label: "Gemini Flash Image",
-    strengths: "fast multimodal images, local vibe scenes",
+    strengths: "fast paid multimodal images, good local vibe (paid)",
+    qualityRank: 2,
   },
   {
     id: "pollinations",
     model: null,
     source: "free",
-    label: "Free stack (Pollinations + Pexels/Unsplash)",
-    strengths: "fully free AI + stock fallback, optional free API keys",
+    label: "Free stack (Pollinations / Pexels)",
+    strengths: "$0 fallback only — lower relevance/quality than ChatGPT Images",
+    qualityRank: 9,
   },
 ];
 
-function preferFreeImages() {
+/** true only when explicitly forced to free ($0) mode */
+export function preferFreeImages() {
   if (process.env.STUDIO_FREE_IMAGES_ONLY === "1") return true;
-  const def = String(process.env.STUDIO_IMAGE_DEFAULT || "free").toLowerCase();
+  const def = String(process.env.STUDIO_IMAGE_DEFAULT || "quality").toLowerCase();
   return def === "free";
 }
 
-function heuristicPick({ location, masterIntent, dominantIntent, includeImages }) {
-  const blob = `${masterIntent || ""} ${dominantIntent || ""} ${location || ""}`.toLowerCase();
+function keywordBlob(pageSample = []) {
+  return (pageSample || [])
+    .slice(0, 8)
+    .map((p) => `${p.keywords?.primary || ""} ${p.writingIntent || ""}`)
+    .join(" ")
+    .toLowerCase();
+}
+
+function heuristicPick({
+  location,
+  masterIntent,
+  dominantIntent,
+  includeImages,
+  pageSample = [],
+}) {
+  const blob = `${masterIntent || ""} ${dominantIntent || ""} ${location || ""} ${keywordBlob(
+    pageSample
+  )}`.toLowerCase();
 
   let writing = WRITING_CANDIDATES[0];
   if (/linkedin|b2b|leadership|professional|insight/.test(blob)) {
@@ -67,17 +89,22 @@ function heuristicPick({ location, masterIntent, dominantIntent, includeImages }
     writing = WRITING_CANDIDATES.find((c) => c.id === "gemini-flash") || writing;
   }
 
-  // Default: fully free image stack (Pollinations / Pexels / Unsplash)
   let image = IMAGE_CANDIDATES.find((c) => c.id === "pollinations");
-  if (
-    includeImages &&
-    !preferFreeImages() &&
-    process.env.OPENROUTER_API_KEY
-  ) {
-    if (/photo|real|studio|people|hands|premium/.test(blob)) {
+
+  if (includeImages && process.env.OPENROUTER_API_KEY && !preferFreeImages()) {
+    // Quality-first: ChatGPT Images for branding / design / premium trades
+    if (
+      /brand|logo|design|identity|packag|premium|photo|studio|people|dental|clinic|law|real estate/.test(
+        blob
+      )
+    ) {
       image = IMAGE_CANDIDATES.find((c) => c.id === "gpt-image") || image;
     } else {
-      image = IMAGE_CANDIDATES.find((c) => c.id === "gemini-image") || image;
+      // Still prefer gpt-image for best output; gemini only if explicitly faster path needed
+      image =
+        IMAGE_CANDIDATES.find((c) => c.id === "gpt-image") ||
+        IMAGE_CANDIDATES.find((c) => c.id === "gemini-image") ||
+        image;
     }
   }
 
@@ -90,7 +117,7 @@ function heuristicPick({ location, masterIntent, dominantIntent, includeImages }
       image: includeImages
         ? preferFreeImages()
           ? `Heuristic: free stack (${image.label}) — $0 cost`
-          : `Heuristic: selected ${image.label} for visual quality vs cost`
+          : `Heuristic: ${image.label} for maximum relevance + HD quality`
         : "Images disabled for this run",
     },
   };
@@ -106,13 +133,14 @@ export async function selectBestStudioProviders({
   dominantIntent,
   pageSample = [],
   includeImages = false,
-  forceImageSource, // "auto"|"ai"|"free"|undefined — user override after AI pick
+  forceImageSource, // "auto"|"ai"|"free"|undefined
 }) {
   const heuristic = heuristicPick({
     location,
     masterIntent,
     dominantIntent,
     includeImages,
+    pageSample,
   });
 
   const apiKey = process.env.OPENROUTER_API_KEY;
@@ -124,7 +152,8 @@ export async function selectBestStudioProviders({
     (c) => `- ${c.id}: ${c.label} — ${c.strengths}`
   ).join("\n");
   const imageList = IMAGE_CANDIDATES.map(
-    (c) => `- ${c.id}: ${c.label} (${c.source}) — ${c.strengths}`
+    (c) =>
+      `- ${c.id}: ${c.label} (${c.source}, qualityRank=${c.qualityRank}) — ${c.strengths}`
   ).join("\n");
   const samples = (pageSample || [])
     .slice(0, 5)
@@ -137,12 +166,17 @@ export async function selectBestStudioProviders({
   try {
     const data = await callOpenRouter({
       model: process.env.ROUTER_MODEL || "openai/gpt-4o-mini",
-      maxTokens: 280,
+      maxTokens: 320,
       messages: [
         {
           role: "system",
-          content:
-            "You are a routing analyst for Avonix Social. Prefer free image providers when quality is good enough. Pick ONE writing candidate and ONE image candidate. Return ONLY JSON: {writingId, imageId, writingReason, imageReason}. No markdown.",
+          content: `You are Avonix Social's provider router. Goal: MAXIMUM image relevance to the service keyword + HD quality for social posts.
+Rules:
+- Prefer gpt-image whenever OpenRouter is available and images are enabled (best photoreal marketing creatives).
+- Use gemini-image only if speed matters more than fidelity.
+- Use pollinations ONLY if the user explicitly wants free/$0, or paid image APIs are unavailable.
+- Writing: pick the best tone fit for the niche.
+Return ONLY JSON: {writingId, imageId, writingReason, imageReason}. No markdown.`,
         },
         {
           role: "user",
@@ -151,12 +185,13 @@ Location: ${location || "n/a"}
 Master intent: ${masterIntent || "n/a"}
 Dominant intent: ${dominantIntent || "n/a"}
 Include images: ${includeImages ? "yes" : "no"}
-Prefer free images: ${preferFreeImages() ? "YES — choose pollinations unless quality is clearly insufficient" : "optional"}
+User free-only mode: ${preferFreeImages() ? "YES — must choose pollinations" : "NO — optimize for best quality (prefer gpt-image)"}
+Force source: ${forceImageSource || "auto (you decide)"}
 
 Writing candidates:
 ${writingList}
 
-Image candidates:
+Image candidates (lower qualityRank = better):
 ${imageList}
 
 Page samples:
@@ -179,6 +214,9 @@ Choose the single best writingId and imageId for ALL posts in this batch.`,
 
     if (!includeImages) {
       image = IMAGE_CANDIDATES.find((c) => c.id === "pollinations") || image;
+    } else if (!preferFreeImages() && image.source === "free" && process.env.OPENROUTER_API_KEY) {
+      // Guardrail: never let the router accidentally pick free when quality mode is on
+      image = IMAGE_CANDIDATES.find((c) => c.id === "gpt-image") || image;
     }
 
     return finalizeDecision(
@@ -205,18 +243,23 @@ function finalizeDecision(pick, { includeImages, forceImageSource }) {
   let image = pick.image;
   let reason = { ...pick.reason };
 
-  // User hard override after AI suggestion
   if (forceImageSource === "free") {
     image = IMAGE_CANDIDATES.find((c) => c.id === "pollinations") || image;
-    reason.image = "User forced Free (Pollinations)";
+    reason.image = "User forced Free stack ($0)";
   } else if (forceImageSource === "ai" && includeImages) {
-    if (image.source !== "ai") {
-      image =
-        IMAGE_CANDIDATES.find((c) => c.id === "gpt-image") ||
-        IMAGE_CANDIDATES.find((c) => c.source === "ai") ||
-        image;
-    }
-    reason.image = `User forced AI images → ${image.label}`;
+    image =
+      IMAGE_CANDIDATES.find((c) => c.id === "gpt-image") ||
+      IMAGE_CANDIDATES.find((c) => c.source === "ai") ||
+      image;
+    reason.image = `User forced Paid AI → ${image.label}`;
+  } else if (
+    includeImages &&
+    !preferFreeImages() &&
+    process.env.OPENROUTER_API_KEY &&
+    image?.source === "free"
+  ) {
+    image = IMAGE_CANDIDATES.find((c) => c.id === "gpt-image") || image;
+    reason.image = `Quality mode override → ${image.label}`;
   }
 
   return {
@@ -237,7 +280,12 @@ function finalizeDecision(pick, { includeImages, forceImageSource }) {
     },
     candidates: {
       writing: WRITING_CANDIDATES.map((c) => ({ id: c.id, label: c.label })),
-      image: IMAGE_CANDIDATES.map((c) => ({ id: c.id, label: c.label, source: c.source })),
+      image: IMAGE_CANDIDATES.map((c) => ({
+        id: c.id,
+        label: c.label,
+        source: c.source,
+        qualityRank: c.qualityRank,
+      })),
     },
   };
 }

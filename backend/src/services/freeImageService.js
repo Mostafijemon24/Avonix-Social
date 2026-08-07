@@ -56,8 +56,8 @@ export function visualSubjectFromKeyword(keyword, location) {
   const place = String(location || "").split(",")[0]?.trim() || "";
 
   const rules = [
-    [/logo|brand(ing)?|identity/, "brand designer crafting a logo on a large monitor in a bright creative studio"],
-    [/graphic design|designer/, "graphic designer editing layouts on dual monitors with color swatches and print proofs"],
+    [/logo|brand(ing)?|identity|corporate identity/, "brand strategist reviewing a printed logo mood board with color swatches, typography samples, and mockups on a desk — no readable text"],
+    [/graphic design|designer/, "graphic designer refining a brand layout on a calibrated monitor with pantone swatches and print proofs — no readable text"],
     [/web design|website|ui\/ux|ux|ui /, "web designer reviewing a website mockup on a laptop and tablet"],
     [/seo|search engine/, "digital marketer analyzing SEO charts and keyword reports on a computer screen"],
     [/social media/, "social media manager planning posts on a laptop with a smartphone nearby"],
