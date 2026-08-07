@@ -7,9 +7,15 @@
  * - Publish lock, schedule, rewrite
  */
 import crypto from "crypto";
-import { callOpenRouter, generateImage } from "../openrouter.js";
+import { callOpenRouter, generateImage, sanitizeEnglishPost } from "../openrouter.js";
 import { resolveActiveWorkspace } from "./workspaceService.js";
 import { publishContent } from "./publishService.js";
+import {
+  normalizeDomain,
+  discoverSitemapUrls,
+  urlPriority,
+} from "./siteAnalyzer.js";
+import { selectBestStudioProviders } from "./studioProviderRouter.js";
 import prisma from "../db.js";
 
 async function stampPostActivity(userId, platform) {
@@ -82,6 +88,9 @@ export const PLATFORM_CONFIG = {
     image: { width: 1024, height: 576, aspect: "16:9" },
   },
 };
+
+/** Part 2 target platforms — 15 URLs × 3 = 45 posts */
+export const STUDIO_POST_PLATFORMS = ["Facebook", "LinkedIn", "GMB"];
 
 const TONE_OPENER = {
   Professional: "Here is a clear update from our team.",
@@ -179,6 +188,18 @@ function normalizeUrl(input) {
     return u.toString().replace(/\/$/, "");
   } catch {
     return raw;
+  }
+}
+
+/** Root origin for grouping / archive tables, e.g. https://example.com */
+export function websiteOriginFromUrl(input) {
+  const n = normalizeUrl(input);
+  if (!n) return null;
+  try {
+    const u = new URL(n);
+    return `${u.protocol}//${u.host}`;
+  } catch {
+    return normalizeDomain(input);
   }
 }
 
@@ -301,15 +322,127 @@ function scorePageKeywords(page, location) {
     .map(([p]) => p)
     .filter((p) => p.toLowerCase() !== primary.toLowerCase());
 
+  const secondary = [
+    rest[0] || `custom ${primary}`,
+    rest[1] || `${primary} experts`,
+    rest[2] || "affordable packages",
+    rest[3] || "local branding services",
+  ]
+    .slice(0, 4)
+    .map((k) => polishKeyword(k, location));
+
   return {
     primary: polishKeyword(primary, location),
-    secondary: polishKeyword(rest[0] || `custom ${primary}`, location),
-    general: [
-      polishKeyword(rest[1] || `${primary} experts`, location),
-      polishKeyword(rest[2] || "affordable packages", location),
-      polishKeyword(rest[3] || "local branding services", location),
-      polishKeyword(rest[4] || "creative solutions", location),
-    ].slice(0, 4),
+    /** @deprecated prefer secondary[0] — kept for post templates */
+    secondary: secondary[0],
+    /** Exactly 4 secondary keywords (user + SEO pack) */
+    secondaryKeywords: secondary,
+    general: secondary,
+  };
+}
+
+/**
+ * Infer page writing intent from URL path + on-page signals.
+ */
+function inferWritingIntent(page) {
+  const path = (() => {
+    try {
+      return new URL(page.url).pathname.toLowerCase();
+    } catch {
+      return String(page.url || "").toLowerCase();
+    }
+  })();
+  const blob = `${page.title} ${page.h1} ${page.description}`.toLowerCase();
+
+  if (/\/(contact|get-in-touch|book|quote|appointment)/.test(path) || /\bcontact\b|\bget a quote\b/.test(blob)) {
+    return {
+      intent: "Conversion",
+      masterIntent:
+        "Drive inquiries and bookings — clear CTA, trust signals, low friction next step.",
+    };
+  }
+  if (/\/(about|team|story|who-we-are)/.test(path) || /\babout us\b|\bour story\b/.test(blob)) {
+    return {
+      intent: "Brand Trust",
+      masterIntent:
+        "Build credibility — experience, values, and why the brand is the safer local choice.",
+    };
+  }
+  if (/\/(blog|news|article|insights?|guide|tips)/.test(path) || /\bhow to\b|\bguide\b|\btips\b/.test(blob)) {
+    return {
+      intent: "Educational",
+      masterIntent:
+        "Teach a useful takeaway — authority content that ranks and nurtures consideration.",
+    };
+  }
+  if (/\/(pricing|packages?|cost|rates)/.test(path) || /\bpricing\b|\bpackages?\b/.test(blob)) {
+    return {
+      intent: "Commercial",
+      masterIntent:
+        "Clarify value vs cost — packages, outcomes, and why the investment pays off locally.",
+    };
+  }
+  if (/\/(services?|solutions?|what-we-do|offerings?)/.test(path) || /\bservices?\b|\bsolutions?\b/.test(blob)) {
+    return {
+      intent: "Service Sell",
+      masterIntent:
+        "Sell the service clearly — problem → solution → proof → soft CTA for the service area.",
+    };
+  }
+  if (/\/(locations?|areas?-we-serve|service-area|near-me)/.test(path)) {
+    return {
+      intent: "Local Coverage",
+      masterIntent:
+        "Reinforce geographic coverage — neighborhoods served and why locals choose this provider.",
+    };
+  }
+  if (path === "/" || path === "") {
+    return {
+      intent: "Brand Overview",
+      masterIntent:
+        "Introduce the brand in one hook — who you help, where you serve, and the primary offer.",
+    };
+  }
+  return {
+    intent: "Awareness",
+    masterIntent:
+      "Grow awareness for the page topic — keyword-led, helpful, and shareable for social.",
+  };
+}
+
+/**
+ * Extract area / service-coverage hints from page copy.
+ */
+function inferAreaCoverage(page, fallbackLocation) {
+  const text = `${page.title} ${page.h1} ${page.description} ${String(page.bodyText || "").slice(0, 2500)}`;
+  const found = new Set();
+
+  const cityState = text.match(
+    /\b([A-Z][a-z]+(?:\s[A-Z][a-z]+)?),\s*([A-Z]{2})\b/g
+  );
+  if (cityState) {
+    for (const m of cityState.slice(0, 6)) found.add(m.trim());
+  }
+
+  const serving = text.match(
+    /(?:serving|based in|located in|areas? we serve|service area(?:s)?)\s*[:\-]?\s*([A-Za-z0-9,\s&.-]{4,80})/gi
+  );
+  if (serving) {
+    for (const m of serving.slice(0, 4)) {
+      const cleaned = m.replace(/^[^:]+:\s*/i, "").replace(/^(serving|based in|located in|areas? we serve|service area(?:s)?)\s*/i, "").trim();
+      if (cleaned.length >= 4) found.add(cleaned.slice(0, 80));
+    }
+  }
+
+  const list = [...found];
+  if (!list.length && fallbackLocation) list.push(normalizeLocation(fallbackLocation));
+  return {
+    areas: list.slice(0, 8),
+    summary: list.length
+      ? list.slice(0, 4).join(" · ")
+      : fallbackLocation
+        ? normalizeLocation(fallbackLocation)
+        : "Coverage not detected — set target location manually",
   };
 }
 
@@ -320,12 +453,12 @@ async function refineKeywordsWithAi(page, location, heuristic) {
   try {
     const data = await callOpenRouter({
       model: process.env.KEYWORD_MODEL || "openai/gpt-4o-mini",
-      maxTokens: 280,
+      maxTokens: 360,
       messages: [
         {
           role: "system",
           content:
-            "You are an SEO + generative-AI keyword analyst. Return ONLY JSON: {primary, secondary, general:[4 strings]}. Prefer commercial Google search intent. No markdown.",
+            "You are an SEO + generative-AI keyword analyst. Return ONLY JSON: {primary:string, secondary:[exactly 4 strings], writingIntent:string, masterIntent:string, areaCoverage:string}. Prefer commercial Google search intent. No markdown.",
         },
         {
           role: "user",
@@ -335,9 +468,14 @@ Title: ${page.title}
 H1: ${page.h1}
 Description: ${page.description}
 Body sample: ${page.bodyText.slice(0, 1800)}
-Heuristic guess: ${JSON.stringify(heuristic)}
+Heuristic guess: ${JSON.stringify({
+            primary: heuristic.primary,
+            secondary: heuristic.secondaryKeywords || heuristic.general,
+          })}
 
-Pick 1 primary, 1 secondary, and exactly 4 general keywords best for Google + AI Overviews.`,
+Pick 1 primary keyword and exactly 4 secondary keywords best for Google + AI Overviews.
+Also set writingIntent (short label) and masterIntent (1 sentence for social copy direction).
+areaCoverage = city/region phrase for this page.`,
         },
       ],
     });
@@ -346,12 +484,31 @@ Pick 1 primary, 1 secondary, and exactly 4 general keywords best for Google + AI
     const m = content.match(/\{[\s\S]*\}/);
     if (!m) return null;
     const parsed = JSON.parse(m[0]);
-    const general = (parsed.general || []).map((k) => pretty(String(k).trim())).filter(Boolean);
-    if (!parsed.primary || !parsed.secondary || general.length < 4) return null;
+    const secondaryRaw = Array.isArray(parsed.secondary)
+      ? parsed.secondary
+      : [parsed.secondary, ...(parsed.general || [])].filter(Boolean);
+    const secondary = secondaryRaw
+      .map((k) => polishKeyword(String(k).trim(), location))
+      .filter(Boolean)
+      .slice(0, 4);
+    while (secondary.length < 4) {
+      secondary.push(
+        polishKeyword(
+          heuristic.secondaryKeywords?.[secondary.length] ||
+            `${parsed.primary || heuristic.primary} tip ${secondary.length + 1}`,
+          location
+        )
+      );
+    }
+    if (!parsed.primary) return null;
     return {
       primary: polishKeyword(parsed.primary, location),
-      secondary: polishKeyword(parsed.secondary, location),
-      general: general.slice(0, 4).map((k) => polishKeyword(k, location)),
+      secondary: secondary[0],
+      secondaryKeywords: secondary,
+      general: secondary,
+      writingIntent: String(parsed.writingIntent || "").trim() || null,
+      masterIntent: String(parsed.masterIntent || "").trim() || null,
+      areaCoverage: String(parsed.areaCoverage || "").trim() || null,
     };
   } catch (err) {
     console.error("[autoPoster keywords AI]", err.message);
@@ -439,13 +596,23 @@ function padToMinWords(text, min, ctx) {
 
 /**
  * Professional heading + SEO body per platform (hard min word count).
+ * Follows page masterIntent / writingIntent when provided.
  */
-export function generatePostContent(platform, keywords, location, url, tone) {
+export function generatePostContent(platform, keywords, location, url, tone, options = {}) {
   const place = normalizeLocation(location) || "your area";
   const primary = polishKeyword(keywords.primary, place);
-  const secondary = polishKeyword(keywords.secondary, place);
-  const g = (keywords.general || []).map((x) => polishKeyword(x, place));
-  while (g.length < 4) g.push("trusted local support");
+  const secondaryList = (
+    keywords.secondaryKeywords ||
+    keywords.general ||
+    [keywords.secondary]
+  )
+    .map((x) => polishKeyword(x, place))
+    .filter(Boolean);
+  while (secondaryList.length < 4) {
+    secondaryList.push(polishKeyword(`${primary} related ${secondaryList.length + 1}`, place));
+  }
+  const secondary = secondaryList[0];
+  const g = secondaryList.slice();
 
   const cfg = PLATFORM_CONFIG[platform];
   const opener = TONE_OPENER[tone] || TONE_OPENER.Professional;
@@ -456,6 +623,13 @@ export function generatePostContent(platform, keywords, location, url, tone) {
   const promo = asOffering(g[3]);
   const padCtx = { primary, secondary, offering, proof, promo, place, provider };
 
+  const writingIntent = String(options.writingIntent || "Awareness").trim();
+  const masterIntent = String(
+    options.masterIntent ||
+      `Publish keyword-led updates for ${primary} that match ${writingIntent} intent in ${place}.`
+  ).trim();
+  const intentLead = `Intent focus (${writingIntent}): ${masterIntent}`;
+
   let heading = "";
   let plain = "";
   let html = "";
@@ -463,6 +637,8 @@ export function generatePostContent(platform, keywords, location, url, tone) {
   if (platform === "Facebook") {
     heading = `Discover ${primaryLocal}`;
     plain = `${opener}
+
+${intentLead}
 
 Looking for ${secondary}? Our team in ${place} delivers ${offering} with care, clarity, and a process built for local search visibility. Customers choose us when they need dependable ${proof} without guesswork.
 
@@ -476,6 +652,8 @@ ${url}
 ${hashtagify(place, primary)}`;
     html = `${opener}
 
+${intentLead}
+
 Looking for ${secondary}? Our team in ${place} delivers ${offering} with care, clarity, and a process built for local search visibility. Customers choose us when they need dependable ${proof} without guesswork.
 
 We help people comparing ${promo} understand scope, timeline, and expected outcomes up front. That transparency builds trust and supports stronger rankings for ${primary} queries across ${place}.
@@ -488,6 +666,8 @@ ${hashtagify(place, primary)}`;
   } else if (platform === "Instagram") {
     heading = `${primary} — crafted with care`;
     plain = `${opener}
+
+${intentLead}
 
 ${secondary} for businesses and homeowners in ${place}.
 
@@ -507,6 +687,8 @@ ${hashtagify(primary, secondary, place, "LocalBusiness", "SEO")}`;
         : "In competitive markets, clear positioning, useful content, and reliable delivery separate category leaders from everyone else.";
     plain = `${opener} ${bridge}
 
+${intentLead}
+
 We support organizations with ${offering}, backed by ${proof}. Our specialists help clients move from idea to polished identity through ${provider}, while aligning messaging to high-intent searches for ${primary} and ${secondary} in ${place}.
 
 Leaders evaluating ${promo} should prioritize process transparency, measurable milestones, and content that reinforces topical authority. That combination improves both customer trust and organic discoverability.
@@ -517,6 +699,8 @@ ${url}
 ${hashtagify("BusinessGrowth", primary, "Leadership", place)}`;
     html = `${opener} ${bridge}
 
+${intentLead}
+
 We support organizations with ${offering}, backed by ${proof}. Our specialists help clients move from idea to polished identity through ${provider}, while aligning messaging to high-intent searches for ${primary} and ${secondary} in ${place}.
 
 Leaders evaluating ${promo} should prioritize process transparency, measurable milestones, and content that reinforces topical authority. That combination improves both customer trust and organic discoverability.
@@ -525,10 +709,13 @@ Discover ${promo}: ${keywordLinkHtml(url, primary)}
 
 ${hashtagify("BusinessGrowth", primary, "Leadership", place)}`;
   } else {
+    // GMB / Google Business Profile
     heading = phraseHasLocation(primary, place)
       ? `${primary} — open and ready to help`
       : `${primary} in ${place} — open and ready to help`;
-    plain = `${opener} Looking for ${secondary}? We provide ${offering} for local customers across ${place}, with clear communication from first message to finished work.
+    plain = `${opener} ${intentLead}
+
+Looking for ${secondary}? We provide ${offering} for local customers across ${place}, with clear communication from first message to finished work.
 
 Ask us about ${promo} and how ${proof} can support your next project. Consistent service pages and updates about ${primary} help nearby customers find the right provider faster.
 
@@ -559,43 +746,205 @@ Visit or message us to learn more about ${primary} and schedule a conversation w
     wordCount: countWords(plain),
     minWords: cfg.minWords,
     maxWords: cfg.maxWords,
+    writingIntent,
+    masterIntent,
   };
+}
+
+/**
+ * Part 6 — write post via AI-selected model; falls back to template on failure.
+ */
+export async function generatePostContentWithAi(
+  platform,
+  keywords,
+  location,
+  url,
+  tone,
+  options = {}
+) {
+  const template = generatePostContent(platform, keywords, location, url, tone, options);
+  const model = options.writingModel;
+  if (!model || !process.env.OPENROUTER_API_KEY) {
+    return { ...template, writingProvider: "template" };
+  }
+
+  const cfg = PLATFORM_CONFIG[platform];
+  const place = normalizeLocation(location) || "your area";
+  const primary = polishKeyword(keywords.primary, place);
+  const secondaryList = (
+    keywords.secondaryKeywords ||
+    keywords.general ||
+    [keywords.secondary]
+  )
+    .map((x) => polishKeyword(x, place))
+    .filter(Boolean)
+    .slice(0, 4);
+
+  try {
+    const data = await callOpenRouter({
+      model,
+      maxTokens: 700,
+      messages: [
+        {
+          role: "system",
+          content: `You write SEO-led social posts for ${platform}. Return ONLY JSON: {heading:string, content:string}. English only, no emojis, no markdown fences. Word count between ${cfg.minWords} and ${cfg.maxWords}. Tone: ${tone}.`,
+        },
+        {
+          role: "user",
+          content: `Platform: ${platform}
+Location: ${place}
+Primary keyword: ${primary}
+Secondary keywords: ${secondaryList.join(", ")}
+Page URL (may include once if platform allows links): ${url}
+Writing intent: ${options.writingIntent || "Awareness"}
+Master intent: ${options.masterIntent || "n/a"}
+Allow links: ${cfg.allowLinks}
+Allow hashtags: ${cfg.allowHashtags}
+
+Write one complete post body that naturally uses the primary keyword and at least two secondary keywords. Follow the master intent.`,
+        },
+      ],
+    });
+
+    const raw = data?.choices?.[0]?.message?.content || "";
+    const m = raw.match(/\{[\s\S]*\}/);
+    if (!m) return { ...template, writingProvider: "template-fallback" };
+    const parsed = JSON.parse(m[0]);
+    let content = sanitizeEnglishPost(String(parsed.content || "").trim());
+    let heading = sanitizeEnglishPost(String(parsed.heading || template.heading).trim());
+    if (!content || countWords(content) < Math.min(40, cfg.minWords)) {
+      return { ...template, writingProvider: "template-fallback" };
+    }
+
+    const padCtx = {
+      primary,
+      secondary: secondaryList[0],
+      offering: asOffering(secondaryList[1] || primary),
+      proof: asOffering(secondaryList[2] || "reliable results"),
+      promo: asOffering(secondaryList[3] || primary),
+      place,
+      provider: asProvider(secondaryList[0] || primary),
+    };
+    content = padToMinWords(content, cfg.minWords, padCtx);
+    if (countWords(content) > cfg.maxWords) {
+      const clipped = enforceMaxWords(content, cfg.maxWords);
+      content = countWords(clipped) >= cfg.minWords ? clipped : content;
+    }
+
+    let contentHtml = content;
+    if (cfg.allowLinks && url && primary) {
+      contentHtml = content.replace(
+        new RegExp(primary.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i"),
+        keywordLinkHtml(url, primary)
+      );
+    }
+
+    return {
+      heading: heading || template.heading,
+      content,
+      contentHtml,
+      wordCount: countWords(content),
+      minWords: cfg.minWords,
+      maxWords: cfg.maxWords,
+      writingIntent: options.writingIntent || template.writingIntent,
+      masterIntent: options.masterIntent || template.masterIntent,
+      writingProvider: model,
+    };
+  } catch (err) {
+    console.error("[generatePostContentWithAi]", err.message);
+    return { ...template, writingProvider: "template-fallback" };
+  }
 }
 
 /** Scene-based photoreal prompt — never ask the model to render keyword text/logos */
 function buildPhotorealImagePrompt(keyword, location, heading) {
   const place = normalizeLocation(location) || "a local business district";
   const topic = polishKeyword(keyword, place);
-  return `Photorealistic natural photograph of a real-world professional scene related to "${topic}" in ${place}.
+  const hint = heading ? ` Scene mood inspired by: ${String(heading).slice(0, 80)}.` : "";
+  return `Photorealistic natural photograph of a real-world professional scene related to "${topic}" in ${place}.${hint}
 Show authentic people, hands at work, tools, materials, or a real studio/office environment that matches this service.
 Natural window light or golden hour, shallow depth of field, sharp detail on textures and faces, documentary style, shot on a full-frame camera, 85mm lens, ISO 100, ultra detailed, 8K resolution.
 Strictly forbidden: any text, letters, words, typography, watermarks, logos, brand marks, UI, posters with writing, 3D metallic emblems, sci-fi city logos, abstract chrome badges, fake signage.
 No illustrations, no cartoon, no CGI logo mockups — only realistic natural photography.`;
 }
 
+function freePollinationsUrl({ prompt, width, height, seed }) {
+  const encoded = encodeURIComponent(String(prompt || "").slice(0, 1800));
+  const s = seed || Math.floor(Math.random() * 1e9);
+  return `https://image.pollinations.ai/prompt/${encoded}?width=${width}&height=${height}&nologo=true&enhance=true&model=flux&seed=${s}`;
+}
+
 /**
- * Photoreal natural images via ChatGPT (openai/gpt-image-1) through OpenRouter.
- * Falls back to Pollinations only if OpenRouter is unavailable.
+ * Free stock-style fallback (no API key): Pollinations Flux.
+ * Optional Unsplash Source-style random related photo when keyword is short.
  */
-export async function generateStudioImage({ keyword, location, platform, heading }) {
+function freeResourceImageUrl({ keyword, location, platform, heading }) {
+  const cfg = PLATFORM_CONFIG[platform] || PLATFORM_CONFIG.Facebook;
+  const { width, height } = cfg.image;
+  const prompt = buildPhotorealImagePrompt(keyword, location, heading);
+  return {
+    url: freePollinationsUrl({ prompt, width, height }),
+    source: "free",
+    provider: "pollinations",
+  };
+}
+
+/**
+ * Photoreal images — AI (OpenRouter) and/or free resources.
+ * Part 6: preferredModel / imageSource can come from AI router decision.
+ * @param {"auto"|"ai"|"free"} [imageSource="auto"]
+ */
+export async function generateStudioImage({
+  keyword,
+  location,
+  platform,
+  heading,
+  imageSource = "auto",
+  preferredModel,
+}) {
   const cfg = PLATFORM_CONFIG[platform] || PLATFORM_CONFIG.Facebook;
   const { width, height } = cfg.image;
   const prompt = buildPhotorealImagePrompt(keyword, location, heading);
   const aspectRatio = platform === "Instagram" ? "1:1" : "16:9";
+  const mode = ["auto", "ai", "free"].includes(imageSource) ? imageSource : "auto";
 
-  if (process.env.OPENROUTER_API_KEY) {
+  if (mode === "free") {
+    return freeResourceImageUrl({ keyword, location, platform, heading });
+  }
+
+  if (process.env.OPENROUTER_API_KEY && (mode === "auto" || mode === "ai")) {
     try {
-      const img = await generateImage({ prompt, aspectRatio });
-      if (img?.ok && img.url) return img.url;
+      const img = await generateImage({
+        prompt,
+        aspectRatio,
+        preferredModel: preferredModel || undefined,
+      });
+      if (img?.ok && img.url) {
+        return {
+          url: img.url,
+          source: "ai",
+          provider: img.model || preferredModel || "openrouter",
+        };
+      }
     } catch (err) {
       console.error("[autoPoster ChatGPT image]", err.message);
     }
   }
 
-  // Emergency fallback only
-  const encoded = encodeURIComponent(prompt.slice(0, 1800));
-  const seed = Math.floor(Math.random() * 1e9);
-  return `https://image.pollinations.ai/prompt/${encoded}?width=${width}&height=${height}&nologo=true&enhance=true&model=flux&seed=${seed}`;
+  if (mode === "ai") {
+    return { url: null, source: "ai", provider: null, error: "AI image unavailable" };
+  }
+
+  // auto fallback → free
+  const free = freeResourceImageUrl({ keyword, location, platform, heading });
+  return { ...free, fallbackFromAi: true };
+}
+
+/** Resolve image URL string for persistence (back-compat with older callers) */
+async function resolveImageUrl(opts) {
+  const result = await generateStudioImage(opts);
+  if (typeof result === "string") return result;
+  return result?.url || null;
 }
 
 /** @deprecated use generateStudioImage */
@@ -608,6 +957,36 @@ export function getRealisticImageUrl(keyword, platform) {
   return `https://image.pollinations.ai/prompt/${prompt}?width=${width}&height=${height}&nologo=true&enhance=true&seed=${Date.now()}`;
 }
 
+function packKeywordResult(keywords, page, location) {
+  const intentFallback = inferWritingIntent(page || { url: "", title: "", h1: "", description: "" });
+  const coverage = inferAreaCoverage(
+    page || { url: "", title: "", h1: "", description: "", bodyText: "" },
+    location
+  );
+  const secondary =
+    keywords.secondaryKeywords ||
+    keywords.general ||
+    [keywords.secondary].filter(Boolean);
+
+  const secondaryKeywords = [...secondary].slice(0, 4);
+  while (secondaryKeywords.length < 4) {
+    secondaryKeywords.push(
+      polishKeyword(`${keywords.primary} related ${secondaryKeywords.length + 1}`, location)
+    );
+  }
+
+  return {
+    primary: keywords.primary,
+    secondary: secondaryKeywords[0],
+    secondaryKeywords,
+    general: secondaryKeywords,
+    writingIntent: keywords.writingIntent || intentFallback.intent,
+    masterIntent: keywords.masterIntent || intentFallback.masterIntent,
+    areaCoverage: keywords.areaCoverage || coverage.summary,
+    areaList: coverage.areas,
+  };
+}
+
 async function scanOneUrl(rawUrl, location) {
   const url = normalizeUrl(rawUrl);
   if (!url) return null;
@@ -618,21 +997,29 @@ async function scanOneUrl(rawUrl, location) {
     const slug = url
       .replace(/^https?:\/\//, "")
       .split(/[/?#]/)[0]
-      .split(".")[0];
+      .split(/[./]/)
+      .pop();
     const primary = polishKeyword(`${slug} services`, location);
+    const secondaryKeywords = [
+      polishKeyword(`custom ${slug} design`, location),
+      polishKeyword(`${slug} experts`, location),
+      "Affordable Packages",
+      "Local Branding Services",
+    ];
+    const pageStub = { url, title: slug, h1: slug, description: "", bodyText: "" };
+    const packed = packKeywordResult(
+      { primary, secondary: secondaryKeywords[0], secondaryKeywords, general: secondaryKeywords },
+      pageStub,
+      location
+    );
     return {
       url,
       reachable: false,
-      keywords: {
-        primary,
-        secondary: polishKeyword(`custom ${slug} design`, location),
-        general: [
-          polishKeyword(`${slug} experts`, location),
-          "Affordable Packages",
-          "Local Branding Services",
-          "Creative Solutions",
-        ],
-      },
+      title: slug,
+      keywords: packed,
+      writingIntent: packed.writingIntent,
+      masterIntent: packed.masterIntent,
+      areaCoverage: packed.areaCoverage,
     };
   }
 
@@ -646,11 +1033,15 @@ async function scanOneUrl(rawUrl, location) {
 
   const heuristic = scorePageKeywords(page, location);
   const ai = await refineKeywordsWithAi(page, location, heuristic);
+  const packed = packKeywordResult(ai || heuristic, page, location);
   return {
     url,
     reachable: true,
     title: page.title,
-    keywords: ai || heuristic,
+    keywords: packed,
+    writingIntent: packed.writingIntent,
+    masterIntent: packed.masterIntent,
+    areaCoverage: packed.areaCoverage,
   };
 }
 
@@ -697,8 +1088,140 @@ async function resolveUser(email) {
 }
 
 /**
- * Full pipeline: scan → keywords → posts + images → persist drafts
- * Skips fingerprints already published+locked.
+ * Part 1 — Website root → discover pages → area coverage + writing intent +
+ * 1 primary + 4 secondary keywords per page (no posts yet).
+ */
+export async function analyzeWebsiteForStudio({
+  email,
+  workspaceId,
+  websiteUrl,
+  location,
+  maxPages = MAX_URLS,
+}) {
+  const auth = await resolveUser(email);
+  if (!auth.ok) return auth;
+
+  const { user } = auth;
+  const { activeId, workspace } = await resolveActiveWorkspace(user);
+  const wid = workspaceId || activeId || workspace?.id || null;
+
+  const origin = normalizeDomain(websiteUrl);
+  if (!origin) {
+    return {
+      ok: false,
+      status: 400,
+      error: "Enter a valid website URL, e.g. https://example.com",
+    };
+  }
+
+  const loc = normalizeLocation(
+    String(location || "").trim() || workspace?.location || ""
+  );
+
+  const discovered = await discoverSitemapUrls(origin);
+  const homepage = `${origin}/`;
+  const prioritized = [
+    homepage,
+    ...discovered
+      .filter((u) => {
+        try {
+          return normalizeUrl(u) !== normalizeUrl(homepage);
+        } catch {
+          return true;
+        }
+      })
+      .sort((a, b) => urlPriority(b) - urlPriority(a)),
+  ];
+
+  // Dedupe by normalized URL
+  const seen = new Set();
+  const uniqueUrls = [];
+  for (const u of prioritized) {
+    const n = normalizeUrl(u) || u;
+    if (seen.has(n)) continue;
+    seen.add(n);
+    uniqueUrls.push(n);
+  }
+
+  const pageLimit = Math.min(Math.max(Number(maxPages) || MAX_URLS, 1), MAX_URLS);
+  const selectedUrls = uniqueUrls.slice(0, pageLimit);
+
+  if (!selectedUrls.length) {
+    return {
+      ok: false,
+      status: 400,
+      error: "No pages discovered on this website. Check the URL is public.",
+    };
+  }
+
+  const analyzed = [];
+  for (let i = 0; i < selectedUrls.length; i += 5) {
+    const batch = selectedUrls.slice(i, i + 5);
+    const results = await Promise.all(batch.map((u) => scanOneUrl(u, loc || "Local")));
+    for (const r of results) if (r) analyzed.push(r);
+  }
+
+  const areaPool = new Set();
+  for (const row of analyzed) {
+    if (row.areaCoverage) areaPool.add(row.areaCoverage);
+    for (const a of row.keywords?.areaList || []) areaPool.add(a);
+  }
+
+  const intentCounts = {};
+  for (const row of analyzed) {
+    const key = row.writingIntent || "Awareness";
+    intentCounts[key] = (intentCounts[key] || 0) + 1;
+  }
+  const dominantIntent =
+    Object.entries(intentCounts).sort((a, b) => b[1] - a[1])[0]?.[0] || "Awareness";
+
+  const masterIntent =
+    analyzed.find((a) => a.masterIntent)?.masterIntent ||
+    `Publish keyword-led social updates for ${origin} that match each page intent and cover ${
+      loc || "the local service area"
+    }.`;
+
+  const pages = analyzed.map((row) => ({
+    url: row.url,
+    reachable: row.reachable,
+    title: row.title || "",
+    areaCoverage: row.areaCoverage,
+    writingIntent: row.writingIntent,
+    masterIntent: row.masterIntent,
+    keywords: {
+      primary: row.keywords.primary,
+      secondary: row.keywords.secondaryKeywords || row.keywords.general || [],
+    },
+  }));
+
+  return {
+    ok: true,
+    workspaceId: wid,
+    websiteUrl: origin,
+    location: loc,
+    needsLocation: !loc,
+    discoveredCount: uniqueUrls.length,
+    pageCount: pages.length,
+    areaCoverage: {
+      summary: [...areaPool].slice(0, 6).join(" · ") || loc || "Set target location",
+      areas: [...areaPool].slice(0, 12),
+    },
+    masterIntent,
+    dominantIntent,
+    pages,
+  };
+}
+
+/**
+ * Part 2 — Full pipeline: keywords → Facebook / LinkedIn / GMB posts (≤45)
+ * Optional images (Part 3). Skips fingerprints already published+locked.
+ *
+ * @param {object} opts
+ * @param {Array} [opts.pages] — Part 1 analyzed pages (skips re-crawl when provided)
+ * @param {string} [opts.masterIntent]
+ * @param {boolean} [opts.includeImages=false] — Part 3 flip; default off for speed
+ * @param {"auto"|"ai"|"free"} [opts.imageSource="auto"]
+ * @param {string[]} [opts.platforms] — defaults to STUDIO_POST_PLATFORMS
  */
 export async function generateAutoPosterSuite({
   email,
@@ -706,6 +1229,12 @@ export async function generateAutoPosterSuite({
   urls,
   location,
   tone = "Professional",
+  pages: prePages,
+  masterIntent: siteMasterIntent,
+  includeImages = false,
+  imageSource = "auto",
+  platforms: platformOverride,
+  websiteUrl,
 }) {
   const auth = await resolveUser(email);
   if (!auth.ok) return auth;
@@ -719,30 +1248,133 @@ export async function generateAutoPosterSuite({
     String(location || "").trim() || workspace?.location || ""
   );
 
-  const scan = await scanUrlsForKeywords(urls, loc);
-  if (!scan.ok) return scan;
+  const platforms = (platformOverride || STUDIO_POST_PLATFORMS).filter(
+    (p) => PLATFORM_CONFIG[p]
+  );
+  if (!platforms.length) {
+    return { ok: false, status: 400, error: "No valid platforms selected." };
+  }
+
+  let analyzed = [];
+
+  if (Array.isArray(prePages) && prePages.length) {
+    analyzed = prePages.slice(0, MAX_URLS).map((p) => {
+      const secondary = Array.isArray(p.keywords?.secondary)
+        ? p.keywords.secondary
+        : Array.isArray(p.keywords?.secondaryKeywords)
+          ? p.keywords.secondaryKeywords
+          : Array.isArray(p.keywords?.general)
+            ? p.keywords.general
+            : [p.keywords?.secondary].filter(Boolean);
+      const secondaryKeywords = secondary.map(String).filter(Boolean).slice(0, 4);
+      while (secondaryKeywords.length < 4) {
+        secondaryKeywords.push(`${p.keywords?.primary || "local service"} tip ${secondaryKeywords.length + 1}`);
+      }
+      return {
+        url: normalizeUrl(p.url) || p.url,
+        reachable: p.reachable !== false,
+        title: p.title || "",
+        writingIntent: p.writingIntent || "Awareness",
+        masterIntent: p.masterIntent || siteMasterIntent || "",
+        areaCoverage: p.areaCoverage || loc,
+        keywords: {
+          primary: p.keywords?.primary || "local business services",
+          secondary: secondaryKeywords[0],
+          secondaryKeywords,
+          general: secondaryKeywords,
+        },
+      };
+    });
+  } else {
+    const scan = await scanUrlsForKeywords(urls, loc);
+    if (!scan.ok) return scan;
+    analyzed = scan.analyzed;
+  }
+
+  if (!analyzed.length) {
+    return { ok: false, status: 400, error: "No pages to generate posts from." };
+  }
+
+  const origin =
+    websiteOriginFromUrl(websiteUrl) ||
+    websiteOriginFromUrl(analyzed[0]?.url) ||
+    null;
+
+  // —— Part 5: archive previous batch when website changes (or same-site drafts) ——
+  const activeSample = await prisma.studioPost.findFirst({
+    where: {
+      userId: user.id,
+      ...(wid ? { workspaceId: wid } : {}),
+      archived: false,
+    },
+    select: { websiteOrigin: true },
+    orderBy: { updatedAt: "desc" },
+  });
+
+  const switchingWebsite =
+    !!origin &&
+    !!activeSample?.websiteOrigin &&
+    activeSample.websiteOrigin !== origin;
+
+  let archivedCount = 0;
+  if (switchingWebsite) {
+    // New website → move ALL previous active posts to Archive
+    const moved = await prisma.studioPost.updateMany({
+      where: {
+        userId: user.id,
+        ...(wid ? { workspaceId: wid } : {}),
+        archived: false,
+      },
+      data: { archived: true, archivedAt: new Date() },
+    });
+    archivedCount = moved.count;
+  } else {
+    // Same website regenerate → archive prior drafts/scheduled (keep published locked active)
+    const moved = await prisma.studioPost.updateMany({
+      where: {
+        userId: user.id,
+        ...(wid ? { workspaceId: wid } : {}),
+        archived: false,
+        status: { in: ["draft", "scheduled"] },
+        ...(origin ? { OR: [{ websiteOrigin: origin }, { websiteOrigin: null }] } : {}),
+      },
+      data: { archived: true, archivedAt: new Date() },
+    });
+    archivedCount = moved.count;
+  }
 
   // Locked fingerprints for this user (never regenerate / republish same combo)
   const locked = await prisma.studioPost.findMany({
-    where: { userId: user.id, locked: true, status: "published" },
+    where: { userId: user.id, locked: true, status: "published", archived: false },
     select: { fingerprint: true },
   });
   const lockedSet = new Set(locked.map((l) => l.fingerprint));
 
-  // Clear previous drafts for this workspace so regenerate is clean
-  await prisma.studioPost.deleteMany({
-    where: {
-      userId: user.id,
-      workspaceId: wid || undefined,
-      status: "draft",
-    },
+  // —— Part 6: AI picks best writing model + image provider for the whole batch ——
+  const providerDecision = await selectBestStudioProviders({
+    websiteUrl: origin || websiteUrl,
+    location: loc,
+    masterIntent: siteMasterIntent || analyzed[0]?.masterIntent,
+    dominantIntent: analyzed[0]?.writingIntent,
+    pageSample: analyzed,
+    includeImages: !!includeImages,
+    forceImageSource: imageSource === "auto" ? undefined : imageSource,
   });
+
+  const resolvedImageSource =
+    includeImages
+      ? imageSource === "auto"
+        ? providerDecision.image.source
+        : imageSource
+      : "free";
+  const preferredImageModel = providerDecision.image.model || undefined;
+  const writingModel = providerDecision.writing.model;
 
   const posts = [];
   const skippedLocked = [];
-  const platforms = Object.keys(PLATFORM_CONFIG);
+  const expectedTotal = analyzed.length * platforms.length;
 
-  for (const item of scan.analyzed) {
+  for (const item of analyzed) {
     for (const platform of platforms) {
       const fp = fingerprintOf(item.url, platform, item.keywords.primary);
       if (lockedSet.has(fp)) {
@@ -750,33 +1382,48 @@ export async function generateAutoPosterSuite({
         continue;
       }
 
-      const postData = generatePostContent(
+      const postData = await generatePostContentWithAi(
         platform,
         item.keywords,
         loc,
         item.url,
-        selectedTone
+        selectedTone,
+        {
+          writingIntent: item.writingIntent,
+          masterIntent: item.masterIntent || siteMasterIntent,
+          writingModel,
+        }
       );
-      const imageUrl = await generateStudioImage({
-        keyword: item.keywords.primary,
-        location: loc,
-        platform,
-        heading: postData.heading,
-      });
+
+      let imageUrl = null;
+      if (includeImages) {
+        imageUrl = await resolveImageUrl({
+          keyword: item.keywords.primary,
+          location: loc,
+          platform,
+          heading: postData.heading,
+          imageSource: resolvedImageSource,
+          preferredModel: preferredImageModel,
+        });
+      }
+
+      const secondaryPack =
+        item.keywords.secondaryKeywords || item.keywords.general || [item.keywords.secondary];
 
       const row = await prisma.studioPost.create({
         data: {
           userId: user.id,
           workspaceId: wid,
           fingerprint: fp,
+          websiteOrigin: origin || websiteOriginFromUrl(item.url),
           sourceUrl: item.url,
           platform,
           tone: selectedTone,
           location: loc,
           primaryKeyword: polishKeyword(item.keywords.primary, loc),
-          secondaryKeyword: polishKeyword(item.keywords.secondary, loc),
+          secondaryKeyword: polishKeyword(secondaryPack[0] || item.keywords.secondary, loc),
           generalKeywords: JSON.stringify(
-            (item.keywords.general || []).map((k) => polishKeyword(k, loc))
+            secondaryPack.map((k) => polishKeyword(k, loc)).slice(0, 4)
           ),
           heading: postData.heading,
           content: postData.content,
@@ -784,6 +1431,7 @@ export async function generateAutoPosterSuite({
           imageUrl,
           status: "draft",
           locked: false,
+          archived: false,
         },
       });
 
@@ -796,9 +1444,19 @@ export async function generateAutoPosterSuite({
     workspaceId: wid,
     location: loc,
     tone: selectedTone,
-    analyzed: scan.analyzed,
+    platforms,
+    expectedTotal,
+    pageCount: analyzed.length,
+    websiteOrigin: origin,
+    switchingWebsite,
+    archivedCount,
+    masterIntent: siteMasterIntent || analyzed[0]?.masterIntent || null,
+    analyzed,
     posts,
     skippedLocked,
+    includeImages: !!includeImages,
+    imageSource: includeImages ? resolvedImageSource : null,
+    providerDecision,
     tones: TONE_PRESETS,
   };
 }
@@ -831,16 +1489,25 @@ function serializePost(row) {
     scheduledDate: row.scheduledAt ? row.scheduledAt.toISOString() : null,
     publishedAt: row.publishedAt ? row.publishedAt.toISOString() : null,
     fingerprint: row.fingerprint,
+    websiteOrigin: row.websiteOrigin || websiteOriginFromUrl(row.sourceUrl),
     createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt ? row.updatedAt.toISOString() : null,
     workspaceId: row.workspaceId,
+    archived: !!row.archived,
+    archivedAt: row.archivedAt ? row.archivedAt.toISOString() : null,
+    /** Part 4 — true when publish is blocked until regenerate */
+    publishLocked: !!(row.locked && row.status === "published"),
   };
 }
 
-export async function listStudioPosts({ email, workspaceId, status }) {
+export async function listStudioPosts({ email, workspaceId, status, archived = false }) {
   const auth = await resolveUser(email);
   if (!auth.ok) return auth;
 
-  const where = { userId: auth.user.id };
+  const where = {
+    userId: auth.user.id,
+    archived: archived === true || archived === "true",
+  };
   if (workspaceId) where.workspaceId = workspaceId;
   if (status) where.status = status;
 
@@ -849,7 +1516,102 @@ export async function listStudioPosts({ email, workspaceId, status }) {
     orderBy: { updatedAt: "desc" },
   });
 
-  return { ok: true, posts: rows.map(serializePost) };
+  return { ok: true, posts: rows.map(serializePost), archived: where.archived };
+}
+
+/**
+ * Part 5 — Archived posts grouped into tables by websiteOrigin.
+ */
+export async function listArchivedStudioPosts({ email, workspaceId }) {
+  const auth = await resolveUser(email);
+  if (!auth.ok) return auth;
+
+  const where = {
+    userId: auth.user.id,
+    archived: true,
+  };
+  if (workspaceId) where.workspaceId = workspaceId;
+
+  const rows = await prisma.studioPost.findMany({
+    where,
+    orderBy: [{ websiteOrigin: "asc" }, { updatedAt: "desc" }],
+  });
+
+  const byWebsite = new Map();
+  for (const row of rows) {
+    const origin =
+      row.websiteOrigin || websiteOriginFromUrl(row.sourceUrl) || "Unknown website";
+    if (!byWebsite.has(origin)) {
+      byWebsite.set(origin, {
+        websiteOrigin: origin,
+        archivedAt: row.archivedAt ? row.archivedAt.toISOString() : null,
+        posts: [],
+      });
+    }
+    const bucket = byWebsite.get(origin);
+    bucket.posts.push(serializePost(row));
+    if (row.archivedAt) {
+      const iso = row.archivedAt.toISOString();
+      if (!bucket.archivedAt || iso > bucket.archivedAt) bucket.archivedAt = iso;
+    }
+  }
+
+  const tables = [...byWebsite.values()].map((t) => ({
+    ...t,
+    count: t.posts.length,
+    lockedCount: t.posts.filter((p) => p.publishLocked).length,
+  }));
+
+  return {
+    ok: true,
+    total: rows.length,
+    websiteCount: tables.length,
+    tables,
+  };
+}
+
+/**
+ * Part 5 — Clear archive (confirm required). Optional per-website.
+ */
+export async function clearStudioArchive({
+  email,
+  workspaceId,
+  websiteOrigin,
+  confirm,
+}) {
+  const auth = await resolveUser(email);
+  if (!auth.ok) return auth;
+
+  if (confirm !== true && confirm !== "true" && confirm !== "CLEAR") {
+    return {
+      ok: false,
+      status: 400,
+      error: "Confirmation required. Pass confirm: true to permanently clear archive.",
+    };
+  }
+
+  const where = {
+    userId: auth.user.id,
+    archived: true,
+  };
+  if (workspaceId) where.workspaceId = workspaceId;
+  if (websiteOrigin) {
+    where.OR = [
+      { websiteOrigin: String(websiteOrigin) },
+      // legacy rows without origin that match host
+      {
+        websiteOrigin: null,
+        sourceUrl: { contains: String(websiteOrigin).replace(/^https?:\/\//, "") },
+      },
+    ];
+  }
+
+  const result = await prisma.studioPost.deleteMany({ where });
+  return {
+    ok: true,
+    deleted: result.count,
+    websiteOrigin: websiteOrigin || null,
+  };
 }
 
 export async function publishStudioPost({ email, postId, alsoLive = true }) {
@@ -946,7 +1708,7 @@ export async function scheduleStudioPost({ email, postId, scheduledAt }) {
   });
   if (!post) return { ok: false, status: 404, error: "Post not found" };
   if (post.locked && post.status === "published") {
-    return { ok: false, status: 409, error: "Published posts are locked. Rewrite first." };
+    return { ok: false, status: 409, error: "Published posts are locked. Regenerate first." };
   }
 
   const updated = await prisma.studioPost.update({
@@ -961,7 +1723,44 @@ export async function scheduleStudioPost({ email, postId, scheduledAt }) {
   return { ok: true, post: serializePost(updated) };
 }
 
-export async function rewriteStudioPost({ email, postId, tone }) {
+/** Part 4 — cancel a scheduled auto-post → back to draft */
+export async function unscheduleStudioPost({ email, postId }) {
+  const auth = await resolveUser(email);
+  if (!auth.ok) return auth;
+
+  const post = await prisma.studioPost.findFirst({
+    where: { id: postId, userId: auth.user.id },
+  });
+  if (!post) return { ok: false, status: 404, error: "Post not found" };
+  if (post.status !== "scheduled") {
+    return { ok: false, status: 400, error: "Post is not scheduled." };
+  }
+
+  const updated = await prisma.studioPost.update({
+    where: { id: post.id },
+    data: {
+      status: "draft",
+      scheduledAt: null,
+      locked: false,
+    },
+  });
+
+  return { ok: true, post: serializePost(updated) };
+}
+
+/**
+ * Part 4 — Regenerate unlocks a published post for reuse.
+ * New fingerprint so the same page/platform/keyword can be published again
+ * without colliding with the previous locked publish.
+ * Image follows the same lock rule: stays until regenerate with includeImages.
+ */
+export async function rewriteStudioPost({
+  email,
+  postId,
+  tone,
+  includeImages = false,
+  imageSource = "auto",
+}) {
   const auth = await resolveUser(email);
   if (!auth.ok) return auth;
 
@@ -981,40 +1780,251 @@ export async function rewriteStudioPost({ email, postId, tone }) {
   const keywords = {
     primary: post.primaryKeyword,
     secondary: post.secondaryKeyword,
-    general,
+    secondaryKeywords: general.length ? general : [post.secondaryKeyword],
+    general: general.length ? general : [post.secondaryKeyword],
   };
 
-  const postData = generatePostContent(
+  // Recover intent line from prior draft when present
+  const intentMatch = String(post.content || "").match(
+    /Intent focus \(([^)]+)\):\s*(.+?)(?:\n|$)/
+  );
+  const writingIntent = intentMatch?.[1] || "Awareness";
+  const masterIntent =
+    intentMatch?.[2]?.trim() ||
+    `Rewrite for ${post.platform} using ${post.primaryKeyword} in ${post.location}`;
+
+  const providerDecision = await selectBestStudioProviders({
+    websiteUrl: post.websiteOrigin || post.sourceUrl,
+    location: post.location,
+    masterIntent,
+    dominantIntent: writingIntent,
+    pageSample: [{ url: post.sourceUrl, writingIntent, keywords: { primary: post.primaryKeyword } }],
+    includeImages: !!includeImages,
+    forceImageSource: imageSource === "auto" ? undefined : imageSource,
+  });
+
+  const rewritten = await generatePostContentWithAi(
     post.platform,
     keywords,
     post.location,
     post.sourceUrl,
-    selectedTone
+    selectedTone,
+    {
+      writingIntent,
+      masterIntent,
+      writingModel: providerDecision.writing.model,
+    }
   );
-  const imageUrl = await generateStudioImage({
-    keyword: keywords.primary,
-    location: post.location,
-    platform: post.platform,
-    heading: postData.heading,
-  });
+
+  // New fingerprint → unlocks reuse / re-publish of this page+platform combo
+  const newFingerprint = fingerprintOf(
+    post.sourceUrl,
+    post.platform,
+    `${keywords.primary}|regen-${Date.now()}`
+  );
+
+  let imageUrl = post.imageUrl;
+  if (includeImages) {
+    const resolvedSource =
+      imageSource === "auto" ? providerDecision.image.source : imageSource;
+    imageUrl = await resolveImageUrl({
+      keyword: keywords.primary,
+      location: post.location,
+      platform: post.platform,
+      heading: rewritten.heading,
+      imageSource: resolvedSource,
+      preferredModel: providerDecision.image.model || undefined,
+    });
+  }
 
   const updated = await prisma.studioPost.update({
     where: { id: post.id },
     data: {
+      fingerprint: newFingerprint,
       tone: selectedTone,
-      heading: postData.heading,
-      content: postData.content,
-      contentHtml: postData.contentHtml,
+      heading: rewritten.heading,
+      content: rewritten.content,
+      contentHtml: rewritten.contentHtml,
       imageUrl,
       status: "draft",
       locked: false,
       scheduledAt: null,
-      publishedAt: null,
+      archived: false,
+      archivedAt: null,
       rewriteOfId: post.rewriteOfId || post.id,
     },
   });
 
-  return { ok: true, post: serializePost(updated) };
+  return {
+    ok: true,
+    post: serializePost(updated),
+    unlocked: true,
+    restoredFromArchive: !!post.archived,
+    previousPublishedAt: post.publishedAt ? post.publishedAt.toISOString() : null,
+    providerDecision,
+  };
+}
+
+/**
+ * Part 3 — Attach / regenerate / clear image on a single post.
+ * Locked published posts cannot change images until rewrite unlocks them.
+ */
+export async function setStudioPostImage({
+  email,
+  postId,
+  action = "generate", // generate | clear
+  imageSource = "auto",
+}) {
+  const auth = await resolveUser(email);
+  if (!auth.ok) return auth;
+
+  const post = await prisma.studioPost.findFirst({
+    where: { id: postId, userId: auth.user.id },
+  });
+  if (!post) return { ok: false, status: 404, error: "Post not found" };
+
+  if (post.locked && post.status === "published") {
+    return {
+      ok: false,
+      status: 409,
+      error: "Post is locked. Rewrite first to change the image.",
+    };
+  }
+
+  if (action === "clear") {
+    const updated = await prisma.studioPost.update({
+      where: { id: post.id },
+      data: { imageUrl: null },
+    });
+    return { ok: true, post: serializePost(updated), imageSource: null };
+  }
+
+  const decision = await selectBestStudioProviders({
+    websiteUrl: post.websiteOrigin || post.sourceUrl,
+    location: post.location,
+    masterIntent: post.heading,
+    dominantIntent: "Awareness",
+    pageSample: [{ url: post.sourceUrl, keywords: { primary: post.primaryKeyword } }],
+    includeImages: true,
+    forceImageSource: imageSource === "auto" ? undefined : imageSource,
+  });
+  const resolvedSource =
+    imageSource === "auto" ? decision.image.source : imageSource;
+
+  const result = await generateStudioImage({
+    keyword: post.primaryKeyword,
+    location: post.location,
+    platform: post.platform,
+    heading: post.heading,
+    imageSource: resolvedSource,
+    preferredModel: decision.image.model || undefined,
+  });
+  const url = typeof result === "string" ? result : result?.url;
+  if (!url) {
+    return {
+      ok: false,
+      status: 502,
+      error: result?.error || "Could not generate image. Try Free source.",
+    };
+  }
+
+  const updated = await prisma.studioPost.update({
+    where: { id: post.id },
+    data: { imageUrl: url },
+  });
+
+  return {
+    ok: true,
+    post: serializePost(updated),
+    imageMeta: typeof result === "object" ? result : { url, source: resolvedSource },
+    providerDecision: decision,
+  };
+}
+
+/**
+ * Part 3 — Batch attach images to draft posts missing images (or force all drafts).
+ */
+export async function attachImagesToStudioPosts({
+  email,
+  workspaceId,
+  imageSource = "auto",
+  onlyMissing = true,
+  postIds,
+}) {
+  const auth = await resolveUser(email);
+  if (!auth.ok) return auth;
+
+  const where = {
+    userId: auth.user.id,
+    status: { in: ["draft", "scheduled"] },
+    locked: false,
+  };
+  if (workspaceId) where.workspaceId = workspaceId;
+  if (Array.isArray(postIds) && postIds.length) {
+    where.id = { in: postIds };
+  } else if (onlyMissing) {
+    where.OR = [{ imageUrl: null }, { imageUrl: "" }];
+  }
+
+  const rows = await prisma.studioPost.findMany({
+    where,
+    orderBy: { updatedAt: "desc" },
+    take: 60,
+  });
+
+  const decision = await selectBestStudioProviders({
+    websiteUrl: rows[0]?.websiteOrigin || rows[0]?.sourceUrl,
+    location: rows[0]?.location,
+    masterIntent: rows[0]?.heading,
+    includeImages: true,
+    forceImageSource: imageSource === "auto" ? undefined : imageSource,
+    pageSample: rows.slice(0, 5).map((p) => ({
+      url: p.sourceUrl,
+      keywords: { primary: p.primaryKeyword },
+    })),
+  });
+  const resolvedSource =
+    imageSource === "auto" ? decision.image.source : imageSource;
+
+  const posts = [];
+  let attached = 0;
+  let failed = 0;
+
+  for (const post of rows) {
+    try {
+      const result = await generateStudioImage({
+        keyword: post.primaryKeyword,
+        location: post.location,
+        platform: post.platform,
+        heading: post.heading,
+        imageSource: resolvedSource,
+        preferredModel: decision.image.model || undefined,
+      });
+      const url = typeof result === "string" ? result : result?.url;
+      if (!url) {
+        failed += 1;
+        continue;
+      }
+      const updated = await prisma.studioPost.update({
+        where: { id: post.id },
+        data: { imageUrl: url },
+      });
+      posts.push(serializePost(updated));
+      attached += 1;
+    } catch (err) {
+      console.error("[attachImages]", post.id, err.message);
+      failed += 1;
+    }
+  }
+
+  return {
+    ok: true,
+    attached,
+    failed,
+    imageSource: resolvedSource,
+    providerDecision: decision,
+    posts,
+  };
 }
 
 /**
@@ -1026,6 +2036,7 @@ export async function processDueScheduledPosts() {
       status: "scheduled",
       scheduledAt: { lte: new Date() },
       locked: false,
+      archived: false,
     },
     take: 50,
   });

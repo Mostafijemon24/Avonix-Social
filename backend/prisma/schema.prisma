@@ -260,12 +260,13 @@ model Lead {
   @@index([status])
 }
 
-/** Content Studio auto-poster records (draft / scheduled / published+locked) */
+/** Content Studio auto-poster records (draft / scheduled / published+locked / archived) */
 model StudioPost {
   id             String    @id @default(cuid())
   userId         String
   workspaceId    String?
   fingerprint    String // url|platform|primaryKeyword — prevents duplicate publish
+  websiteOrigin  String? // e.g. https://example.com — groups posts per website
   sourceUrl      String
   platform       String // Facebook | Instagram | LinkedIn | GMB
   tone           String
@@ -279,6 +280,8 @@ model StudioPost {
   imageUrl       String?
   status         String    @default("draft") // draft | scheduled | published
   locked         Boolean   @default(false)
+  archived       Boolean   @default(false)
+  archivedAt     DateTime?
   scheduledAt    DateTime?
   publishedAt    DateTime?
   rewriteOfId    String?
@@ -287,5 +290,7 @@ model StudioPost {
 
   @@index([userId, fingerprint])
   @@index([userId, workspaceId, status])
+  @@index([userId, workspaceId, archived])
+  @@index([userId, websiteOrigin, archived])
   @@index([status, scheduledAt])
 }

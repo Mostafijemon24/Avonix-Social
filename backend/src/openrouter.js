@@ -120,7 +120,7 @@ export function enforceWordLimit(text, maxWords) {
  * then falls back to multimodal chat models.
  * Returns { ok, url } where url is a public HTTPS or persisted upload URL.
  */
-export async function generateImage({ prompt, aspectRatio = "1:1" }) {
+export async function generateImage({ prompt, aspectRatio = "1:1", preferredModel }) {
   const apiKey = process.env.OPENROUTER_API_KEY;
 
   if (!apiKey) {
@@ -138,11 +138,12 @@ export async function generateImage({ prompt, aspectRatio = "1:1" }) {
   }
 
   // 1) ChatGPT / OpenAI dedicated Images API (preferred)
-  const preferred = process.env.IMAGE_MODEL || "openai/gpt-image-1";
+  const preferred = preferredModel || process.env.IMAGE_MODEL || "openai/gpt-image-1";
   const chatGptModels = [
     ...new Set(
       [
         preferred.startsWith("openai/") ? preferred : null,
+        preferredModel?.startsWith("openai/") ? preferredModel : null,
         "openai/gpt-image-1",
         "openai/gpt-5-image",
         "openai/gpt-5-image-mini",
@@ -172,6 +173,7 @@ export async function generateImage({ prompt, aspectRatio = "1:1" }) {
     ...new Set(
       [
         preferred.startsWith("google/") ? preferred : null,
+        preferredModel?.startsWith("google/") ? preferredModel : null,
         "google/gemini-2.5-flash-image",
         "google/gemini-3.1-flash-image-preview",
         "google/gemini-2.5-flash-image-preview",

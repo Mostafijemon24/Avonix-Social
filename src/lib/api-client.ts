@@ -98,8 +98,52 @@ export type StudioPostRecord = {
   scheduledDate: string | null;
   publishedAt: string | null;
   fingerprint: string;
+  websiteOrigin?: string | null;
   createdAt: string;
+  updatedAt?: string | null;
   workspaceId: string | null;
+  archived?: boolean;
+  archivedAt?: string | null;
+  publishLocked?: boolean;
+};
+
+export type ArchiveWebsiteTable = {
+  websiteOrigin: string;
+  archivedAt: string | null;
+  count: number;
+  lockedCount: number;
+  posts: StudioPostRecord[];
+};
+
+export type StudioPageAnalysis = {
+  url: string;
+  reachable?: boolean;
+  title?: string;
+  areaCoverage: string;
+  writingIntent: string;
+  masterIntent: string;
+  keywords: {
+    primary: string;
+    secondary: string[];
+  };
+};
+
+export type WebsiteAnalyzeResult = {
+  ok: boolean;
+  workspaceId: string | null;
+  websiteUrl: string;
+  location: string;
+  needsLocation: boolean;
+  discoveredCount: number;
+  pageCount: number;
+  areaCoverage: {
+    summary: string;
+    areas: string[];
+  };
+  masterIntent: string;
+  dominantIntent: string;
+  pages: StudioPageAnalysis[];
+  error?: string;
 };
 
 export const api = {
@@ -470,19 +514,45 @@ export const api = {
       body: JSON.stringify({ email, sitemap }),
     }),
 
-  /** Avonix Social — scan ≤15 URLs + multi-platform posts */
+  /** Avonix Social — Part 2: ≤15 pages × FB/LinkedIn/GMB posts */
   generateAutoPoster: (payload: {
     email: string;
     workspaceId?: string;
-    urls: string[] | string;
+    urls?: string[] | string;
     location: string;
     tone?: string;
+    pages?: StudioPageAnalysis[];
+    masterIntent?: string;
+    includeImages?: boolean;
+    imageSource?: "auto" | "ai" | "free";
+    platforms?: string[];
+    websiteUrl?: string;
   }) =>
     request<{
       ok: boolean;
       workspaceId: string | null;
       location: string;
       tone: string;
+      platforms?: string[];
+      expectedTotal?: number;
+      pageCount?: number;
+      websiteOrigin?: string | null;
+      switchingWebsite?: boolean;
+      archivedCount?: number;
+      masterIntent?: string | null;
+      includeImages?: boolean;
+      imageSource?: string | null;
+      providerDecision?: {
+        method?: string;
+        writing?: { id: string; model: string; label: string; reason: string };
+        image?: {
+          id: string;
+          model: string | null;
+          source: string;
+          label: string;
+          reason: string;
+        };
+      };
       analyzed: Array<{
         url: string;
         reachable: boolean;
@@ -491,7 +561,11 @@ export const api = {
           primary: string;
           secondary: string;
           general: string[];
+          secondaryKeywords?: string[];
         };
+        writingIntent?: string;
+        masterIntent?: string;
+        areaCoverage?: string;
       }>;
       posts: StudioPostRecord[];
       skippedLocked: Array<{ url: string; platform: string; reason: string }>;
@@ -503,12 +577,55 @@ export const api = {
       timeoutMs: 5 * 60 * 1000,
     }),
 
+  /** Part 1 — website → pages + coverage + intent + keywords */
+  analyzeWebsiteForStudio: (payload: {
+    email: string;
+    workspaceId?: string;
+    websiteUrl: string;
+    location?: string;
+    maxPages?: number;
+  }) =>
+    request<WebsiteAnalyzeResult>("/auto-poster/analyze-website", {
+      method: "POST",
+      body: JSON.stringify(payload),
+      timeoutMs: 3 * 60 * 1000,
+    }),
+
   listStudioPosts: (email: string, workspaceId?: string, status?: string) =>
     request<{ ok: boolean; posts: StudioPostRecord[] }>(
       `/auto-poster/posts?email=${encodeURIComponent(email)}${
         workspaceId ? `&workspaceId=${encodeURIComponent(workspaceId)}` : ""
       }${status ? `&status=${encodeURIComponent(status)}` : ""}`
     ),
+
+  listArchivedStudioPosts: (email: string, workspaceId?: string) =>
+    request<{
+      ok: boolean;
+      total: number;
+      websiteCount: number;
+      tables: ArchiveWebsiteTable[];
+      error?: string;
+    }>(
+      `/auto-poster/archive?email=${encodeURIComponent(email)}${
+        workspaceId ? `&workspaceId=${encodeURIComponent(workspaceId)}` : ""
+      }`
+    ),
+
+  clearStudioArchive: (payload: {
+    email: string;
+    workspaceId?: string;
+    websiteOrigin?: string;
+    confirm: boolean | "CLEAR";
+  }) =>
+    request<{
+      ok: boolean;
+      deleted: number;
+      websiteOrigin?: string | null;
+      error?: string;
+    }>("/auto-poster/archive/clear", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
 
   publishStudioPost: (payload: { email: string; postId: string; alsoLive?: boolean }) =>
     request<{ ok: boolean; post: StudioPostRecord; live?: unknown; error?: string }>(
@@ -522,10 +639,77 @@ export const api = {
       body: JSON.stringify(payload),
     }),
 
-    rewriteStudioPost: (payload: { email: string; postId: string; tone?: string }) =>
-    request<{ ok: boolean; post: StudioPostRecord; error?: string }>("/auto-poster/rewrite", {
+  unscheduleStudioPost: (payload: { email: string; postId: string }) =>
+    request<{ ok: boolean; post: StudioPostRecord; error?: string }>("/auto-poster/unschedule", {
       method: "POST",
       body: JSON.stringify(payload),
+    }),
+
+  rewriteStudioPost: (payload: {
+    email: string;
+    postId: string;
+    tone?: string;
+    includeImages?: boolean;
+    imageSource?: "auto" | "ai" | "free";
+  }) =>
+    request<{
+      ok: boolean;
+      post: StudioPostRecord;
+      unlocked?: boolean;
+      restoredFromArchive?: boolean;
+      previousPublishedAt?: string | null;
+      error?: string;
+    }>("/auto-poster/rewrite", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
+  setStudioPostImage: (payload: {
+    email: string;
+    postId: string;
+    action?: "generate" | "clear";
+    imageSource?: "auto" | "ai" | "free";
+  }) =>
+    request<{
+      ok: boolean;
+      post: StudioPostRecord;
+      imageMeta?: { url?: string | null; source?: string; provider?: string | null };
+      error?: string;
+    }>("/auto-poster/post-image", {
+      method: "POST",
+      body: JSON.stringify(payload),
+      timeoutMs: 2 * 60 * 1000,
+    }),
+
+  attachStudioImages: (payload: {
+    email: string;
+    workspaceId?: string;
+    imageSource?: "auto" | "ai" | "free";
+    onlyMissing?: boolean;
+    postIds?: string[];
+  }) =>
+    request<{
+      ok: boolean;
+      attached: number;
+      failed: number;
+      imageSource: string;
+      providerDecision?: {
+        method?: string;
+        writing?: { id: string; model: string; label: string; reason: string };
+        image?: {
+          id: string;
+          model: string | null;
+          source: string;
+          label: string;
+          reason: string;
+        };
+      };
+      posts: StudioPostRecord[];
+      error?: string;
+    }>("/auto-poster/attach-images", {
+      method: "POST",
+      body: JSON.stringify(payload),
+      timeoutMs: 5 * 60 * 1000,
     }),
 };
 

@@ -78,7 +78,7 @@ function isLikelyPageUrl(u) {
   }
 }
 
-function urlPriority(u) {
+export function urlPriority(u) {
   try {
     const path = new URL(u).pathname.toLowerCase();
     if (path === "/" || path === "") return 100;
@@ -92,7 +92,7 @@ function urlPriority(u) {
   }
 }
 
-async function discoverSitemapUrls(origin) {
+export async function discoverSitemapUrls(origin) {
   const candidates = [
     `${origin}/sitemap.xml`,
     `${origin}/sitemap_index.xml`,
