@@ -19,6 +19,7 @@ import { selectBestStudioProviders } from "./studioProviderRouter.js";
 import {
   resolveFreeImage,
   freeImageRateLimitPause,
+  buildRelevantImagePrompt,
 } from "./freeImageService.js";
 import prisma from "../db.js";
 
@@ -65,7 +66,8 @@ export const PLATFORM_CONFIG = {
     maxWords: 160,
     allowLinks: true,
     allowHashtags: true,
-    image: { width: 1200, height: 630, aspect: "16:9" },
+    // Link preview / feed — HD landscape
+    image: { width: 1920, height: 1008, aspect: "16:9" },
   },
   Instagram: {
     key: "instagram",
@@ -81,7 +83,8 @@ export const PLATFORM_CONFIG = {
     maxWords: 200,
     allowLinks: true,
     allowHashtags: true,
-    image: { width: 1200, height: 627, aspect: "16:9" },
+    // LinkedIn shared image — HD landscape
+    image: { width: 1920, height: 1005, aspect: "16:9" },
   },
   GMB: {
     key: "google_business",
@@ -89,7 +92,8 @@ export const PLATFORM_CONFIG = {
     maxWords: 130,
     allowLinks: false,
     allowHashtags: false,
-    image: { width: 1024, height: 576, aspect: "16:9" },
+    // Google Business Profile post — HD 16:9
+    image: { width: 1200, height: 900, aspect: "4:3" },
   },
 };
 
@@ -860,16 +864,9 @@ Write one complete post body that naturally uses the primary keyword and at leas
   }
 }
 
-/** Scene-based photoreal prompt — never ask the model to render keyword text/logos */
-function buildPhotorealImagePrompt(keyword, location, heading) {
-  const place = normalizeLocation(location) || "a local business district";
-  const topic = polishKeyword(keyword, place);
-  const hint = heading ? ` Scene mood inspired by: ${String(heading).slice(0, 80)}.` : "";
-  return `Photorealistic natural photograph of a real-world professional scene related to "${topic}" in ${place}.${hint}
-Show authentic people, hands at work, tools, materials, or a real studio/office environment that matches this service.
-Natural window light or golden hour, shallow depth of field, sharp detail on textures and faces, documentary style, shot on a full-frame camera, 85mm lens, ISO 100, ultra detailed, 8K resolution.
-Strictly forbidden: any text, letters, words, typography, watermarks, logos, brand marks, UI, posters with writing, 3D metallic emblems, sci-fi city logos, abstract chrome badges, fake signage.
-No illustrations, no cartoon, no CGI logo mockups — only realistic natural photography.`;
+/** Scene-based photoreal prompt — keyword → visual subject, never render text/logos */
+function buildPhotorealImagePrompt(keyword, location, heading, platform) {
+  return buildRelevantImagePrompt({ keyword, location, heading, platform });
 }
 
 /**
@@ -888,8 +885,13 @@ export async function generateStudioImage({
 }) {
   const cfg = PLATFORM_CONFIG[platform] || PLATFORM_CONFIG.Facebook;
   const { width, height } = cfg.image;
-  const prompt = buildPhotorealImagePrompt(keyword, location, heading);
-  const aspectRatio = platform === "Instagram" ? "1:1" : "16:9";
+  const prompt = buildPhotorealImagePrompt(keyword, location, heading, platform);
+  const aspectRatio =
+    platform === "Instagram"
+      ? "1:1"
+      : platform === "GMB"
+        ? "4:3"
+        : "16:9";
   const mode = ["auto", "ai", "free"].includes(imageSource) ? imageSource : "auto";
   const freeOnly =
     process.env.STUDIO_FREE_IMAGES_ONLY === "1" ||
@@ -905,6 +907,7 @@ export async function generateStudioImage({
       heading,
       width,
       height,
+      platform,
     });
     return free;
   }
@@ -921,6 +924,8 @@ export async function generateStudioImage({
           url: img.url,
           source: "ai",
           provider: img.model || preferredModel || "openrouter",
+          width,
+          height,
         };
       }
     } catch (err) {
@@ -940,6 +945,7 @@ export async function generateStudioImage({
     heading,
     width,
     height,
+    platform,
   });
   return { ...free, fallbackFromAi: true };
 }

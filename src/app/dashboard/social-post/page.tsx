@@ -863,8 +863,10 @@ export default function ContentStudioPage() {
                 ))}
               </div>
               <p className="text-[10px] text-slate-500 mt-2">
-                Free = Pollinations Flux (AI) + Pexels/Unsplash stock fallback — $0. Optional free
-                API keys on the server raise rate limits.
+                Free = topic-matched Pollinations Flux (HD) first, then scored Pexels/Unsplash.
+                Sizes differ by platform: Facebook 1920×1008 · LinkedIn 1920×1005 · GMB 1200×900.
+                For near-perfect relevance use Paid AI (gpt-image). After deploy, Regenerate image
+                on old posts.
               </p>
             </div>
           </div>
