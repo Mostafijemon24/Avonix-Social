@@ -1197,146 +1197,266 @@ function PostListRow({
     .trim()
     .slice(0, 140);
   const busy = !!(imageBusy || actionBusy);
+  const sizeLabel = PLATFORM_IMAGE_SIZE[post.platform]?.label || "HD";
 
-  return (
-    <div
-      className={`glass-card rounded-xl border overflow-hidden ${
-        locked ? "border-emerald-900/60" : "border-navy-800"
-      }`}
-    >
-      <div className="flex items-stretch gap-0">
+  const actionButtons = (
+    <div className="flex flex-wrap gap-2 px-3 pb-3">
+      {!locked && (
+        <>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => onGenerateImage(post.id)}
+            className="inline-flex items-center justify-center gap-1.5 border border-violet-800/50 text-violet-300 text-[11px] font-bold px-2.5 py-1.5 rounded-lg bg-violet-950/30 disabled:opacity-50"
+          >
+            {imageBusy ? (
+              <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <ImageIcon className="w-3.5 h-3.5" />
+            )}
+            {post.image ? "Regenerate image" : "Attach image"}
+          </button>
+          {post.image && (
+            <>
+              <button
+                type="button"
+                onClick={() =>
+                  onDownloadImage(
+                    post.image!,
+                    `avonix-${post.platform}-${post.id.slice(0, 8)}.jpg`
+                  )
+                }
+                className="inline-flex items-center justify-center gap-1.5 border border-navy-600 text-slate-200 text-[11px] font-bold px-2.5 py-1.5 rounded-lg hover:bg-navy-900"
+              >
+                <Download className="w-3.5 h-3.5" />
+                Download
+              </button>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => onClearImage(post.id)}
+                className="inline-flex items-center justify-center gap-1.5 border border-navy-600 text-slate-400 text-[11px] font-bold px-2.5 py-1.5 rounded-lg hover:bg-navy-900 disabled:opacity-50"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                Detach
+              </button>
+            </>
+          )}
+        </>
+      )}
+
+      {locked ? (
         <button
           type="button"
-          onClick={onToggle}
-          className="min-w-0 flex-1 flex items-center gap-3 px-3 py-2.5 hover:bg-navy-900/50 text-left"
+          disabled={busy}
+          onClick={() => onRewrite(post.id)}
+          className="inline-flex items-center justify-center gap-1.5 border border-orange-800/50 text-orange-300 text-[11px] font-bold px-2.5 py-1.5 rounded-lg bg-orange-950/30 hover:bg-orange-950/50 disabled:opacity-50"
         >
-          <div className="relative w-12 h-12 rounded-lg overflow-hidden bg-navy-900 shrink-0 border border-navy-700">
-            {post.image ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={post.image}
-                alt=""
-                className="w-full h-full object-cover"
-                onError={(e) => {
-                  const el = e.currentTarget;
-                  el.style.display = "none";
-                  const fallback = el.nextElementSibling;
-                  if (fallback instanceof HTMLElement) fallback.style.display = "flex";
-                }}
-              />
-            ) : null}
-            <div
-              className={`w-full h-full flex flex-col items-center justify-center text-slate-600 ${
-                post.image ? "hidden" : ""
-              }`}
-              style={post.image ? { display: "none" } : undefined}
-            >
-              <ImageIcon className="w-4 h-4" />
-              <span className="text-[7px] font-bold text-slate-500 mt-0.5 leading-none px-0.5 text-center">
-                {PLATFORM_IMAGE_SIZE[post.platform]?.label?.split(" · ")[0] || "HD"}
-              </span>
-            </div>
-            {locked ? (
-              <span className="absolute inset-0 bg-navy-950/55 flex items-center justify-center">
-                <Lock className="w-4 h-4 text-emerald-400" />
-              </span>
-            ) : (
-              <span
-                className="absolute bottom-0.5 right-0.5 bg-navy-950/80 rounded p-0.5 border border-navy-600"
-                title="Unlocked draft — locks after publish"
-              >
-                <Unlock className="w-3 h-3 text-slate-400" />
-              </span>
-            )}
-          </div>
-
-          <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap items-center gap-2 mb-0.5">
-              {platformIcon(post.platform)}
-              <span className="text-sm font-bold text-white">{post.platform}</span>
-              <span className="text-[10px] uppercase font-bold text-slate-500 border border-navy-600 px-1.5 py-0.5 rounded">
-                {post.tone}
-              </span>
-              <span
-                className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
-                  words >= minWords
-                    ? "text-emerald-400 bg-emerald-950/30"
-                    : "text-red-400 bg-red-950/30"
-                }`}
-              >
-                {words} words · min {minWords}
-              </span>
-              {post.image ? (
-                <span className="text-[10px] font-bold text-violet-300 bg-violet-950/30 px-1.5 py-0.5 rounded">
-                  Image on
-                </span>
-              ) : (
-                <span className="text-[10px] font-bold text-slate-500 bg-navy-900 px-1.5 py-0.5 rounded">
-                  No image
-                </span>
-              )}
-              {locked ? (
-                <span className="text-[10px] font-bold text-emerald-400 inline-flex items-center gap-1 bg-emerald-950/40 border border-emerald-800/50 px-1.5 py-0.5 rounded">
-                  <Lock className="w-3 h-3" /> Locked
-                </span>
-              ) : (
-                <span className="text-[10px] font-bold text-slate-400 inline-flex items-center gap-1 bg-navy-900 border border-navy-600 px-1.5 py-0.5 rounded">
-                  <Unlock className="w-3 h-3" /> Unlocked
-                </span>
-              )}
-              {post.status === "scheduled" && post.scheduledDate && (
-                <span className="text-[10px] font-bold text-sky-300 inline-flex items-center gap-1">
-                  <Clock className="w-3 h-3" />
-                  {new Date(post.scheduledDate).toLocaleString()}
-                </span>
-              )}
-              {post.publishedAt && (
-                <span className="text-[10px] font-bold text-slate-400 inline-flex items-center gap-1">
-                  <Clock className="w-3 h-3" />
-                  Last posted {new Date(post.publishedAt).toLocaleString()}
-                </span>
-              )}
-            </div>
-            <p className="text-xs font-semibold text-slate-200 truncate">{post.heading}</p>
-            {!expanded && (
-              <p className="text-[11px] text-slate-500 truncate mt-0.5">{snippet}…</p>
-            )}
-          </div>
-
-          <span className="text-[10px] text-slate-500 font-bold shrink-0">
-            {expanded ? "Hide" : "Open"}
-          </span>
+          {actionBusy ? (
+            <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+          ) : (
+            <Unlock className="w-3.5 h-3.5" />
+          )}
+          Re-generate & unlock
         </button>
-
-        {/* Always-visible lock + regenerate (Part 4) */}
-        {locked && (
-          <div className="flex items-center gap-1 pr-2 pl-1 border-l border-navy-800 bg-navy-950/40">
+      ) : post.status === "scheduled" ? (
+        <>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => onUnschedule(post.id)}
+            className="inline-flex items-center justify-center gap-1.5 border border-navy-600 text-slate-300 text-[11px] font-bold px-2.5 py-1.5 rounded-lg hover:bg-navy-900 disabled:opacity-50"
+          >
+            <X className="w-3.5 h-3.5" />
+            Cancel schedule
+          </button>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => onPublish(post.id)}
+            className="inline-flex items-center justify-center gap-1.5 bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white text-[11px] font-bold px-2.5 py-1.5 rounded-lg"
+          >
+            <PlusCircle className="w-3.5 h-3.5" />
+            Publish now
+          </button>
+        </>
+      ) : (
+        <>
+          <div className="relative">
+            {showPicker && (
+              <div className="absolute bottom-full left-0 mb-2 bg-navy-900 border border-navy-600 rounded-xl p-3 z-20 w-[260px] shadow-xl">
+                <p className="text-[10px] text-slate-400 font-bold mb-2">Auto-post at</p>
+                <input
+                  type="datetime-local"
+                  value={scheduleDate}
+                  onChange={(e) => setScheduleDate(e.target.value)}
+                  className="w-full text-xs border border-navy-600 bg-navy-950 rounded-lg px-2 py-2 text-slate-200 mb-2"
+                />
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => {
+                      onSchedule(post.id, scheduleDate);
+                      setShowPicker(false);
+                    }}
+                    className="flex-1 bg-sky-600 text-white text-xs font-bold py-2 rounded-lg disabled:opacity-50"
+                  >
+                    Confirm
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowPicker(false)}
+                    className="flex-1 bg-navy-800 text-slate-300 text-xs font-bold py-2 rounded-lg"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
             <button
               type="button"
               disabled={busy}
-              title="Regenerate unlocks this post for reuse"
-              onClick={() => onRewrite(post.id)}
-              className="inline-flex items-center gap-1 text-[10px] font-bold text-orange-300 border border-orange-800/50 bg-orange-950/30 px-2 py-1.5 rounded-lg hover:bg-orange-950/60 disabled:opacity-50"
+              onClick={() => setShowPicker(!showPicker)}
+              className="inline-flex items-center justify-center gap-1.5 border border-sky-800/50 text-sky-300 text-[11px] font-bold px-2.5 py-1.5 rounded-lg bg-sky-950/30 disabled:opacity-50"
             >
-              {actionBusy ? (
-                <RefreshCw className="w-3 h-3 animate-spin" />
-              ) : (
-                <Unlock className="w-3 h-3" />
-              )}
-              Re-generate
+              <Calendar className="w-3.5 h-3.5" />
+              Schedule auto-post
             </button>
           </div>
-        )}
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => onPublish(post.id)}
+            className="inline-flex items-center justify-center gap-1.5 bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white text-[11px] font-bold px-2.5 py-1.5 rounded-lg"
+          >
+            {actionBusy ? (
+              <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <PlusCircle className="w-3.5 h-3.5" />
+            )}
+            Publish live
+          </button>
+        </>
+      )}
+
+      <button
+        type="button"
+        onClick={onToggle}
+        className="inline-flex items-center justify-center gap-1 border border-navy-600 text-slate-400 text-[11px] font-bold px-2.5 py-1.5 rounded-lg hover:bg-navy-900 ml-auto"
+      >
+        {expanded ? "Hide text" : "View text"}
+      </button>
+    </div>
+  );
+
+  return (
+    <div
+      className={`glass-card rounded-xl border overflow-visible ${
+        locked ? "border-emerald-900/60" : "border-navy-800"
+      }`}
+    >
+      {/* Collapsed header — always visible */}
+      <div className="flex items-start gap-3 px-3 pt-2.5 pb-2">
+        <div className="relative w-12 h-12 rounded-lg overflow-hidden bg-navy-900 shrink-0 border border-navy-700">
+          {post.image ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={post.image}
+              alt=""
+              className="w-full h-full object-cover"
+              onError={(e) => {
+                const el = e.currentTarget;
+                el.style.display = "none";
+                const fallback = el.nextElementSibling;
+                if (fallback instanceof HTMLElement) fallback.style.display = "flex";
+              }}
+            />
+          ) : null}
+          <div
+            className={`w-full h-full flex flex-col items-center justify-center text-slate-600 ${
+              post.image ? "hidden" : ""
+            }`}
+            style={post.image ? { display: "none" } : undefined}
+          >
+            <ImageIcon className="w-4 h-4" />
+            <span className="text-[7px] font-bold text-slate-500 mt-0.5 leading-none px-0.5 text-center">
+              {sizeLabel.split(" · ")[0]}
+            </span>
+          </div>
+          {locked ? (
+            <span className="absolute inset-0 bg-navy-950/55 flex items-center justify-center">
+              <Lock className="w-4 h-4 text-emerald-400" />
+            </span>
+          ) : (
+            <span
+              className="absolute bottom-0.5 right-0.5 bg-navy-950/80 rounded p-0.5 border border-navy-600"
+              title="Unlocked draft"
+            >
+              <Unlock className="w-3 h-3 text-slate-400" />
+            </span>
+          )}
+        </div>
+
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2 mb-0.5">
+            {platformIcon(post.platform)}
+            <span className="text-sm font-bold text-white">{post.platform}</span>
+            <span className="text-[10px] uppercase font-bold text-slate-500 border border-navy-600 px-1.5 py-0.5 rounded">
+              {post.tone}
+            </span>
+            <span
+              className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                words >= minWords
+                  ? "text-emerald-400 bg-emerald-950/30"
+                  : "text-red-400 bg-red-950/30"
+              }`}
+            >
+              {words} words · min {minWords}
+            </span>
+            {post.image ? (
+              <span className="text-[10px] font-bold text-violet-300 bg-violet-950/30 px-1.5 py-0.5 rounded">
+                Image on · {sizeLabel}
+              </span>
+            ) : (
+              <span className="text-[10px] font-bold text-slate-500 bg-navy-900 px-1.5 py-0.5 rounded">
+                No image · need {sizeLabel}
+              </span>
+            )}
+            {locked ? (
+              <span className="text-[10px] font-bold text-emerald-400 inline-flex items-center gap-1 bg-emerald-950/40 border border-emerald-800/50 px-1.5 py-0.5 rounded">
+                <Lock className="w-3 h-3" /> Locked
+              </span>
+            ) : (
+              <span className="text-[10px] font-bold text-slate-400 inline-flex items-center gap-1 bg-navy-900 border border-navy-600 px-1.5 py-0.5 rounded">
+                <Unlock className="w-3 h-3" /> Unlocked
+              </span>
+            )}
+            {post.status === "scheduled" && post.scheduledDate && (
+              <span className="text-[10px] font-bold text-sky-300 inline-flex items-center gap-1">
+                <Clock className="w-3 h-3" />
+                {new Date(post.scheduledDate).toLocaleString()}
+              </span>
+            )}
+          </div>
+          <p className="text-xs font-semibold text-slate-200 truncate">{post.heading}</p>
+          {!expanded && (
+            <p className="text-[11px] text-slate-500 truncate mt-0.5">{snippet}…</p>
+          )}
+        </div>
       </div>
 
+      {/* Actions always visible when collapsed — no need to Open */}
+      <div className="border-t border-navy-800/80 pt-2">{actionButtons}</div>
+
+      {/* Expanded: full image + full text only */}
       {expanded && (
-        <div className="px-4 pb-4 pt-1 border-t border-navy-800 space-y-3">
+        <div className="px-3 pb-4 border-t border-navy-800 space-y-3">
           {post.publishedAt && (
-            <p className="text-[11px] text-slate-400 font-semibold inline-flex items-center gap-1.5">
+            <p className="text-[11px] text-slate-400 font-semibold inline-flex items-center gap-1.5 pt-3">
               <Clock className="w-3.5 h-3.5 text-sky-400" />
               Last posted:{" "}
               <span className="text-white">{new Date(post.publishedAt).toLocaleString()}</span>
-              {locked ? " · locked until re-generate" : " · unlocked for reuse"}
             </p>
           )}
 
@@ -1349,13 +1469,8 @@ function PostListRow({
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={post.image} alt="" className="w-full h-auto object-cover" />
               <span className="absolute bottom-2 left-2 inline-flex items-center gap-1 text-[10px] font-bold bg-navy-950/85 text-slate-200 px-2 py-1 rounded-lg border border-navy-600 backdrop-blur-sm">
-                Perfect size: {PLATFORM_IMAGE_SIZE[post.platform]?.label || "HD"}
+                Perfect size: {sizeLabel}
               </span>
-              {locked && (
-                <span className="absolute top-2 right-2 inline-flex items-center gap-1 text-[10px] font-bold bg-navy-950/80 text-emerald-400 px-2 py-1 rounded-lg border border-emerald-900/50">
-                  <Lock className="w-3 h-3" /> Image locked
-                </span>
-              )}
             </div>
           )}
 
@@ -1389,150 +1504,6 @@ function PostListRow({
                   S{i + 1}: {kw}
                 </span>
               ))}
-          </div>
-
-          {/* Image controls — locked posts cannot change image until regenerate */}
-          {!locked && (
-            <div className="pt-2 border-t border-navy-700 flex flex-wrap gap-2">
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => onGenerateImage(post.id)}
-                className="inline-flex items-center justify-center gap-1.5 border border-violet-800/50 text-violet-300 text-xs font-bold px-3 py-2 rounded-xl bg-violet-950/30 disabled:opacity-50"
-              >
-                {imageBusy ? (
-                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                ) : (
-                  <ImageIcon className="w-3.5 h-3.5" />
-                )}
-                {post.image ? "Regenerate image" : "Attach image"}
-              </button>
-              {post.image && (
-                <>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      onDownloadImage(
-                        post.image!,
-                        `avonix-${post.platform}-${post.id.slice(0, 8)}.jpg`
-                      )
-                    }
-                    className="inline-flex items-center justify-center gap-1.5 border border-navy-600 text-slate-200 text-xs font-bold px-3 py-2 rounded-xl hover:bg-navy-900"
-                  >
-                    <Download className="w-3.5 h-3.5" />
-                    Download
-                  </button>
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={() => onClearImage(post.id)}
-                    className="inline-flex items-center justify-center gap-1.5 border border-navy-600 text-slate-400 text-xs font-bold px-3 py-2 rounded-xl hover:bg-navy-900 disabled:opacity-50"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                    Detach
-                  </button>
-                </>
-              )}
-            </div>
-          )}
-
-          <div className="pt-2 border-t border-navy-700 flex flex-wrap gap-2">
-            {locked ? (
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => onRewrite(post.id)}
-                className="inline-flex items-center justify-center gap-2 border border-orange-800/50 text-orange-300 text-xs font-bold px-3 py-2 rounded-xl bg-orange-950/30 hover:bg-orange-950/50 disabled:opacity-50"
-              >
-                {actionBusy ? (
-                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                ) : (
-                  <Unlock className="w-3.5 h-3.5" />
-                )}
-                Re-generate & unlock
-              </button>
-            ) : post.status === "scheduled" ? (
-              <>
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => onUnschedule(post.id)}
-                  className="inline-flex items-center justify-center gap-1.5 border border-navy-600 text-slate-300 text-xs font-bold px-3 py-2 rounded-xl hover:bg-navy-900 disabled:opacity-50"
-                >
-                  <X className="w-3.5 h-3.5" />
-                  Cancel schedule
-                </button>
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => onPublish(post.id)}
-                  className="inline-flex items-center justify-center gap-1.5 bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white text-xs font-bold px-3 py-2 rounded-xl"
-                >
-                  <PlusCircle className="w-3.5 h-3.5" />
-                  Publish now
-                </button>
-              </>
-            ) : (
-              <>
-                <div className="relative">
-                  {showPicker && (
-                    <div className="absolute bottom-full left-0 mb-2 bg-navy-900 border border-navy-600 rounded-xl p-3 z-20 w-[260px] shadow-xl">
-                      <p className="text-[10px] text-slate-400 font-bold mb-2">
-                        Auto-post at
-                      </p>
-                      <input
-                        type="datetime-local"
-                        value={scheduleDate}
-                        onChange={(e) => setScheduleDate(e.target.value)}
-                        className="w-full text-xs border border-navy-600 bg-navy-950 rounded-lg px-2 py-2 text-slate-200 mb-2"
-                      />
-                      <div className="flex gap-2">
-                        <button
-                          type="button"
-                          disabled={busy}
-                          onClick={() => {
-                            onSchedule(post.id, scheduleDate);
-                            setShowPicker(false);
-                          }}
-                          className="flex-1 bg-sky-600 text-white text-xs font-bold py-2 rounded-lg disabled:opacity-50"
-                        >
-                          Confirm
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setShowPicker(false)}
-                          className="flex-1 bg-navy-800 text-slate-300 text-xs font-bold py-2 rounded-lg"
-                        >
-                          Cancel
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={() => setShowPicker(!showPicker)}
-                    className="inline-flex items-center justify-center gap-1.5 border border-sky-800/50 text-sky-300 text-xs font-bold px-3 py-2 rounded-xl bg-sky-950/30 disabled:opacity-50"
-                  >
-                    <Calendar className="w-3.5 h-3.5" />
-                    Schedule auto-post
-                  </button>
-                </div>
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => onPublish(post.id)}
-                  className="inline-flex items-center justify-center gap-1.5 bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white text-xs font-bold px-3 py-2 rounded-xl"
-                >
-                  {actionBusy ? (
-                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                  ) : (
-                    <PlusCircle className="w-3.5 h-3.5" />
-                  )}
-                  Publish live
-                </button>
-              </>
-            )}
           </div>
         </div>
       )}
