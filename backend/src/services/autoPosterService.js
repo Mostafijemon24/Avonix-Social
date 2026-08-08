@@ -525,7 +525,73 @@ areaCoverage = city/region phrase for this page.`,
 }
 
 function keywordLinkHtml(url, keyword) {
-  return `<a href="${url}" class="text-[#ff6600] underline font-medium" target="_blank" rel="noopener noreferrer">${keyword}</a>`;
+  // Deprecated for social publish — platforms do not keep inline rich links in the caption.
+  // Kept for any legacy callers; prefer plain CTA lines instead.
+  return String(keyword || "");
+}
+
+function escapeHtml(text) {
+  return String(text || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+/** Preview HTML = escaped plain text (no <a> tags). UI uses whitespace-pre-wrap. */
+function plainToPreviewHtml(text) {
+  return escapeHtml(text);
+}
+
+function stripInlineHtmlLinks(text) {
+  return String(text || "")
+    .replace(/<a\b[^>]*>([\s\S]*?)<\/a>/gi, "$1")
+    .replace(/<\/?[^>]+>/g, "");
+}
+
+/**
+ * Facebook / LinkedIn captions: plain URL as CTA at the bottom — not keyword hyperlinks.
+ * Hashtags only on platforms that support them.
+ */
+function finalizeSocialCaption(body, { platform, url, primary, secondary, place }) {
+  const cfg = PLATFORM_CONFIG[platform] || PLATFORM_CONFIG.Facebook;
+  let out = stripInlineHtmlLinks(body).trim();
+
+  // Remove leftover "Learn more: Keyword" without URL so we can attach a clean CTA
+  out = out.replace(/\n*Learn more:\s*[^\n]*$/i, "").trim();
+  out = out.replace(/\n*Discover [^:\n]+:\s*$/i, "").trim();
+
+  if (cfg.allowLinks && url) {
+    const hasUrl = out.includes(String(url).trim());
+    if (!hasUrl) {
+      out = `${out}\n\nLearn more:\n${url}`.trim();
+    }
+  } else {
+    // Strip raw URLs if platform forbids links (GMB / IG captions)
+    out = out
+      .replace(/https?:\/\/\S+/gi, "")
+      .replace(/\n*Learn more:\s*$/i, "")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
+  }
+
+  if (cfg.allowHashtags) {
+    const alreadyHasTags = /(?:^|\s)#[A-Za-z0-9_]{2,}/.test(out.slice(-200));
+    if (!alreadyHasTags) {
+      const tags =
+        platform === "LinkedIn"
+          ? hashtagify("BusinessGrowth", primary, "Leadership", place)
+          : platform === "Instagram"
+            ? hashtagify(primary, secondary, place, "LocalBusiness", "SEO")
+            : hashtagify(place, primary, secondary || "LocalSEO");
+      if (tags) out = `${out}\n\n${tags}`.trim();
+    }
+  } else {
+    // GMB — strip hashtags
+    out = out.replace(/(?:^|\s)#[A-Za-z0-9_]+/g, "").replace(/\s{2,}/g, " ").trim();
+  }
+
+  return out;
 }
 
 function hashtagify(...parts) {
@@ -652,25 +718,15 @@ Looking for ${secondary}? Our team in ${place} delivers ${offering} with care, c
 
 We help people comparing ${promo} understand scope, timeline, and expected outcomes up front. That transparency builds trust and supports stronger rankings for ${primary} queries across ${place}.
 
-Explore how ${provider} support can move your project forward, then take the next step with a clear call to action.
-
-Learn more: ${primary}
-${url}
-
-${hashtagify(place, primary)}`;
-    html = `${opener}
-
-${intentLead}
-
-Looking for ${secondary}? Our team in ${place} delivers ${offering} with care, clarity, and a process built for local search visibility. Customers choose us when they need dependable ${proof} without guesswork.
-
-We help people comparing ${promo} understand scope, timeline, and expected outcomes up front. That transparency builds trust and supports stronger rankings for ${primary} queries across ${place}.
-
-Explore how ${provider} support can move your project forward, then take the next step with a clear call to action.
-
-Learn more: ${keywordLinkHtml(url, primary)}
-
-${hashtagify(place, primary)}`;
+Explore how ${provider} support can move your project forward, then take the next step with a clear call to action.`;
+    plain = finalizeSocialCaption(plain, {
+      platform: "Facebook",
+      url,
+      primary,
+      secondary,
+      place,
+    });
+    html = plainToPreviewHtml(plain);
   } else if (platform === "Instagram") {
     heading = `${primary} — crafted with care`;
     plain = `${opener}
@@ -681,10 +737,15 @@ ${secondary} for businesses and homeowners in ${place}.
 
 We focus on ${offering} and ${proof}, so every detail supports both real-world results and search-friendly messaging around ${primary}. Ready for ${promo}?
 
-Save this post, share it with someone who needs ${provider} help, and check the link in bio for the full story.
-
-${hashtagify(primary, secondary, place, "LocalBusiness", "SEO")}`;
-    html = plain;
+Save this post, share it with someone who needs ${provider} help, and check the link in bio for the full story.`;
+    plain = finalizeSocialCaption(plain, {
+      platform: "Instagram",
+      url,
+      primary,
+      secondary,
+      place,
+    });
+    html = plainToPreviewHtml(plain);
   } else if (platform === "LinkedIn") {
     heading = phraseHasLocation(primary, place)
       ? `${primary} — practical value for growing teams`
@@ -699,25 +760,17 @@ ${intentLead}
 
 We support organizations with ${offering}, backed by ${proof}. Our specialists help clients move from idea to polished identity through ${provider}, while aligning messaging to high-intent searches for ${primary} and ${secondary} in ${place}.
 
-Leaders evaluating ${promo} should prioritize process transparency, measurable milestones, and content that reinforces topical authority. That combination improves both customer trust and organic discoverability.
-
-Discover ${promo}:
-${url}
-
-${hashtagify("BusinessGrowth", primary, "Leadership", place)}`;
-    html = `${opener} ${bridge}
-
-${intentLead}
-
-We support organizations with ${offering}, backed by ${proof}. Our specialists help clients move from idea to polished identity through ${provider}, while aligning messaging to high-intent searches for ${primary} and ${secondary} in ${place}.
-
-Leaders evaluating ${promo} should prioritize process transparency, measurable milestones, and content that reinforces topical authority. That combination improves both customer trust and organic discoverability.
-
-Discover ${promo}: ${keywordLinkHtml(url, primary)}
-
-${hashtagify("BusinessGrowth", primary, "Leadership", place)}`;
+Leaders evaluating ${promo} should prioritize process transparency, measurable milestones, and content that reinforces topical authority. That combination improves both customer trust and organic discoverability.`;
+    plain = finalizeSocialCaption(plain, {
+      platform: "LinkedIn",
+      url,
+      primary,
+      secondary,
+      place,
+    });
+    html = plainToPreviewHtml(plain);
   } else {
-    // GMB / Google Business Profile
+    // GMB / Google Business Profile — no links, no hashtags
     heading = phraseHasLocation(primary, place)
       ? `${primary} — open and ready to help`
       : `${primary} in ${place} — open and ready to help`;
@@ -728,7 +781,14 @@ Looking for ${secondary}? We provide ${offering} for local customers across ${pl
 Ask us about ${promo} and how ${proof} can support your next project. Consistent service pages and updates about ${primary} help nearby customers find the right provider faster.
 
 Visit or message us to learn more about ${primary} and schedule a conversation with our team.`;
-    html = plain;
+    plain = finalizeSocialCaption(plain, {
+      platform: "GMB",
+      url,
+      primary,
+      secondary,
+      place,
+    });
+    html = plainToPreviewHtml(plain);
   }
 
   const applyRange = (body) => {
@@ -741,11 +801,18 @@ Visit or message us to learn more about ${primary} and schedule a conversation w
     if (countWords(next) < cfg.minWords) {
       next = padToMinWords(next, cfg.minWords, padCtx);
     }
-    return next;
+    // Re-attach CTA + hashtags after padding/clipping
+    return finalizeSocialCaption(next, {
+      platform,
+      url,
+      primary,
+      secondary,
+      place,
+    });
   };
 
   plain = applyRange(plain);
-  html = applyRange(html);
+  html = plainToPreviewHtml(plain);
 
   return {
     heading,
@@ -795,7 +862,13 @@ export async function generatePostContentWithAi(
       messages: [
         {
           role: "system",
-          content: `You write SEO-led social posts for ${platform}. Return ONLY JSON: {heading:string, content:string}. English only, no emojis, no markdown fences. Word count between ${cfg.minWords} and ${cfg.maxWords}. Tone: ${tone}.`,
+          content: `You write SEO-led social posts for ${platform}. Return ONLY JSON: {heading:string, content:string}. English only, no emojis, no markdown, no HTML, no inline hyperlinks. Word count between ${cfg.minWords} and ${cfg.maxWords}. Tone: ${tone}.
+Rules:
+- Never wrap keywords in links or HTML.
+- Do NOT put a URL in the middle of a sentence.
+- If links are allowed, end with a plain CTA block: "Learn more:" on one line and the URL on the next.
+- If hashtags are allowed, end with 3–5 relevant hashtags on the last line.
+- If links/hashtags are not allowed, omit them entirely.`,
         },
         {
           role: "user",
@@ -803,10 +876,10 @@ export async function generatePostContentWithAi(
 Location: ${place}
 Primary keyword: ${primary}
 Secondary keywords: ${secondaryList.join(", ")}
-Page URL (may include once if platform allows links): ${url}
+Page URL for bottom CTA only (if allowed): ${url}
 Writing intent: ${options.writingIntent || "Awareness"}
 Master intent: ${options.masterIntent || "n/a"}
-Allow links: ${cfg.allowLinks}
+Allow links (bottom CTA only): ${cfg.allowLinks}
 Allow hashtags: ${cfg.allowHashtags}
 
 Write one complete post body that naturally uses the primary keyword and at least two secondary keywords. Follow the master intent.`,
@@ -839,18 +912,18 @@ Write one complete post body that naturally uses the primary keyword and at leas
       content = countWords(clipped) >= cfg.minWords ? clipped : content;
     }
 
-    let contentHtml = content;
-    if (cfg.allowLinks && url && primary) {
-      contentHtml = content.replace(
-        new RegExp(primary.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i"),
-        keywordLinkHtml(url, primary)
-      );
-    }
+    content = finalizeSocialCaption(content, {
+      platform,
+      url,
+      primary,
+      secondary: secondaryList[0],
+      place,
+    });
 
     return {
       heading: heading || template.heading,
       content,
-      contentHtml,
+      contentHtml: plainToPreviewHtml(content),
       wordCount: countWords(content),
       minWords: cfg.minWords,
       maxWords: cfg.maxWords,

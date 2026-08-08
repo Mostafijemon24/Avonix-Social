@@ -49,6 +49,14 @@ const PLATFORM_MIN_WORDS: Record<string, number> = {
   GMB: 90,
 };
 
+/** Perfect publish sizes (match backend PLATFORM_CONFIG) */
+const PLATFORM_IMAGE_SIZE: Record<string, { w: number; h: number; label: string }> = {
+  Facebook: { w: 1920, h: 1008, label: "1920×1008 · 16:9" },
+  LinkedIn: { w: 1920, h: 1005, label: "1920×1005 · 16:9" },
+  GMB: { w: 1200, h: 900, label: "1200×900 · 4:3" },
+  Instagram: { w: 1080, h: 1080, label: "1080×1080 · 1:1" },
+};
+
 type ListFilter = "draft" | "published" | "scheduled";
 type ImageSource = "auto" | "ai" | "free";
 type MainTab = "active" | "archive";
@@ -1218,12 +1226,15 @@ function PostListRow({
               />
             ) : null}
             <div
-              className={`w-full h-full flex items-center justify-center text-slate-600 ${
+              className={`w-full h-full flex flex-col items-center justify-center text-slate-600 ${
                 post.image ? "hidden" : ""
               }`}
               style={post.image ? { display: "none" } : undefined}
             >
               <ImageIcon className="w-4 h-4" />
+              <span className="text-[7px] font-bold text-slate-500 mt-0.5 leading-none px-0.5 text-center">
+                {PLATFORM_IMAGE_SIZE[post.platform]?.label?.split(" · ")[0] || "HD"}
+              </span>
             </div>
             {locked ? (
               <span className="absolute inset-0 bg-navy-950/55 flex items-center justify-center">
@@ -1337,6 +1348,9 @@ function PostListRow({
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={post.image} alt="" className="w-full h-auto object-cover" />
+              <span className="absolute bottom-2 left-2 inline-flex items-center gap-1 text-[10px] font-bold bg-navy-950/85 text-slate-200 px-2 py-1 rounded-lg border border-navy-600 backdrop-blur-sm">
+                Perfect size: {PLATFORM_IMAGE_SIZE[post.platform]?.label || "HD"}
+              </span>
               {locked && (
                 <span className="absolute top-2 right-2 inline-flex items-center gap-1 text-[10px] font-bold bg-navy-950/80 text-emerald-400 px-2 py-1 rounded-lg border border-emerald-900/50">
                   <Lock className="w-3 h-3" /> Image locked
@@ -1345,10 +1359,19 @@ function PostListRow({
             </div>
           )}
 
-          <div
-            className="text-xs text-slate-300 whitespace-pre-wrap leading-relaxed text-left [&_a]:text-orange-400 [&_a]:underline"
-            dangerouslySetInnerHTML={{ __html: post.contentHtml || post.content }}
-          />
+          <div className="text-xs text-slate-300 whitespace-pre-wrap leading-relaxed text-left">
+            {String(post.content || post.contentHtml || "")
+              .replace(/<a\b[^>]*>([\s\S]*?)<\/a>/gi, "$1")
+              .replace(/<br\s*\/?>/gi, "\n")
+              .replace(/<\/p>/gi, "\n\n")
+              .replace(/<[^>]+>/g, "")
+              .replace(/&nbsp;/g, " ")
+              .replace(/&amp;/g, "&")
+              .replace(/&lt;/g, "<")
+              .replace(/&gt;/g, ">")
+              .replace(/&quot;/g, '"')
+              .trim()}
+          </div>
           <div className="flex flex-wrap gap-2">
             <span className="text-[10px] font-semibold text-orange-400 bg-orange-950/40 border border-orange-800/40 px-2 py-1 rounded">
               P: {post.keywords.primary}
