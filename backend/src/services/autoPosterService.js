@@ -97,8 +97,8 @@ export const PLATFORM_CONFIG = {
   },
 };
 
-/** Part 2 target platforms — 15 URLs × 3 = 45 posts */
-export const STUDIO_POST_PLATFORMS = ["Facebook", "LinkedIn", "GMB"];
+/** Part 2 target platforms — 15 URLs × 4 = 60 posts */
+export const STUDIO_POST_PLATFORMS = ["Facebook", "Instagram", "LinkedIn", "GMB"];
 
 const TONE_OPENER = {
   Professional: "Here is a clear update from our team.",
@@ -549,46 +549,95 @@ function stripInlineHtmlLinks(text) {
     .replace(/<\/?[^>]+>/g, "");
 }
 
+/** Strip CTA blocks, raw URLs, and hashtag lines so padding runs on body copy only. */
+function stripCtaHashtagsAndUrls(text) {
+  let out = String(text || "").trim();
+  out = out.replace(/(?:^|\n)\s*(?:#[A-Za-z0-9_]+(?:\s+#[A-Za-z0-9_]+)*)\s*(?=\n|$)/g, "\n");
+  out = out.replace(
+    /(?:^|\n)\s*(?:Learn more|Discover more|See the full|Explore options|Explore how|Ready to|Want the details|Compare how|Compare options|Book a|Read the full|Get the details|See how we)[^\n]*\n?\s*https?:\/\/\S+\s*/gi,
+    "\n"
+  );
+  out = out.replace(/(?:^|\n)\s*https?:\/\/\S+\s*/gi, "\n");
+  out = out.replace(/\n*Learn more:\s*[^\n]*/gi, "");
+  out = out.replace(/\n{3,}/g, "\n\n").trim();
+  return out;
+}
+
 /**
- * Facebook / LinkedIn captions: plain URL as CTA at the bottom — not keyword hyperlinks.
- * Hashtags only on platforms that support them.
+ * Relevant bottom CTA for platforms that allow links (Facebook / LinkedIn).
+ * Instagram captions cannot use links — bio only.
  */
-function finalizeSocialCaption(body, { platform, url, primary, secondary, place }) {
-  const cfg = PLATFORM_CONFIG[platform] || PLATFORM_CONFIG.Facebook;
-  let out = stripInlineHtmlLinks(body).trim();
+function buildBottomCta({ platform, url, primary, place, writingIntent }) {
+  const topic = String(primary || "our services").trim();
+  const where = String(place || "").trim();
+  const intent = String(writingIntent || "Awareness").toLowerCase();
+  const localHint = where && !phraseHasLocation(topic, where) ? ` in ${where}` : "";
 
-  // Remove leftover "Learn more: Keyword" without URL so we can attach a clean CTA
-  out = out.replace(/\n*Learn more:\s*[^\n]*$/i, "").trim();
-  out = out.replace(/\n*Discover [^:\n]+:\s*$/i, "").trim();
-
-  if (cfg.allowLinks && url) {
-    const hasUrl = out.includes(String(url).trim());
-    if (!hasUrl) {
-      out = `${out}\n\nLearn more:\n${url}`.trim();
+  let line = "";
+  if (platform === "LinkedIn") {
+    if (/convert|transaction|lead|book|buy/i.test(intent)) {
+      line = `Ready to talk about ${topic}${localHint}? See the full overview:`;
+    } else if (/consider|compare|evaluat/i.test(intent)) {
+      line = `Compare how we support teams with ${topic}${localHint}:`;
+    } else {
+      line = `See how we approach ${topic}${localHint}:`;
     }
   } else {
-    // Strip raw URLs if platform forbids links (GMB / IG captions)
-    out = out
-      .replace(/https?:\/\/\S+/gi, "")
-      .replace(/\n*Learn more:\s*$/i, "")
-      .replace(/\n{3,}/g, "\n\n")
-      .trim();
+    // Facebook (and any other link-allowed feed)
+    if (/convert|transaction|lead|book|buy/i.test(intent)) {
+      line = `Ready to get started with ${topic}${localHint}?`;
+    } else if (/consider|compare|evaluat/i.test(intent)) {
+      line = `Explore options for ${topic}${localHint}:`;
+    } else if (/service|support|help/i.test(intent)) {
+      line = `Want the details on ${topic}${localHint}?`;
+    } else {
+      line = `Discover more about ${topic}${localHint}:`;
+    }
+  }
+
+  return `${line}\n${url}`.trim();
+}
+
+/**
+ * Facebook / LinkedIn: relevant plain-URL CTA at the bottom — not keyword hyperlinks.
+ * Instagram: hashtags + square image (no caption links).
+ * Hashtags only on platforms that support them.
+ */
+function finalizeSocialCaption(
+  body,
+  { platform, url, primary, secondary, place, writingIntent }
+) {
+  const cfg = PLATFORM_CONFIG[platform] || PLATFORM_CONFIG.Facebook;
+  let out = stripCtaHashtagsAndUrls(stripInlineHtmlLinks(body));
+
+  if (cfg.allowLinks && url) {
+    const cleanUrl = String(url).trim();
+    if (cleanUrl) {
+      out = `${out}\n\n${buildBottomCta({
+        platform,
+        url: cleanUrl,
+        primary,
+        place,
+        writingIntent,
+      })}`.trim();
+    }
   }
 
   if (cfg.allowHashtags) {
-    const alreadyHasTags = /(?:^|\s)#[A-Za-z0-9_]{2,}/.test(out.slice(-200));
-    if (!alreadyHasTags) {
-      const tags =
-        platform === "LinkedIn"
-          ? hashtagify("BusinessGrowth", primary, "Leadership", place)
-          : platform === "Instagram"
-            ? hashtagify(primary, secondary, place, "LocalBusiness", "SEO")
-            : hashtagify(place, primary, secondary || "LocalSEO");
-      if (tags) out = `${out}\n\n${tags}`.trim();
-    }
-  } else {
-    // GMB — strip hashtags
-    out = out.replace(/(?:^|\s)#[A-Za-z0-9_]+/g, "").replace(/\s{2,}/g, " ").trim();
+    const tags =
+      platform === "LinkedIn"
+        ? hashtagify("BusinessGrowth", primary, "Leadership", place)
+        : platform === "Instagram"
+          ? hashtagify(
+              primary,
+              secondary,
+              place,
+              "LocalBusiness",
+              "SmallBusiness",
+              "InstagramMarketing"
+            )
+          : hashtagify(place, primary, secondary || "LocalSEO");
+    if (tags) out = `${out}\n\n${tags}`.trim();
   }
 
   return out;
@@ -725,6 +774,7 @@ Explore how ${provider} support can move your project forward, then take the nex
       primary,
       secondary,
       place,
+      writingIntent,
     });
     html = plainToPreviewHtml(plain);
   } else if (platform === "Instagram") {
@@ -744,6 +794,7 @@ Save this post, share it with someone who needs ${provider} help, and check the 
       primary,
       secondary,
       place,
+      writingIntent,
     });
     html = plainToPreviewHtml(plain);
   } else if (platform === "LinkedIn") {
@@ -767,6 +818,7 @@ Leaders evaluating ${promo} should prioritize process transparency, measurable m
       primary,
       secondary,
       place,
+      writingIntent,
     });
     html = plainToPreviewHtml(plain);
   } else {
@@ -787,12 +839,15 @@ Visit or message us to learn more about ${primary} and schedule a conversation w
       primary,
       secondary,
       place,
+      writingIntent,
     });
     html = plainToPreviewHtml(plain);
   }
 
   const applyRange = (body) => {
-    let next = padToMinWords(body, cfg.minWords, padCtx);
+    // Pad body copy only — CTA / hashtags are re-attached after
+    let next = stripCtaHashtagsAndUrls(body);
+    next = padToMinWords(next, cfg.minWords, padCtx);
     if (countWords(next) > cfg.maxWords) {
       const clipped = enforceMaxWords(next, cfg.maxWords);
       // SEO floor wins: never clip below minWords (slight overshoot OK)
@@ -801,13 +856,13 @@ Visit or message us to learn more about ${primary} and schedule a conversation w
     if (countWords(next) < cfg.minWords) {
       next = padToMinWords(next, cfg.minWords, padCtx);
     }
-    // Re-attach CTA + hashtags after padding/clipping
     return finalizeSocialCaption(next, {
       platform,
       url,
       primary,
       secondary,
       place,
+      writingIntent,
     });
   };
 
@@ -866,7 +921,7 @@ export async function generatePostContentWithAi(
 Rules:
 - Never wrap keywords in links or HTML.
 - Do NOT put a URL in the middle of a sentence.
-- If links are allowed, end with a plain CTA block: "Learn more:" on one line and the URL on the next.
+- If links are allowed, end with a short relevant CTA line that mentions the primary keyword (or intent), then the URL on the next line. Examples: "Discover more about {keyword}:" / "See how we approach {keyword}:" / "Ready to get started with {keyword}?" — never a bare "Learn more:" with no context.
 - If hashtags are allowed, end with 3–5 relevant hashtags on the last line.
 - If links/hashtags are not allowed, omit them entirely.`,
         },
@@ -906,6 +961,7 @@ Write one complete post body that naturally uses the primary keyword and at leas
       place,
       provider: asProvider(secondaryList[0] || primary),
     };
+    content = stripCtaHashtagsAndUrls(content);
     content = padToMinWords(content, cfg.minWords, padCtx);
     if (countWords(content) > cfg.maxWords) {
       const clipped = enforceMaxWords(content, cfg.maxWords);
@@ -918,6 +974,7 @@ Write one complete post body that naturally uses the primary keyword and at leas
       primary,
       secondary: secondaryList[0],
       place,
+      writingIntent: options.writingIntent || "Awareness",
     });
 
     return {
@@ -1301,7 +1358,7 @@ export async function analyzeWebsiteForStudio({
 }
 
 /**
- * Part 2 — Full pipeline: keywords → Facebook / LinkedIn / GMB posts (≤45)
+ * Part 2 — Full pipeline: keywords → Facebook / Instagram / LinkedIn / GMB posts (≤60)
  * Optional images (Part 3). Skips fingerprints already published+locked.
  *
  * @param {object} opts

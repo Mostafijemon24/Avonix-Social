@@ -287,7 +287,7 @@ export default function ContentStudioPage() {
         masterIntent: analysis?.masterIntent,
         includeImages,
         imageSource,
-        platforms: ["Facebook", "LinkedIn", "GMB"],
+        platforms: ["Facebook", "Instagram", "LinkedIn", "GMB"],
         websiteUrl: analysis?.websiteUrl || websiteUrl.trim() || undefined,
       });
 
@@ -543,6 +543,7 @@ export default function ContentStudioPage() {
   const filtered = generatedPosts.filter((p) => p.status === listFilter);
   const platformCounts = {
     Facebook: generatedPosts.filter((p) => p.platform === "Facebook").length,
+    Instagram: generatedPosts.filter((p) => p.platform === "Instagram").length,
     LinkedIn: generatedPosts.filter((p) => p.platform === "LinkedIn").length,
     GMB: generatedPosts.filter((p) => p.platform === "GMB").length,
   };
@@ -793,7 +794,8 @@ export default function ContentStudioPage() {
             <div>
               <h3 className="text-base font-bold text-white">3. How should posts sound?</h3>
               <p className="text-sm text-slate-400 mt-1">
-                Writing for Facebook, LinkedIn & Google Business from {selectedPages.length} pages.
+                Writing for Facebook, Instagram, LinkedIn & Google Business from{" "}
+                {selectedPages.length} pages.
               </p>
             </div>
             <button
@@ -957,6 +959,9 @@ export default function ContentStudioPage() {
               )}
               <span className="inline-flex items-center gap-1 bg-navy-900 border border-navy-700 px-2 py-1 rounded-lg">
                 <Facebook className="w-3 h-3 text-blue-400" /> {platformCounts.Facebook}
+              </span>
+              <span className="inline-flex items-center gap-1 bg-navy-900 border border-navy-700 px-2 py-1 rounded-lg">
+                <Instagram className="w-3 h-3 text-pink-400" /> {platformCounts.Instagram}
               </span>
               <span className="inline-flex items-center gap-1 bg-navy-900 border border-navy-700 px-2 py-1 rounded-lg">
                 <Linkedin className="w-3 h-3 text-sky-400" /> {platformCounts.LinkedIn}
@@ -1149,7 +1154,7 @@ export default function ContentStudioPage() {
           <p className="text-[11px] text-slate-500 text-center">
             Need accounts connected?{" "}
             <Link href="/dashboard/connections" className="text-orange-400 font-bold hover:underline">
-              Connect Facebook / LinkedIn / Google →
+              Connect Facebook / Instagram / LinkedIn / Google →
             </Link>
           </p>
         </div>

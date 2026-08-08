@@ -357,7 +357,7 @@ router.post("/generate/social-suite", async (req, res) => {
   }
 });
 
-/** Avonix Social — Part 2: ≤15 pages × FB/LinkedIn/GMB = ≤45 posts */
+/** Avonix Social — Part 2: ≤15 pages × FB/IG/LinkedIn/GMB = ≤60 posts */
 router.post("/auto-poster/generate", async (req, res) => {
   try {
     const {
