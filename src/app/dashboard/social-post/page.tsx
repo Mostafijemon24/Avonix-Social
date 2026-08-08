@@ -52,6 +52,7 @@ const PLATFORM_MIN_WORDS: Record<string, number> = {
 type ListFilter = "draft" | "published" | "scheduled";
 type ImageSource = "auto" | "ai" | "free";
 type MainTab = "active" | "archive";
+type StudioStep = 1 | 2 | 3 | 4;
 
 function platformIcon(platform: string) {
   switch (platform) {
@@ -127,6 +128,7 @@ export default function ContentStudioPage() {
 
   // —— Part 5: archive ——
   const [mainTab, setMainTab] = useState<MainTab>("active");
+  const [step, setStep] = useState<StudioStep>(1);
   const [archiveTables, setArchiveTables] = useState<ArchiveWebsiteTable[]>([]);
   const [archiveTotal, setArchiveTotal] = useState(0);
   const [isLoadingArchive, setIsLoadingArchive] = useState(false);
@@ -189,8 +191,11 @@ export default function ContentStudioPage() {
     setArchiveTotal(0);
     setMainTab("active");
     setProviderDecision(null);
+    setStep(1);
     setLocation(state.sitemap?.location || "");
-    loadRecords();
+    loadRecords().then((posts) => {
+      if (posts.length) setStep(4);
+    });
     loadArchive();
   }, [state.activeWorkspaceId, state.email, state.sitemap?.location, loadRecords, loadArchive]);
 
@@ -220,8 +225,9 @@ export default function ContentStudioPage() {
       if (result.location && !location.trim()) {
         setLocation(result.location);
       }
+      setStep(2);
       showToast(
-        `Part 1 done — ${result.pageCount} pages from ${result.discoveredCount} discovered`,
+        `Found ${result.pageCount} pages — pick which to use`,
         "success"
       );
     } catch (err) {
@@ -283,6 +289,7 @@ export default function ContentStudioPage() {
       setListFilter("draft");
       setGenerateDone(true);
       setMainTab("active");
+      setStep(4);
       if (result.archivedCount) {
         await loadArchive();
         showToast(
@@ -310,6 +317,7 @@ export default function ContentStudioPage() {
         if (posts.length) {
           setListFilter("draft");
           setGenerateDone(true);
+          setStep(4);
           showToast(`Complete — ${posts.length} posts ready`, "success");
           break;
         }
@@ -545,260 +553,262 @@ export default function ContentStudioPage() {
     .sort()
     .reverse()[0] as string | undefined;
 
+  const STEPS = [
+    { n: 1 as StudioStep, label: "Website", hint: "Add your site" },
+    { n: 2 as StudioStep, label: "Pages", hint: "Pick pages" },
+    { n: 3 as StudioStep, label: "Create", hint: "Tone & images" },
+    { n: 4 as StudioStep, label: "Publish", hint: "Review & post" },
+  ];
+
+  const goStep = (n: StudioStep) => {
+    if (n === 2 && !analysis) {
+      showToast("Analyze your website first", "error");
+      return;
+    }
+    if (n === 3 && !selectedPages.length) {
+      showToast("Select at least one page first", "error");
+      return;
+    }
+    if (n === 4 && !generatedPosts.length && !generateDone) {
+      showToast("Create posts first", "error");
+      return;
+    }
+    setStep(n);
+    if (n === 4) setMainTab("active");
+  };
+
   return (
-    <div className="space-y-6 max-w-7xl mx-auto animate-fade-in text-center">
-      {/* —— PART 1 —— */}
-      <div className="glass-card p-6 sm:p-8 rounded-2xl border border-navy-800">
-        <div className="inline-flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider text-orange-400 mb-2">
-          <span className="bg-orange-500/20 border border-orange-500/40 px-2 py-0.5 rounded-full">
-            Part 1
-          </span>
-          Website → pages → coverage → intent → keywords
-        </div>
-        <h2 className="text-base font-bold text-white mb-1">Content Studio</h2>
-        <p className="text-xs text-slate-400 mb-6 max-w-2xl mx-auto">
-          Enter a website URL. We discover up to 15 pages, detect area coverage and writing
-          intent, then extract 1 primary + 4 secondary keywords per page.
+    <div className="space-y-5 max-w-3xl mx-auto animate-fade-in text-left">
+      {/* Header */}
+      <div className="text-center space-y-1">
+        <h2 className="text-xl font-bold text-white tracking-tight">Content Studio</h2>
+        <p className="text-sm text-slate-400">
+          Four simple steps: website → pages → create → publish.
         </p>
+      </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-6 text-center items-stretch">
-          <div className="flex flex-col h-full">
-            <label className="block text-xs font-bold text-slate-300 mb-2 w-full text-center">
-              Website URL
-            </label>
-            <div className="relative w-full flex-1 flex flex-col">
-              <Globe className="absolute left-3 top-3.5 w-4 h-4 text-slate-500 pointer-events-none" />
-              <input
-                type="url"
-                value={websiteUrl}
-                onChange={(e) => setWebsiteUrl(e.target.value)}
-                placeholder="https://example.com"
-                className="w-full flex-1 min-h-[48px] text-xs font-semibold border border-navy-700 bg-navy-900 rounded-xl pl-10 pr-4 py-3 text-white focus:ring-2 focus:ring-orange-500 outline-none text-center sm:text-left"
-              />
-            </div>
-            <p className="text-[10px] text-slate-500 mt-2">
-              Root domain is enough — sitemap & pages are discovered automatically
+      {/* Stepper */}
+      <nav className="glass-card border border-navy-800 rounded-2xl p-3 sm:p-4">
+        <ol className="grid grid-cols-4 gap-1 sm:gap-2">
+          {STEPS.map((s) => {
+            const active = step === s.n;
+            const done = step > s.n;
+            return (
+              <li key={s.n}>
+                <button
+                  type="button"
+                  onClick={() => goStep(s.n)}
+                  className={`w-full rounded-xl px-1 py-2 sm:px-2 sm:py-2.5 text-center transition-all ${
+                    active
+                      ? "bg-orange-500 text-white shadow-lg shadow-orange-500/20"
+                      : done
+                        ? "bg-emerald-950/40 text-emerald-300 border border-emerald-800/40"
+                        : "bg-navy-900 text-slate-500 border border-navy-700"
+                  }`}
+                >
+                  <span className="block text-[10px] sm:text-xs font-bold">
+                    {done && !active ? "✓ " : ""}
+                    {s.n}. {s.label}
+                  </span>
+                  <span
+                    className={`hidden sm:block text-[10px] mt-0.5 ${
+                      active ? "text-orange-100" : "text-slate-500"
+                    }`}
+                  >
+                    {s.hint}
+                  </span>
+                </button>
+              </li>
+            );
+          })}
+        </ol>
+      </nav>
+
+      {/* —— STEP 1: Website —— */}
+      {step === 1 && (
+        <div className="glass-card p-5 sm:p-7 rounded-2xl border border-navy-800 space-y-5">
+          <div>
+            <h3 className="text-base font-bold text-white">1. Your website</h3>
+            <p className="text-sm text-slate-400 mt-1">
+              Enter the site URL. We find important pages automatically.
             </p>
           </div>
 
-          <div className="flex flex-col h-full">
-            <label className="block text-xs font-bold text-slate-300 mb-2 w-full text-center">
-              Target Location (area coverage)
-            </label>
-            <div className="relative w-full flex-1 flex flex-col">
-              <MapPin className="absolute left-3 top-3.5 w-4 h-4 text-slate-500 pointer-events-none" />
-              <input
-                type="text"
-                value={location}
-                onChange={(e) => setLocation(e.target.value)}
-                placeholder="e.g. Denver, CO — optional; AI can infer"
-                className="w-full flex-1 min-h-[48px] text-xs font-semibold border border-navy-700 bg-navy-900 rounded-xl pl-10 pr-4 py-3 text-white focus:ring-2 focus:ring-orange-500 outline-none text-center"
-              />
+          <div className="space-y-4">
+            <div>
+              <label className="block text-xs font-bold text-slate-300 mb-1.5">
+                Website URL
+              </label>
+              <div className="relative">
+                <Globe className="absolute left-3 top-3.5 w-4 h-4 text-slate-500" />
+                <input
+                  type="url"
+                  value={websiteUrl}
+                  onChange={(e) => setWebsiteUrl(e.target.value)}
+                  placeholder="https://yourbusiness.com"
+                  className="w-full text-sm font-semibold border border-navy-700 bg-navy-900 rounded-xl pl-10 pr-4 py-3 text-white focus:ring-2 focus:ring-orange-500 outline-none"
+                />
+              </div>
             </div>
-            <p className="text-[10px] text-slate-500 mt-2">
-              Used for local SEO keywords; auto-filled from site when possible
-            </p>
+            <div>
+              <label className="block text-xs font-bold text-slate-300 mb-1.5">
+                City / area <span className="text-slate-500 font-normal">(optional)</span>
+              </label>
+              <div className="relative">
+                <MapPin className="absolute left-3 top-3.5 w-4 h-4 text-slate-500" />
+                <input
+                  type="text"
+                  value={location}
+                  onChange={(e) => setLocation(e.target.value)}
+                  placeholder="e.g. Denver, CO"
+                  className="w-full text-sm font-semibold border border-navy-700 bg-navy-900 rounded-xl pl-10 pr-4 py-3 text-white focus:ring-2 focus:ring-orange-500 outline-none"
+                />
+              </div>
+            </div>
           </div>
-        </div>
 
-        <div className="flex flex-col items-center gap-3">
           <button
             type="button"
             onClick={handleAnalyzeWebsite}
             disabled={isAnalyzing}
-            className="bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white font-bold py-3 px-6 rounded-xl text-xs transition-all shadow-lg shadow-orange-500/20 inline-flex items-center justify-center gap-2"
+            className="w-full sm:w-auto bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white font-bold py-3 px-8 rounded-xl text-sm inline-flex items-center justify-center gap-2 shadow-lg shadow-orange-500/20"
           >
             {isAnalyzing ? (
               <>
-                <RefreshCw className="w-3.5 h-3.5 animate-spin" /> Analyzing website…
+                <RefreshCw className="w-4 h-4 animate-spin" /> Finding pages…
               </>
             ) : (
               <>
-                <Search className="w-3.5 h-3.5" /> Analyze website (Part 1)
+                <Search className="w-4 h-4" /> Continue
               </>
             )}
           </button>
           {isAnalyzing && (
-            <p className="text-[11px] text-slate-400">
-              Crawling sitemap & pages — this can take a minute.
-            </p>
+            <p className="text-xs text-slate-400">This can take up to a minute.</p>
+          )}
+
+          {generatedPosts.length > 0 && (
+            <button
+              type="button"
+              onClick={() => goStep(4)}
+              className="block text-xs font-bold text-orange-400 hover:underline"
+            >
+              Skip to your existing posts →
+            </button>
           )}
         </div>
+      )}
 
-        {analysis && (
-          <div className="mt-6 pt-4 border-t border-navy-700 space-y-4 text-left">
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <div className="bg-navy-900 border border-navy-700 rounded-xl p-3 text-center">
-                <p className="text-[10px] uppercase text-slate-500 font-bold mb-1">Website</p>
-                <p className="text-xs text-orange-400 font-bold truncate" title={analysis.websiteUrl}>
-                  {analysis.websiteUrl}
-                </p>
-                <p className="text-[10px] text-slate-500 mt-1">
-                  {analysis.discoveredCount} discovered · {analysis.pageCount} analyzed
-                </p>
-              </div>
-              <div className="bg-navy-900 border border-navy-700 rounded-xl p-3 text-center">
-                <p className="text-[10px] uppercase text-slate-500 font-bold mb-1 inline-flex items-center gap-1 justify-center w-full">
-                  <MapPin className="w-3 h-3" /> Area coverage
-                </p>
-                <p className="text-xs text-slate-200 font-semibold">
-                  {analysis.areaCoverage?.summary || location || "—"}
-                </p>
-              </div>
-              <div className="bg-navy-900 border border-navy-700 rounded-xl p-3 text-center">
-                <p className="text-[10px] uppercase text-slate-500 font-bold mb-1 inline-flex items-center gap-1 justify-center w-full">
-                  <Target className="w-3 h-3" /> Master intent
-                </p>
-                <p className="text-xs text-slate-300 leading-relaxed">
-                  {analysis.masterIntent}
-                </p>
-                <p className="text-[10px] text-emerald-400 font-bold mt-1">
-                  Dominant: {analysis.dominantIntent}
-                </p>
-              </div>
-            </div>
-
-            <div className="overflow-x-auto rounded-xl border border-navy-700">
-              <table className="w-full text-left text-xs min-w-[720px]">
-                <thead className="bg-navy-950 text-slate-500 uppercase text-[10px] tracking-wide">
-                  <tr>
-                    <th className="px-3 py-2 font-bold w-10">Use</th>
-                    <th className="px-3 py-2 font-bold">Page URL</th>
-                    <th className="px-3 py-2 font-bold">Area</th>
-                    <th className="px-3 py-2 font-bold">Intent</th>
-                    <th className="px-3 py-2 font-bold">Primary KW</th>
-                    <th className="px-3 py-2 font-bold">Secondary (4)</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {(analysis.pages || []).map((page) => {
-                    const checked = selectedPages.some((p) => p.url === page.url);
-                    return (
-                      <tr
-                        key={page.url}
-                        className="border-t border-navy-800 hover:bg-navy-900/40"
-                      >
-                        <td className="px-3 py-2 align-top">
-                          <input
-                            type="checkbox"
-                            checked={checked}
-                            onChange={() => togglePage(page.url)}
-                            className="rounded border-navy-600 bg-navy-900 text-orange-500 focus:ring-orange-500"
-                          />
-                        </td>
-                        <td className="px-3 py-2 align-top max-w-[220px]">
-                          <a
-                            href={page.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-orange-400 hover:underline font-semibold break-all"
-                          >
-                            {page.url.replace(/^https?:\/\//, "")}
-                          </a>
-                          {page.title ? (
-                            <p className="text-[10px] text-slate-500 mt-0.5 truncate">
-                              {page.title}
-                            </p>
-                          ) : null}
-                          {!page.reachable && (
-                            <span className="text-[10px] text-amber-400 font-bold">
-                              Unreachable — slug fallback
-                            </span>
-                          )}
-                        </td>
-                        <td className="px-3 py-2 align-top text-slate-300 max-w-[140px]">
-                          {page.areaCoverage}
-                        </td>
-                        <td className="px-3 py-2 align-top">
-                          <span className="text-emerald-400 font-bold whitespace-nowrap">
-                            {page.writingIntent}
-                          </span>
-                          <p className="text-[10px] text-slate-500 mt-0.5 leading-snug">
-                            {page.masterIntent}
-                          </p>
-                        </td>
-                        <td className="px-3 py-2 align-top text-white font-semibold max-w-[140px]">
-                          {page.keywords.primary}
-                        </td>
-                        <td className="px-3 py-2 align-top">
-                          <ul className="space-y-0.5 text-slate-400">
-                            {(page.keywords.secondary || []).slice(0, 4).map((kw, i) => (
-                              <li key={i}>
-                                <span className="text-slate-600">{i + 1}.</span> {kw}
-                              </li>
-                            ))}
-                          </ul>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-            <p className="text-[10px] text-slate-500 text-center">
-              {selectedPages.length}/15 pages selected for Part 2 (post generation)
-            </p>
-          </div>
-        )}
-      </div>
-
-      {/* —— PART 2 —— */}
-      {analysis && selectedPages.length > 0 && (
-        <div className="glass-card p-6 sm:p-8 rounded-2xl border border-navy-800">
-          <div className="inline-flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider text-orange-400 mb-2">
-            <span className="bg-orange-500/20 border border-orange-500/40 px-2 py-0.5 rounded-full">
-              Part 2
-            </span>
-            15 pages × 3 platforms = up to 45 posts
-          </div>
-          <h3 className="text-sm font-bold text-white mb-1">Generate platform posts</h3>
-          <p className="text-xs text-slate-400 mb-4 max-w-2xl mx-auto">
-            Uses Part 1 keywords + master intent. Word floors: Facebook 120–160 · LinkedIn
-            150–200 · Google Business 90–130.
-          </p>
-
-          <div className="flex flex-wrap justify-center gap-2 mb-5">
-            {[
-              { name: "Facebook", min: 120, max: 160, icon: Facebook, color: "text-blue-400" },
-              { name: "LinkedIn", min: 150, max: 200, icon: Linkedin, color: "text-sky-400" },
-              { name: "GMB", min: 90, max: 130, icon: Globe, color: "text-emerald-400" },
-            ].map((p) => (
-              <span
-                key={p.name}
-                className="inline-flex items-center gap-1.5 text-[11px] font-bold bg-navy-900 border border-navy-700 rounded-full px-3 py-1.5 text-slate-200"
-              >
-                <p.icon className={`w-3.5 h-3.5 ${p.color}`} />
-                {p.name}
-                <span className="text-slate-500 font-semibold">
-                  {p.min}–{p.max}w
-                </span>
-              </span>
-            ))}
-          </div>
-
-          {analysis.masterIntent && (
-            <div className="mb-5 mx-auto max-w-2xl bg-navy-900/80 border border-navy-700 rounded-xl px-4 py-3 text-left">
-              <p className="text-[10px] uppercase tracking-wide text-slate-500 font-bold mb-1">
-                Master intent (applied to every post)
+      {/* —— STEP 2: Pages —— */}
+      {step === 2 && analysis && (
+        <div className="glass-card p-5 sm:p-7 rounded-2xl border border-navy-800 space-y-5">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h3 className="text-base font-bold text-white">2. Choose pages</h3>
+              <p className="text-sm text-slate-400 mt-1">
+                We write posts from the pages you keep selected ({selectedPages.length} of{" "}
+                {(analysis.pages || []).length}).
               </p>
-              <p className="text-xs text-slate-300 leading-relaxed">{analysis.masterIntent}</p>
             </div>
-          )}
+            <button
+              type="button"
+              onClick={() => setStep(1)}
+              className="text-xs font-bold text-slate-400 hover:text-white"
+            >
+              ← Edit website
+            </button>
+          </div>
 
-          <div className="mb-4">
-            <label className="block text-xs font-bold text-slate-300 mb-3 text-center">
-              Post tone / preset
-            </label>
-            <div className="flex flex-wrap justify-center gap-2">
+          <div className="rounded-xl border border-navy-700 bg-navy-950/50 px-3 py-2 text-xs text-slate-300">
+            <span className="font-bold text-white">{analysis.areaCoverage?.summary || location || "—"}</span>
+            <span className="text-slate-500"> · </span>
+            Focus: <span className="text-emerald-400 font-semibold">{analysis.dominantIntent}</span>
+          </div>
+
+          <ul className="space-y-2 max-h-[420px] overflow-y-auto pr-1">
+            {(analysis.pages || []).map((page) => {
+              const checked = selectedPages.some((p) => p.url === page.url);
+              return (
+                <li key={page.url}>
+                  <label
+                    className={`flex items-start gap-3 rounded-xl border px-3 py-3 cursor-pointer transition-colors ${
+                      checked
+                        ? "border-orange-500/50 bg-orange-950/20"
+                        : "border-navy-700 bg-navy-900/40"
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => togglePage(page.url)}
+                      className="mt-1 rounded border-navy-600 bg-navy-900 text-orange-500 focus:ring-orange-500"
+                    />
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-sm font-bold text-white truncate">
+                        {page.title || page.url.replace(/^https?:\/\//, "")}
+                      </span>
+                      <span className="block text-[11px] text-slate-500 truncate mt-0.5">
+                        {page.url.replace(/^https?:\/\//, "")}
+                      </span>
+                      <span className="mt-1.5 flex flex-wrap gap-1.5 text-[10px]">
+                        <span className="bg-navy-950 border border-navy-700 text-slate-300 px-1.5 py-0.5 rounded font-semibold">
+                          {page.writingIntent}
+                        </span>
+                        <span className="bg-navy-950 border border-navy-700 text-orange-300 px-1.5 py-0.5 rounded font-semibold truncate max-w-[200px]">
+                          {page.keywords.primary}
+                        </span>
+                      </span>
+                    </span>
+                  </label>
+                </li>
+              );
+            })}
+          </ul>
+
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              disabled={!selectedPages.length}
+              onClick={() => setStep(3)}
+              className="bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white font-bold py-3 px-6 rounded-xl text-sm"
+            >
+              Next: Create posts →
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* —— STEP 3: Create —— */}
+      {step === 3 && (
+        <div className="glass-card p-5 sm:p-7 rounded-2xl border border-navy-800 space-y-6">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h3 className="text-base font-bold text-white">3. How should posts sound?</h3>
+              <p className="text-sm text-slate-400 mt-1">
+                Writing for Facebook, LinkedIn & Google Business from {selectedPages.length} pages.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setStep(2)}
+              className="text-xs font-bold text-slate-400 hover:text-white"
+            >
+              ← Pages
+            </button>
+          </div>
+
+          <div>
+            <p className="text-xs font-bold text-slate-300 mb-2">Tone</p>
+            <div className="flex flex-wrap gap-2">
               {TONE_PRESETS.map((tone) => (
                 <button
                   key={tone}
                   type="button"
                   onClick={() => setSelectedTone(tone)}
-                  className={`px-3 py-1.5 rounded-full text-[11px] font-bold transition-all ${
+                  className={`px-3 py-2 rounded-xl text-xs font-bold ${
                     selectedTone === tone
                       ? "bg-orange-500 text-white"
-                      : "bg-navy-900 text-slate-400 border border-navy-700 hover:border-orange-500/50"
+                      : "bg-navy-900 text-slate-400 border border-navy-700"
                   }`}
                 >
                   {tone}
@@ -807,522 +817,335 @@ export default function ContentStudioPage() {
             </div>
           </div>
 
-          {/* —— PART 3 image controls (shared with generate) —— */}
-          <div className="mb-5 mx-auto max-w-xl border border-navy-700 rounded-xl p-4 bg-navy-950/50 text-left">
-            <div className="inline-flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider text-orange-400 mb-3">
-              <span className="bg-orange-500/20 border border-orange-500/40 px-2 py-0.5 rounded-full">
-                Part 3
-              </span>
-              Images (optional)
-            </div>
-            <label className="flex items-start gap-3 cursor-pointer mb-3">
-              <input
-                type="checkbox"
-                checked={includeImages}
-                onChange={(e) => setIncludeImages(e.target.checked)}
-                className="mt-0.5 rounded border-navy-600 bg-navy-900 text-orange-500 focus:ring-orange-500"
-              />
-              <span>
-                <span className="text-xs font-bold text-white block">
-                  Include relevant images with posts
-                </span>
-                <span className="text-[10px] text-slate-500">
-                  Uncheck to publish text-only. You can attach images later per post or in bulk.
-                </span>
-              </span>
-            </label>
-            <div
-              className={`space-y-2 ${includeImages ? "opacity-100" : "opacity-40 pointer-events-none"}`}
-            >
-              <p className="text-[10px] uppercase tracking-wide text-slate-500 font-bold">
-                Image source
-              </p>
-              <div className="flex flex-wrap gap-2">
-                {(
-                  [
-                    {
-                      id: "auto" as const,
-                      label: "AI picks best (recommended)",
-                    },
-                    { id: "ai" as const, label: "Paid AI only" },
-                    { id: "free" as const, label: "Free only ($0)" },
-                  ] as const
-                ).map((opt) => (
+          <div>
+            <p className="text-xs font-bold text-slate-300 mb-2">Images</p>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              {(
+                [
+                  {
+                    id: "best" as const,
+                    title: "Best quality",
+                    desc: "AI picks the best paid model",
+                  },
+                  {
+                    id: "free" as const,
+                    title: "Free",
+                    desc: "$0 images · lower quality",
+                  },
+                  {
+                    id: "none" as const,
+                    title: "No images",
+                    desc: "Text posts only",
+                  },
+                ] as const
+              ).map((opt) => {
+                const active =
+                  (opt.id === "none" && !includeImages) ||
+                  (opt.id === "best" && includeImages && imageSource === "auto") ||
+                  (opt.id === "free" && includeImages && imageSource === "free") ||
+                  (opt.id === "best" && includeImages && imageSource === "ai");
+                return (
                   <button
                     key={opt.id}
                     type="button"
-                    onClick={() => setImageSource(opt.id)}
-                    className={`px-3 py-1.5 rounded-full text-[11px] font-bold ${
-                      imageSource === opt.id
-                        ? "bg-orange-500 text-white"
-                        : "bg-navy-900 text-slate-400 border border-navy-700"
+                    onClick={() => {
+                      if (opt.id === "none") {
+                        setIncludeImages(false);
+                      } else if (opt.id === "free") {
+                        setIncludeImages(true);
+                        setImageSource("free");
+                      } else {
+                        setIncludeImages(true);
+                        setImageSource("auto");
+                      }
+                    }}
+                    className={`text-left rounded-xl border px-3 py-3 ${
+                      active
+                        ? "border-orange-500 bg-orange-950/30"
+                        : "border-navy-700 bg-navy-900/50"
                     }`}
                   >
-                    {opt.label}
+                    <span className="block text-sm font-bold text-white">{opt.title}</span>
+                    <span className="block text-[11px] text-slate-400 mt-0.5">{opt.desc}</span>
                   </button>
-                ))}
-              </div>
-              <p className="text-[10px] text-slate-500 mt-2">
-                Recommended: AI picks ChatGPT Images (paid, HD, topic-matched). Free Pollinations is
-                $0 but often generic/low quality. Platform sizes: FB 1920×1008 · LI 1920×1005 · GMB
-                1200×900. Needs OPENROUTER_API_KEY on the server.
-              </p>
+                );
+              })}
             </div>
           </div>
 
           {providerDecision && (
-            <div className="mb-5 mx-auto max-w-xl border border-orange-900/40 rounded-xl p-4 bg-orange-950/10 text-left">
-              <div className="inline-flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider text-orange-400 mb-2">
-                <span className="bg-orange-500/20 border border-orange-500/40 px-2 py-0.5 rounded-full">
-                  Part 6
-                </span>
-                AI provider decision ({providerDecision.method || "ai"})
-              </div>
-              <div className="space-y-2 text-xs text-slate-300">
-                {providerDecision.writing && (
-                  <p>
-                    <span className="font-bold text-white">Writing:</span>{" "}
-                    {providerDecision.writing.label}
-                    <span className="block text-[10px] text-slate-500 mt-0.5">
-                      {providerDecision.writing.reason}
-                    </span>
-                  </p>
-                )}
-                {providerDecision.image && (
-                  <p>
-                    <span className="font-bold text-white">Images:</span>{" "}
-                    {providerDecision.image.label}
-                    <span className="block text-[10px] text-slate-500 mt-0.5">
-                      {providerDecision.image.reason}
-                    </span>
-                  </p>
-                )}
-              </div>
-            </div>
-          )}
-
-          <div className="flex flex-col items-center gap-3">
-            <button
-              type="button"
-              onClick={handleScanAndGenerate}
-              disabled={isScanning}
-              className="bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white font-bold py-3 px-6 rounded-xl text-xs transition-all shadow-lg shadow-orange-500/20 inline-flex items-center justify-center gap-2"
-            >
-              {isScanning ? (
-                <>
-                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />{" "}
-                  {includeImages ? "Writing posts + images…" : "Writing posts…"}
-                </>
-              ) : (
-                <>
-                  <Play className="w-3.5 h-3.5" /> Generate{" "}
-                  {selectedPages.length * 3} posts
-                  {includeImages ? " + images" : ""}
-                </>
-              )}
-            </button>
-            <p className="text-[10px] text-slate-500">
-              {selectedPages.length} pages × 3 platforms = {selectedPages.length * 3} drafts
-              {includeImages
-                ? ` · images via ${imageSource}`
-                : " · text only (images optional)"}
-            </p>
-            {isScanning && (
-              <p className="text-[11px] text-slate-400">
-                Writing FB / LinkedIn / GMB copy with word limits — stay on this page.
-              </p>
-            )}
-            {generateDone && !isScanning && (
-              <p className="text-[11px] text-emerald-400 font-bold inline-flex items-center gap-1.5">
-                <CheckCircle2 className="w-3.5 h-3.5" />
-                Ready — {generatedPosts.length} post
-                {generatedPosts.length === 1 ? "" : "s"}
-              </p>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* —— PART 3 batch attach (for existing drafts) —— */}
-      {generatedPosts.length > 0 && (
-        <div className="glass-card p-5 sm:p-6 rounded-2xl border border-navy-800">
-          <div className="inline-flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider text-orange-400 mb-2">
-            <span className="bg-orange-500/20 border border-orange-500/40 px-2 py-0.5 rounded-full">
-              Part 3
-            </span>
-            Attach / refresh images
-          </div>
-          <p className="text-xs text-slate-400 mb-4 max-w-xl mx-auto">
-            {postsMissingImages} draft/scheduled post
-            {postsMissingImages === 1 ? "" : "s"} missing images. Per-post download,
-            regenerate, or detach is available when you open a row.
-          </p>
-          <div className="flex flex-wrap justify-center gap-2">
-            <button
-              type="button"
-              disabled={isAttachingImages || !includeImages}
-              onClick={() => handleAttachAllImages(true)}
-              className="inline-flex items-center gap-1.5 bg-orange-500 hover:bg-orange-600 disabled:opacity-40 text-white text-xs font-bold px-4 py-2 rounded-xl"
-            >
-              {isAttachingImages ? (
-                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-              ) : (
-                <ImageIcon className="w-3.5 h-3.5" />
-              )}
-              Attach missing images
-            </button>
-            <button
-              type="button"
-              disabled={isAttachingImages || !includeImages}
-              onClick={() => handleAttachAllImages(false)}
-              className="inline-flex items-center gap-1.5 border border-navy-600 text-slate-200 text-xs font-bold px-4 py-2 rounded-xl hover:bg-navy-900 disabled:opacity-40"
-            >
-              <RefreshCw className="w-3.5 h-3.5" />
-              Regenerate all draft images
-            </button>
-          </div>
-          {!includeImages && (
-            <p className="text-[10px] text-amber-400/90 mt-3 text-center">
-              Check “Include relevant images” above to enable attach / regenerate.
-            </p>
-          )}
-        </div>
-      )}
-
-      {/* —— PART 5: Active / Archive tabs —— */}
-      <div className="flex flex-wrap items-center justify-center gap-2">
-        <button
-          type="button"
-          onClick={() => setMainTab("active")}
-          className={`px-4 py-2 rounded-xl text-xs font-bold ${
-            mainTab === "active"
-              ? "bg-orange-500 text-white"
-              : "bg-navy-900 text-slate-400 border border-navy-700"
-          }`}
-        >
-          Active posts ({generatedPosts.length})
-        </button>
-        <button
-          type="button"
-          onClick={() => {
-            setMainTab("archive");
-            loadArchive();
-          }}
-          className={`px-4 py-2 rounded-xl text-xs font-bold ${
-            mainTab === "archive"
-              ? "bg-orange-500 text-white"
-              : "bg-navy-900 text-slate-400 border border-navy-700"
-          }`}
-        >
-          Archive ({archiveTotal})
-        </button>
-      </div>
-
-      {mainTab === "active" && generatedPosts.length > 0 && (
-        <div className="space-y-4">
-          <div className="glass-card p-4 rounded-2xl border border-navy-800">
-            <div className="inline-flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider text-orange-400 mb-2">
-              <span className="bg-orange-500/20 border border-orange-500/40 px-2 py-0.5 rounded-full">
-                Part 4
+            <p className="text-[11px] text-slate-500">
+              Last run used{" "}
+              <span className="text-slate-300 font-semibold">
+                {providerDecision.writing?.label || "writer"}
               </span>
-              Publish lock · regenerate unlock · schedule · last posted
+              {providerDecision.image?.label ? (
+                <>
+                  {" "}
+                  · images via{" "}
+                  <span className="text-slate-300 font-semibold">
+                    {providerDecision.image.label}
+                  </span>
+                </>
+              ) : null}
+            </p>
+          )}
+
+          <button
+            type="button"
+            onClick={handleScanAndGenerate}
+            disabled={isScanning || !selectedPages.length}
+            className="w-full sm:w-auto bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white font-bold py-3.5 px-8 rounded-xl text-sm inline-flex items-center justify-center gap-2 shadow-lg shadow-orange-500/20"
+          >
+            {isScanning ? (
+              <>
+                <RefreshCw className="w-4 h-4 animate-spin" />
+                {includeImages ? "Writing posts + images…" : "Writing posts…"}
+              </>
+            ) : (
+              <>
+                <Play className="w-4 h-4" />
+                Create posts
+              </>
+            )}
+          </button>
+        </div>
+      )}
+
+      {/* —— STEP 4: Publish —— */}
+      {step === 4 && (
+        <div className="space-y-4">
+          <div className="glass-card p-5 sm:p-6 rounded-2xl border border-navy-800 space-y-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h3 className="text-base font-bold text-white">4. Review & publish</h3>
+                <p className="text-sm text-slate-400 mt-1">
+                  Open a post → Publish live or Schedule. Published posts lock until you
+                  re-generate.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setStep(1);
+                  setGenerateDone(false);
+                }}
+                className="text-xs font-bold text-orange-400 hover:underline"
+              >
+                + New website
+              </button>
             </div>
-            <div className="flex flex-wrap items-center justify-center gap-3 text-[11px] text-slate-400">
-              <span className="inline-flex items-center gap-1 font-bold text-slate-300">
+
+            <div className="flex flex-wrap gap-2 text-[11px] text-slate-400">
+              <span className="inline-flex items-center gap-1 font-bold text-slate-300 bg-navy-900 border border-navy-700 px-2 py-1 rounded-lg">
                 <Lock className="w-3.5 h-3.5 text-emerald-400" />
                 {lockedCount} locked
               </span>
-              {lastPostedAt ? (
-                <span className="inline-flex items-center gap-1 font-semibold">
+              {lastPostedAt && (
+                <span className="inline-flex items-center gap-1 font-semibold bg-navy-900 border border-navy-700 px-2 py-1 rounded-lg">
                   <Clock className="w-3.5 h-3.5 text-sky-400" />
-                  Last posted:{" "}
-                  <span className="text-white">
-                    {new Date(lastPostedAt).toLocaleString()}
-                  </span>
+                  Last: {new Date(lastPostedAt).toLocaleString()}
                 </span>
-              ) : (
-                <span className="text-slate-500">No posts published yet</span>
               )}
-            </div>
-            <p className="text-[10px] text-slate-500 mt-2 max-w-xl mx-auto">
-              Drafts show <span className="text-slate-300">Unlocked</span>. After you press Publish,
-              the post gets a green <span className="text-emerald-400">Locked</span> padlock (text +
-              image). Regenerate unlocks it so you can publish again.
-            </p>
-          </div>
-
-          <div className="flex flex-wrap items-center justify-center gap-3">
-            <h3 className="text-sm font-bold text-white w-full sm:w-auto">
-              Posts ({generatedPosts.length})
-            </h3>
-            <div className="flex flex-wrap justify-center gap-2 text-[10px] font-bold text-slate-400">
-              <span className="inline-flex items-center gap-1 bg-navy-900 border border-navy-700 px-2 py-1 rounded-full">
+              <span className="inline-flex items-center gap-1 bg-navy-900 border border-navy-700 px-2 py-1 rounded-lg">
                 <Facebook className="w-3 h-3 text-blue-400" /> {platformCounts.Facebook}
               </span>
-              <span className="inline-flex items-center gap-1 bg-navy-900 border border-navy-700 px-2 py-1 rounded-full">
+              <span className="inline-flex items-center gap-1 bg-navy-900 border border-navy-700 px-2 py-1 rounded-lg">
                 <Linkedin className="w-3 h-3 text-sky-400" /> {platformCounts.LinkedIn}
               </span>
-              <span className="inline-flex items-center gap-1 bg-navy-900 border border-navy-700 px-2 py-1 rounded-full">
+              <span className="inline-flex items-center gap-1 bg-navy-900 border border-navy-700 px-2 py-1 rounded-lg">
                 <Globe className="w-3 h-3 text-emerald-400" /> {platformCounts.GMB}
               </span>
             </div>
-            <div className="flex flex-wrap justify-center gap-2">
+
+            <div className="flex flex-wrap gap-2">
               {(["draft", "scheduled", "published"] as ListFilter[]).map((f) => (
                 <button
                   key={f}
                   type="button"
-                  onClick={() => setListFilter(f)}
+                  onClick={() => {
+                    setMainTab("active");
+                    setListFilter(f);
+                  }}
                   className={`px-3 py-1.5 rounded-full text-[11px] font-bold capitalize ${
-                    listFilter === f
+                    mainTab === "active" && listFilter === f
                       ? "bg-orange-500 text-white"
                       : "bg-navy-900 text-slate-400 border border-navy-700"
                   }`}
                 >
-                  {f}
-                  {f === "published" ? " (locked)" : ""} (
-                  {generatedPosts.filter((p) => p.status === f).length})
+                  {f} ({generatedPosts.filter((p) => p.status === f).length})
                 </button>
               ))}
-            </div>
-          </div>
-
-          {filtered.length === 0 ? (
-            <div className="glass-card p-10 rounded-2xl border border-navy-800 text-center text-slate-500 text-sm">
-              No {listFilter} posts.
-            </div>
-          ) : (
-            <div className="space-y-2 text-left">
-              {filtered.map((post) => (
-                <PostListRow
-                  key={post.id}
-                  post={post}
-                  expanded={expandedId === post.id}
-                  imageBusy={imageBusyId === post.id}
-                  actionBusy={actionBusyId === post.id}
-                  onToggle={() =>
-                    setExpandedId((id) => (id === post.id ? null : post.id))
-                  }
-                  onPublish={handlePublish}
-                  onSchedule={handleSchedule}
-                  onUnschedule={handleUnschedule}
-                  onRewrite={handleRewrite}
-                  onGenerateImage={(id) => handlePostImage(id, "generate")}
-                  onClearImage={(id) => handlePostImage(id, "clear")}
-                  onDownloadImage={(url, name) => downloadImage(url, name)}
-                />
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
-      {mainTab === "archive" && (
-        <div className="space-y-4">
-          <div className="glass-card p-5 sm:p-6 rounded-2xl border border-navy-800">
-            <div className="inline-flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider text-orange-400 mb-2">
-              <span className="bg-orange-500/20 border border-orange-500/40 px-2 py-0.5 rounded-full">
-                Part 5
-              </span>
-              Archive · per-website tables · clear with confirm
-            </div>
-            <p className="text-xs text-slate-400 mb-4 max-w-2xl mx-auto">
-              When you generate posts for a new website, previous posts move here — grouped by
-              website. Locked posts stay padlocked until Re-generate (then restore to Active).
-            </p>
-            <div className="flex flex-wrap justify-center gap-2">
               <button
                 type="button"
-                disabled={isLoadingArchive}
-                onClick={() => loadArchive()}
-                className="inline-flex items-center gap-1.5 border border-navy-600 text-slate-200 text-xs font-bold px-3 py-2 rounded-xl hover:bg-navy-900 disabled:opacity-50"
+                onClick={() => {
+                  setMainTab("archive");
+                  loadArchive();
+                }}
+                className={`px-3 py-1.5 rounded-full text-[11px] font-bold ${
+                  mainTab === "archive"
+                    ? "bg-orange-500 text-white"
+                    : "bg-navy-900 text-slate-400 border border-navy-700"
+                }`}
               >
-                <RefreshCw className={`w-3.5 h-3.5 ${isLoadingArchive ? "animate-spin" : ""}`} />
-                Refresh archive
+                Archive ({archiveTotal})
               </button>
-              {archiveTotal > 0 && (
-                <button
-                  type="button"
-                  disabled={isClearingArchive}
-                  onClick={() => setClearConfirmOrigin("__ALL__")}
-                  className="inline-flex items-center gap-1.5 border border-red-900/50 text-red-300 text-xs font-bold px-3 py-2 rounded-xl bg-red-950/20 hover:bg-red-950/40 disabled:opacity-50"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                  Clear entire archive
-                </button>
-              )}
             </div>
-          </div>
 
-          {clearConfirmOrigin && (
-            <div className="glass-card p-5 rounded-2xl border border-red-900/40 bg-red-950/20 text-center space-y-3">
-              <p className="text-sm font-bold text-white">Confirm clear archive?</p>
-              <p className="text-xs text-slate-400 max-w-md mx-auto">
-                {clearConfirmOrigin === "__ALL__"
-                  ? `Permanently delete all ${archiveTotal} archived posts. This cannot be undone.`
-                  : `Permanently delete archived posts for ${clearConfirmOrigin}. This cannot be undone.`}
-              </p>
-              <div className="flex flex-wrap justify-center gap-2">
+            {mainTab === "active" && includeImages && (
+              <div className="flex flex-wrap gap-2">
                 <button
                   type="button"
-                  disabled={isClearingArchive}
-                  onClick={() =>
-                    handleClearArchive(
-                      clearConfirmOrigin === "__ALL__" ? null : clearConfirmOrigin
-                    )
-                  }
-                  className="bg-red-600 hover:bg-red-500 disabled:opacity-50 text-white text-xs font-bold px-4 py-2 rounded-xl inline-flex items-center gap-1.5"
+                  disabled={isAttachingImages || !postsMissingImages}
+                  onClick={() => handleAttachAllImages(true)}
+                  className="inline-flex items-center gap-1.5 text-xs font-bold border border-violet-800/50 text-violet-300 bg-violet-950/30 px-3 py-2 rounded-xl disabled:opacity-50"
                 >
-                  {isClearingArchive ? (
+                  {isAttachingImages ? (
                     <RefreshCw className="w-3.5 h-3.5 animate-spin" />
                   ) : (
-                    <Trash2 className="w-3.5 h-3.5" />
+                    <ImageIcon className="w-3.5 h-3.5" />
                   )}
-                  Yes, clear
-                </button>
-                <button
-                  type="button"
-                  disabled={isClearingArchive}
-                  onClick={() => setClearConfirmOrigin(null)}
-                  className="border border-navy-600 text-slate-300 text-xs font-bold px-4 py-2 rounded-xl"
-                >
-                  Cancel
+                  Add missing images ({postsMissingImages})
                 </button>
               </div>
-            </div>
-          )}
+            )}
+          </div>
 
-          {isLoadingArchive ? (
-            <div className="glass-card p-10 rounded-2xl border border-navy-800 text-center text-slate-500 text-sm">
-              Loading archive…
-            </div>
-          ) : archiveTables.length === 0 ? (
-            <div className="glass-card p-10 rounded-2xl border border-navy-800 text-center text-slate-500 text-sm">
-              Archive is empty. Generate posts for a new website to move previous batches here.
-            </div>
-          ) : (
-            archiveTables.map((table) => (
-              <div
-                key={table.websiteOrigin}
-                className="glass-card rounded-2xl border border-navy-800 overflow-hidden text-left"
-              >
-                <div className="px-4 py-3 border-b border-navy-800 flex flex-wrap items-center justify-between gap-2 bg-navy-950/50">
-                  <div>
-                    <p className="text-xs font-bold text-orange-400 truncate max-w-[420px]">
-                      {table.websiteOrigin}
-                    </p>
-                    <p className="text-[10px] text-slate-500 mt-0.5">
-                      {table.count} posts · {table.lockedCount} locked
-                      {table.archivedAt
-                        ? ` · archived ${new Date(table.archivedAt).toLocaleString()}`
-                        : ""}
-                    </p>
-                  </div>
+          {mainTab === "active" && (
+            <>
+              {filtered.length === 0 ? (
+                <div className="glass-card p-8 rounded-2xl border border-navy-800 text-center text-slate-500 text-sm">
+                  No {listFilter} posts yet.{" "}
                   <button
                     type="button"
-                    disabled={isClearingArchive}
-                    onClick={() => setClearConfirmOrigin(table.websiteOrigin)}
-                    className="text-[10px] font-bold text-red-300 border border-red-900/40 px-2.5 py-1.5 rounded-lg hover:bg-red-950/30 disabled:opacity-50"
+                    className="text-orange-400 font-bold hover:underline"
+                    onClick={() => setStep(1)}
                   >
-                    Clear this website
+                    Start from step 1
                   </button>
                 </div>
+              ) : (
+                <div className="space-y-2">
+                  {filtered.map((post) => (
+                    <PostListRow
+                      key={post.id}
+                      post={post}
+                      expanded={expandedId === post.id}
+                      imageBusy={imageBusyId === post.id}
+                      actionBusy={actionBusyId === post.id}
+                      onToggle={() =>
+                        setExpandedId((id) => (id === post.id ? null : post.id))
+                      }
+                      onPublish={handlePublish}
+                      onSchedule={handleSchedule}
+                      onUnschedule={handleUnschedule}
+                      onRewrite={handleRewrite}
+                      onGenerateImage={(id) => handlePostImage(id, "generate")}
+                      onClearImage={(id) => handlePostImage(id, "clear")}
+                      onDownloadImage={(url, name) => downloadImage(url, name)}
+                    />
+                  ))}
+                </div>
+              )}
+            </>
+          )}
 
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left text-xs min-w-[640px]">
-                    <thead className="bg-navy-950 text-slate-500 uppercase text-[10px] tracking-wide">
-                      <tr>
-                        <th className="px-3 py-2 font-bold">Platform</th>
-                        <th className="px-3 py-2 font-bold">Page</th>
-                        <th className="px-3 py-2 font-bold">Primary KW</th>
-                        <th className="px-3 py-2 font-bold">Status</th>
-                        <th className="px-3 py-2 font-bold">Last posted</th>
-                        <th className="px-3 py-2 font-bold">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {table.posts.map((post) => {
+          {mainTab === "archive" && (
+            <div className="space-y-3">
+              {isLoadingArchive ? (
+                <p className="text-sm text-slate-400 text-center py-6">Loading archive…</p>
+              ) : archiveTables.length === 0 ? (
+                <div className="glass-card p-8 rounded-2xl border border-navy-800 text-center text-slate-500 text-sm">
+                  Archive is empty.
+                </div>
+              ) : (
+                archiveTables.map((table) => (
+                  <div
+                    key={table.websiteOrigin}
+                    className="glass-card rounded-2xl border border-navy-800 overflow-hidden"
+                  >
+                    <div className="px-4 py-3 border-b border-navy-800 flex flex-wrap justify-between gap-2">
+                      <div>
+                        <p className="text-sm font-bold text-white">{table.websiteOrigin}</p>
+                        <p className="text-[11px] text-slate-500">
+                          {table.count} posts · {table.lockedCount} locked
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setClearConfirmOrigin(table.websiteOrigin)}
+                        className="text-[11px] font-bold text-red-300 border border-red-900/40 px-2 py-1 rounded-lg"
+                      >
+                        Clear
+                      </button>
+                    </div>
+                    <ul className="divide-y divide-navy-800">
+                      {table.posts.slice(0, 8).map((post) => {
                         const locked = !!(
                           post.publishLocked ||
                           (post.status === "published" && post.locked)
                         );
                         return (
-                          <tr
+                          <li
                             key={post.id}
-                            className="border-t border-navy-800 hover:bg-navy-900/40"
+                            className="px-4 py-2.5 flex items-center justify-between gap-2 text-xs"
                           >
-                            <td className="px-3 py-2 align-top">
-                              <span className="inline-flex items-center gap-1.5 font-bold text-white">
-                                {platformIcon(post.platform)}
-                                {post.platform}
-                                {locked && (
-                                  <Lock className="w-3 h-3 text-emerald-400" />
-                                )}
-                              </span>
-                            </td>
-                            <td className="px-3 py-2 align-top max-w-[180px]">
-                              <p className="text-slate-300 truncate" title={post.url}>
-                                {post.url.replace(/^https?:\/\//, "")}
-                              </p>
-                              <p className="text-[10px] text-slate-500 truncate">
-                                {post.heading}
-                              </p>
-                            </td>
-                            <td className="px-3 py-2 align-top text-slate-300">
-                              {post.keywords.primary}
-                            </td>
-                            <td className="px-3 py-2 align-top">
-                              <span className="capitalize text-slate-400">{post.status}</span>
+                            <span className="min-w-0 truncate text-slate-300">
+                              {platformIcon(post.platform)}{" "}
+                              <span className="font-semibold text-white">{post.heading}</span>
                               {locked && (
-                                <span className="block text-[10px] text-emerald-400 font-bold">
-                                  Padlocked
-                                </span>
+                                <Lock className="inline w-3 h-3 text-emerald-400 ml-1" />
                               )}
-                            </td>
-                            <td className="px-3 py-2 align-top text-slate-500 whitespace-nowrap">
-                              {post.publishedAt
-                                ? new Date(post.publishedAt).toLocaleString()
-                                : "—"}
-                            </td>
-                            <td className="px-3 py-2 align-top">
-                              <button
-                                type="button"
-                                disabled={actionBusyId === post.id}
-                                onClick={() => handleRewrite(post.id)}
-                                className="inline-flex items-center gap-1 text-[10px] font-bold text-orange-300 border border-orange-800/50 bg-orange-950/30 px-2 py-1.5 rounded-lg hover:bg-orange-950/60 disabled:opacity-50"
-                                title={
-                                  locked
-                                    ? "Re-generate unlocks and restores to Active"
-                                    : "Re-generate and restore to Active"
-                                }
-                              >
-                                {actionBusyId === post.id ? (
-                                  <RefreshCw className="w-3 h-3 animate-spin" />
-                                ) : locked ? (
-                                  <Unlock className="w-3 h-3" />
-                                ) : (
-                                  <RefreshCw className="w-3 h-3" />
-                                )}
-                                Re-generate
-                              </button>
-                            </td>
-                          </tr>
+                            </span>
+                            <button
+                              type="button"
+                              disabled={actionBusyId === post.id}
+                              onClick={() => handleRewrite(post.id)}
+                              className="shrink-0 text-[10px] font-bold text-orange-300 border border-orange-800/50 px-2 py-1 rounded-lg"
+                            >
+                              Re-generate
+                            </button>
+                          </li>
                         );
                       })}
-                    </tbody>
-                  </table>
+                    </ul>
+                  </div>
+                ))
+              )}
+
+              {clearConfirmOrigin && (
+                <div className="glass-card p-5 rounded-2xl border border-red-900/40 bg-red-950/20 text-center space-y-3">
+                  <p className="text-sm font-bold text-white">Clear archive for this site?</p>
+                  <div className="flex justify-center gap-2">
+                    <button
+                      type="button"
+                      disabled={isClearingArchive}
+                      onClick={() => handleClearArchive(clearConfirmOrigin)}
+                      className="bg-red-600 text-white text-xs font-bold px-4 py-2 rounded-xl"
+                    >
+                      Yes, clear
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setClearConfirmOrigin(null)}
+                      className="border border-navy-600 text-slate-300 text-xs font-bold px-4 py-2 rounded-xl"
+                    >
+                      Cancel
+                    </button>
+                  </div>
                 </div>
-              </div>
-            ))
+              )}
+            </div>
           )}
+
+          <p className="text-[11px] text-slate-500 text-center">
+            Need accounts connected?{" "}
+            <Link href="/dashboard/connections" className="text-orange-400 font-bold hover:underline">
+              Connect Facebook / LinkedIn / Google →
+            </Link>
+          </p>
         </div>
       )}
-
-      <p className="text-[10px] text-slate-500 text-center">
-        Publish requires a live OAuth connection for that platform on the active client.{" "}
-        <Link href="/dashboard/connections" className="text-orange-400 font-bold hover:underline">
-          Connect accounts →
-        </Link>
-      </p>
     </div>
   );
 }
