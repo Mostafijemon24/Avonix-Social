@@ -61,7 +61,8 @@ function providerConfig(provider) {
       clientId: process.env.LINKEDIN_CLIENT_ID,
       clientSecret: process.env.LINKEDIN_CLIENT_SECRET,
       label: "LinkedIn",
-      setupHint: "Set LINKEDIN_CLIENT_ID and LINKEDIN_CLIENT_SECRET in backend/.env.",
+      setupHint:
+        "Set LINKEDIN_CLIENT_ID/SECRET. Enable Sign In (OpenID) + Share on LinkedIn. Scopes must match Auth tab (default: openid profile email w_member_social).",
     };
   }
   return { configured: false, label: provider, setupHint: "Unknown provider" };
@@ -247,6 +248,23 @@ export function getMetaOAuthScopeHint(provider) {
   );
 }
 
+/**
+ * LinkedIn OAuth scopes — must match Auth tab on the Developer App.
+ * Default = Sign In (OpenID) + Share on LinkedIn only.
+ * Org scopes (r_organization_social / w_organization_social) need Community Management
+ * or Advertising API approval; requesting them without approval →
+ * "The requested permission scope is not valid".
+ */
+function linkedinOAuthScopes() {
+  const raw =
+    process.env.LINKEDIN_OAUTH_SCOPES || "openid profile email w_member_social";
+  return raw
+    .split(/[,\s]+/)
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .join(" ");
+}
+
 export async function startOAuth({ email, provider, workspaceId }) {
   if (!PROVIDERS.includes(provider)) {
     return { ok: false, status: 400, error: "Unsupported provider" };
@@ -304,9 +322,9 @@ export async function startOAuth({ email, provider, workspaceId }) {
       client_id: cfg.clientId,
       redirect_uri: redirectUri,
       state,
-      scope: "openid profile w_member_social r_organization_social w_organization_social",
     });
-    authUrl = `https://www.linkedin.com/oauth/v2/authorization?${params}`;
+    // LinkedIn rejects application/x-www-form-urlencoded "+" for scopes.
+    authUrl = `https://www.linkedin.com/oauth/v2/authorization?${params.toString()}&scope=${encodeURIComponent(linkedinOAuthScopes())}`;
   }
 
   return { ok: true, authUrl, redirectUri };
