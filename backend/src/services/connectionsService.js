@@ -74,6 +74,7 @@ export function getConnectionsSetupStatus() {
     instagram: providerConfig("instagram").configured,
     google_business: providerConfig("google_business").configured,
     linkedin: providerConfig("linkedin").configured,
+    linkedinMode: linkedinIsCommunityApp() ? "community" : "signin",
     linkedinScopes: linkedinOAuthScopes(),
     callbacks: {
       facebook: callbackUrl("facebook"),
@@ -250,12 +251,11 @@ export function getMetaOAuthScopeHint(provider) {
 }
 
 /**
- * LinkedIn OAuth scopes — must match Products on the Developer App.
- * Sign In (OpenID) → openid profile email
- * Share on LinkedIn → also w_member_social (set LINKEDIN_SHARE_ON_LINKEDIN=1)
- * Org scopes without Community Management API → LinkedIn "Bummer" page.
+ * LinkedIn OAuth scopes — pick ONE app type (LinkedIn forbids mixing on the same app):
+ *   sign-in  → Sign In with LinkedIn (OpenID) ± Share on LinkedIn
+ *   community → Community Management API only (Company Pages)
  */
-const LINKEDIN_BLOCKED_SCOPES = new Set([
+const LINKEDIN_SIGNIN_BLOCKED_SCOPES = new Set([
   "r_organization_social",
   "w_organization_social",
   "rw_organization_admin",
@@ -264,9 +264,20 @@ const LINKEDIN_BLOCKED_SCOPES = new Set([
   "r_emailaddress",
 ]);
 
+function linkedinIsCommunityApp() {
+  const v = String(process.env.LINKEDIN_COMMUNITY_MANAGEMENT || "").toLowerCase();
+  return v === "1" || v === "true" || v === "yes";
+}
+
 function linkedinOAuthScopes() {
-  const raw =
-    process.env.LINKEDIN_OAUTH_SCOPES || "openid profile email";
+  if (linkedinIsCommunityApp()) {
+    const raw =
+      process.env.LINKEDIN_OAUTH_SCOPES ||
+      "r_organization_social w_organization_social rw_organization_admin";
+    return [...new Set(raw.split(/[,\s]+/).map((s) => s.trim()).filter(Boolean))].join(" ");
+  }
+
+  const raw = process.env.LINKEDIN_OAUTH_SCOPES || "openid profile email";
   const allowShare =
     process.env.LINKEDIN_SHARE_ON_LINKEDIN === "1" ||
     process.env.LINKEDIN_SHARE_ON_LINKEDIN === "true";
@@ -275,7 +286,7 @@ function linkedinOAuthScopes() {
     .split(/[,\s]+/)
     .map((s) => s.trim())
     .filter(Boolean)
-    .filter((s) => !LINKEDIN_BLOCKED_SCOPES.has(s))
+    .filter((s) => !LINKEDIN_SIGNIN_BLOCKED_SCOPES.has(s))
     .filter((s) => allowShare || s !== "w_member_social");
 
   if (!scopes.includes("openid")) scopes.unshift("openid");
@@ -601,7 +612,13 @@ async function handleLinkedInCallback({ code, user, workspaceId }) {
     if (saved.length) return saved;
   }
 
-  // Fallback: member profile
+  if (linkedinIsCommunityApp()) {
+    throw new Error(
+      "No LinkedIn Company Page found for this account. Community Management API connects Pages only — the person must be an admin of a Company Page."
+    );
+  }
+
+  // Fallback: member profile (Sign In / OpenID apps)
   const meRes = await fetch("https://api.linkedin.com/v2/userinfo", {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
