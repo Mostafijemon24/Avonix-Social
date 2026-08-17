@@ -13,7 +13,8 @@
     "db:setup": "prisma db push && node prisma/seed.js",
     "admin:create": "node scripts/admin-cli.js create",
     "admin:list": "node scripts/admin-cli.js list",
-    "admin:delete": "node scripts/admin-cli.js delete"
+    "admin:delete": "node scripts/admin-cli.js delete",
+    "admin:forgot": "node scripts/admin-cli.js forgot"
   },
   "dependencies": {
     "@prisma/client": "^6.1.0",

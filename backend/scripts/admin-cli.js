@@ -5,6 +5,7 @@
  *   npm run admin:create
  *   npm run admin:list
  *   npm run admin:delete -- email@example.com
+ *   npm run admin:forgot -- email@example.com
  *
  * Max 2 Super Admins. 2FA (TOTP) is mandatory.
  */
@@ -15,6 +16,7 @@ import {
   createSuperAdminViaCli,
   deleteSuperAdminViaCli,
   listAdminsViaCli,
+  requestAdminPasswordReset,
   canCreateAdmin,
   MAX_SUPER_ADMINS,
 } from "../src/services/adminAuthService.js";
@@ -129,14 +131,39 @@ async function cmdDelete(emailArg) {
   console.log(`✓ Deleted ${result.deleted}. Remaining: ${result.remaining}/${MAX_SUPER_ADMINS}`);
 }
 
+async function cmdForgot(emailArg) {
+  const email = emailArg || process.argv[3];
+  if (!email) {
+    console.error("Usage: npm run admin:forgot -- email@domain.com");
+    process.exit(1);
+  }
+  const result = await requestAdminPasswordReset(email, "cli", { revealCode: true });
+  if (!result.ok) {
+    console.error("ERROR:", result.error);
+    process.exit(1);
+  }
+  if (!result.emailCode) {
+    console.error("\nNo Super Admin exists for:", email);
+    console.error("Create one first: npm run admin:create\n");
+    process.exit(1);
+  }
+  console.log("\n✓ Reset issued for", result.email);
+  console.log("  SMTP:", result.delivery?.email || "unknown", result.delivery?.emailError || "");
+  console.log("\n─── EMAIL RESET CODE (valid 10 min) ───");
+  console.log("  ", result.emailCode);
+  console.log("\nEnter this code on /admin/login → Forgot password, plus your authenticator code.");
+  console.log("If Gmail did not arrive, check Spam / Promotions, or use this terminal code.\n");
+}
+
 async function main() {
   const cmd = process.argv[2] || "create";
   try {
     if (cmd === "create") await cmdCreate();
     else if (cmd === "list") await cmdList();
     else if (cmd === "delete") await cmdDelete();
+    else if (cmd === "forgot") await cmdForgot();
     else {
-      console.log("Commands: create | list | delete");
+      console.log("Commands: create | list | delete | forgot");
       process.exit(1);
     }
   } finally {

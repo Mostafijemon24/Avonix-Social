@@ -59,7 +59,7 @@ export async function sendAdminPasswordResetEmail(admin, { emailCode }) {
     { email: admin.email, name: admin.name },
     {
       type: "admin_password_reset",
-      title: "Avonix Social — Super Admin password reset",
+      title: `Avonix Social admin code: ${emailCode}`,
       body: `Your Super Admin password reset code is: ${emailCode}\n\nValid for 10 minutes. You will also need your authenticator (2FA) code to finish the reset.\n\nIf you did not request this, ignore this email. If you lost your authenticator, use the VPS CLI instead.`,
       code: emailCode,
       codeLabel: "Admin reset code",
@@ -165,10 +165,14 @@ export async function sendEmail(user, { type, title, body, code, codeLabel, ctaU
         await attempt.transport.sendMail({
           from,
           to: user.email,
+          replyTo: authUser || undefined,
           subject: title,
           text: body,
           html,
-          // Helps some providers accept mail when display name differs
+          messageId: `<${type || "mail"}-${Date.now()}@avonixai.com>`,
+          headers: {
+            "X-Entity-Ref-ID": `${type || "mail"}-${Date.now()}`,
+          },
           envelope: authUser
             ? { from: authUser, to: user.email }
             : undefined,

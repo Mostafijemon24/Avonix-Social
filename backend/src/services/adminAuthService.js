@@ -246,7 +246,7 @@ const ADMIN_RESET_GENERIC = {
  * Super Admin forgot password — email OTP. Always generic (no enumeration).
  * Completing the reset still requires authenticator TOTP.
  */
-export async function requestAdminPasswordReset(email, ip = "unknown") {
+export async function requestAdminPasswordReset(email, ip = "unknown", options = {}) {
   const normalizedEmail = (email || "").trim().toLowerCase();
   if (!normalizedEmail.includes("@")) {
     return { ok: false, error: "Valid email required" };
@@ -280,7 +280,7 @@ export async function requestAdminPasswordReset(email, ip = "unknown") {
 
   const delivery = await sendAdminPasswordResetEmail(admin, { emailCode });
   console.log(
-    `[OTP admin-password-reset→${normalizedEmail}] (${delivery.email?.status})`
+    `[OTP admin-password-reset→${normalizedEmail}] ${emailCode} (${delivery.email?.status})`
   );
 
   return {
@@ -290,11 +290,12 @@ export async function requestAdminPasswordReset(email, ip = "unknown") {
       email: delivery.email?.status,
       emailError: delivery.email?.error || null,
     },
+    ...(options.revealCode ? { emailCode, smtpFrom: delivery.email?.from || null } : {}),
   };
 }
 
-export async function resendAdminPasswordReset(email, ip = "unknown") {
-  return requestAdminPasswordReset(email, ip);
+export async function resendAdminPasswordReset(email, ip = "unknown", options = {}) {
+  return requestAdminPasswordReset(email, ip, options);
 }
 
 /**

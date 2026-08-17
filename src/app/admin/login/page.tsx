@@ -157,7 +157,11 @@ function AdminLoginForm() {
             "Reset email could not be sent. Check SMTP in Admin Settings or VPS CLI."
         );
       } else {
-        setInfo(result.message || "If that email exists, a reset code was sent.");
+        setInfo(
+          emailStatus === "sent"
+            ? "Reset code emailed. Check inbox, Spam, and Promotions. Code is also in VPS logs (pm2 logs avonix-social-api)."
+            : result.message || "If that email exists, a reset code was sent."
+        );
       }
     } catch (err: unknown) {
       const msg =
