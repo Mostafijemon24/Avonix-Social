@@ -74,6 +74,7 @@ export function getConnectionsSetupStatus() {
     instagram: providerConfig("instagram").configured,
     google_business: providerConfig("google_business").configured,
     linkedin: providerConfig("linkedin").configured,
+    linkedinScopes: linkedinOAuthScopes(),
     callbacks: {
       facebook: callbackUrl("facebook"),
       instagram: callbackUrl("instagram"),
@@ -249,20 +250,40 @@ export function getMetaOAuthScopeHint(provider) {
 }
 
 /**
- * LinkedIn OAuth scopes — must match Auth tab on the Developer App.
- * Default = Sign In (OpenID) + Share on LinkedIn only.
- * Org scopes (r_organization_social / w_organization_social) need Community Management
- * or Advertising API approval; requesting them without approval →
- * "The requested permission scope is not valid".
+ * LinkedIn OAuth scopes — must match Products on the Developer App.
+ * Sign In (OpenID) → openid profile email
+ * Share on LinkedIn → also w_member_social (set LINKEDIN_SHARE_ON_LINKEDIN=1)
+ * Org scopes without Community Management API → LinkedIn "Bummer" page.
  */
+const LINKEDIN_BLOCKED_SCOPES = new Set([
+  "r_organization_social",
+  "w_organization_social",
+  "rw_organization_admin",
+  "r_basicprofile",
+  "r_liteprofile",
+  "r_emailaddress",
+]);
+
 function linkedinOAuthScopes() {
   const raw =
-    process.env.LINKEDIN_OAUTH_SCOPES || "openid profile email w_member_social";
-  return raw
+    process.env.LINKEDIN_OAUTH_SCOPES || "openid profile email";
+  const allowShare =
+    process.env.LINKEDIN_SHARE_ON_LINKEDIN === "1" ||
+    process.env.LINKEDIN_SHARE_ON_LINKEDIN === "true";
+
+  const scopes = raw
     .split(/[,\s]+/)
     .map((s) => s.trim())
     .filter(Boolean)
-    .join(" ");
+    .filter((s) => !LINKEDIN_BLOCKED_SCOPES.has(s))
+    .filter((s) => allowShare || s !== "w_member_social");
+
+  if (!scopes.includes("openid")) scopes.unshift("openid");
+  if (!scopes.includes("profile")) scopes.push("profile");
+  if (!scopes.includes("email")) scopes.push("email");
+  if (allowShare && !scopes.includes("w_member_social")) scopes.push("w_member_social");
+
+  return [...new Set(scopes)].join(" ");
 }
 
 export async function startOAuth({ email, provider, workspaceId }) {
@@ -323,8 +344,9 @@ export async function startOAuth({ email, provider, workspaceId }) {
       redirect_uri: redirectUri,
       state,
     });
-    // LinkedIn rejects application/x-www-form-urlencoded "+" for scopes.
-    authUrl = `https://www.linkedin.com/oauth/v2/authorization?${params.toString()}&scope=${encodeURIComponent(linkedinOAuthScopes())}`;
+    // LinkedIn rejects "+" encoded scopes. Force a new consent screen.
+    authUrl = `https://www.linkedin.com/oauth/v2/authorization?${params.toString()}&scope=${encodeURIComponent(linkedinOAuthScopes())}&prompt=consent`;
+    console.log(`[linkedin oauth] scopes="${linkedinOAuthScopes()}" redirect=${redirectUri}`);
   }
 
   return { ok: true, authUrl, redirectUri };
