@@ -7,7 +7,8 @@ import {
   signPreAuthToken,
   verifyPreAuthToken,
 } from "../middleware/adminAuth.js";
-import { validatePasswordStrength } from "../password.js";
+import { validatePasswordStrength, PASSWORD_HINT } from "../password.js";
+import { sendAdminPasswordResetEmail } from "./notifyService.js";
 
 export { validatePasswordStrength };
 
@@ -19,6 +20,10 @@ const ISSUER = "Avonix Social Admin";
 const loginAttempts = new Map();
 const MAX_ATTEMPTS = 5;
 const LOCKOUT_MS = 15 * 60 * 1000;
+const OTP_TTL_MS = 10 * 60 * 1000;
+const resetRequestAttempts = new Map();
+const MAX_RESET_REQUESTS = 5;
+const RESET_WINDOW_MS = 15 * 60 * 1000;
 
 function attemptKey(email, ip) {
   return `${(email || "").toLowerCase()}|${ip || "unknown"}`;
@@ -51,6 +56,34 @@ function recordFailedLogin(email, ip) {
 
 function clearLoginAttempts(email, ip) {
   loginAttempts.delete(attemptKey(email, ip));
+}
+
+function generateOtp() {
+  return String(crypto.randomInt(100000, 999999));
+}
+
+function checkResetRequestLimit(email, ip) {
+  const key = attemptKey(email, ip);
+  const entry = resetRequestAttempts.get(key);
+  if (!entry) return { ok: true };
+  if (Date.now() - entry.firstAt > RESET_WINDOW_MS) {
+    resetRequestAttempts.delete(key);
+    return { ok: true };
+  }
+  if (entry.count >= MAX_RESET_REQUESTS) {
+    return { ok: false, error: "Too many reset requests. Try again in 15 minutes." };
+  }
+  return { ok: true };
+}
+
+function recordResetRequest(email, ip) {
+  const key = attemptKey(email, ip);
+  const entry = resetRequestAttempts.get(key);
+  if (!entry || Date.now() - entry.firstAt > RESET_WINDOW_MS) {
+    resetRequestAttempts.set(key, { count: 1, firstAt: Date.now() });
+    return;
+  }
+  entry.count += 1;
 }
 
 function verifyTotp(secret, token) {
@@ -199,6 +232,155 @@ export async function adminLoginStep2(preAuthToken, totpCode, ip = "unknown") {
     expiresInSeconds: 30 * 60,
     idleTimeoutSeconds: 30 * 60,
     admin: { id: admin.id, email: admin.email, name: admin.name, role: admin.role },
+  };
+}
+
+const ADMIN_RESET_GENERIC = {
+  ok: true,
+  next: "reset_password",
+  message:
+    "If that Super Admin email exists, a reset code was sent. Check inbox and spam. You will also need your authenticator code.",
+};
+
+/**
+ * Super Admin forgot password — email OTP. Always generic (no enumeration).
+ * Completing the reset still requires authenticator TOTP.
+ */
+export async function requestAdminPasswordReset(email, ip = "unknown") {
+  const normalizedEmail = (email || "").trim().toLowerCase();
+  if (!normalizedEmail.includes("@")) {
+    return { ok: false, error: "Valid email required" };
+  }
+
+  const rate = checkResetRequestLimit(normalizedEmail, ip);
+  if (!rate.ok) return rate;
+  recordResetRequest(normalizedEmail, ip);
+
+  const admin = await prisma.admin.findUnique({ where: { email: normalizedEmail } });
+  if (!admin) {
+    await bcrypt.compare(
+      "timing",
+      "$2a$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/X4.G2oQ.YzqKxqKxq"
+    );
+    return { ...ADMIN_RESET_GENERIC, email: normalizedEmail };
+  }
+
+  const emailCode = generateOtp();
+  const expiresAt = new Date(Date.now() + OTP_TTL_MS);
+
+  await prisma.verificationCode.create({
+    data: {
+      email: normalizedEmail,
+      channel: "email",
+      code: emailCode,
+      purpose: "admin_password_reset",
+      expiresAt,
+    },
+  });
+
+  const delivery = await sendAdminPasswordResetEmail(admin, { emailCode });
+  console.log(
+    `[OTP admin-password-reset→${normalizedEmail}] (${delivery.email?.status})`
+  );
+
+  return {
+    ...ADMIN_RESET_GENERIC,
+    email: normalizedEmail,
+    delivery: {
+      email: delivery.email?.status,
+      emailError: delivery.email?.error || null,
+    },
+  };
+}
+
+export async function resendAdminPasswordReset(email, ip = "unknown") {
+  return requestAdminPasswordReset(email, ip);
+}
+
+/**
+ * Email reset code + authenticator TOTP + new strong password.
+ */
+export async function resetAdminPasswordWithCode(
+  { email, code, totpCode, password, confirmPassword },
+  ip = "unknown"
+) {
+  const normalizedEmail = (email || "").trim().toLowerCase();
+  if (!normalizedEmail.includes("@")) {
+    return { ok: false, error: "Valid email required" };
+  }
+
+  const rate = checkRateLimit(normalizedEmail, ip);
+  if (!rate.ok) return rate;
+
+  if (password !== confirmPassword) {
+    return { ok: false, error: "Password and confirmation do not match" };
+  }
+  const strength = validatePasswordStrength(password);
+  if (!strength.ok) {
+    return { ok: false, error: `${strength.error}. ${PASSWORD_HINT}` };
+  }
+
+  const admin = await prisma.admin.findUnique({ where: { email: normalizedEmail } });
+  if (!admin) {
+    recordFailedLogin(normalizedEmail, ip);
+    return { ok: false, error: "Invalid reset code or authenticator code" };
+  }
+
+  const now = new Date();
+  const row = await prisma.verificationCode.findFirst({
+    where: {
+      email: normalizedEmail,
+      channel: "email",
+      purpose: "admin_password_reset",
+      usedAt: null,
+      expiresAt: { gt: now },
+      code: String(code || "").trim(),
+    },
+    orderBy: { createdAt: "desc" },
+  });
+
+  if (!row) {
+    recordFailedLogin(normalizedEmail, ip);
+    return { ok: false, error: "Invalid or expired reset code" };
+  }
+
+  if (!admin.totpEnabled || !admin.totpSecret) {
+    recordFailedLogin(normalizedEmail, ip);
+    return {
+      ok: false,
+      error: "2FA is not configured. Recreate this admin via VPS CLI.",
+    };
+  }
+
+  if (!verifyTotp(admin.totpSecret, totpCode)) {
+    recordFailedLogin(normalizedEmail, ip);
+    return { ok: false, error: "Invalid authenticator code" };
+  }
+
+  const passwordHash = await bcrypt.hash(password, 12);
+
+  await prisma.$transaction([
+    prisma.verificationCode.update({ where: { id: row.id }, data: { usedAt: now } }),
+    prisma.admin.update({ where: { id: admin.id }, data: { passwordHash } }),
+  ]);
+
+  await prisma.verificationCode.updateMany({
+    where: {
+      email: normalizedEmail,
+      purpose: "admin_password_reset",
+      usedAt: null,
+    },
+    data: { usedAt: now },
+  });
+
+  clearLoginAttempts(normalizedEmail, ip);
+  console.log(`[admin-password-reset] password updated for ${normalizedEmail}`);
+
+  return {
+    ok: true,
+    email: admin.email,
+    next: "signin",
+    message: "Password updated. Sign in with your new password and authenticator code.",
   };
 }
 

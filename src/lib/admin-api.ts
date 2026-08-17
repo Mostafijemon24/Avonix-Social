@@ -58,6 +58,44 @@ export const adminApi = {
       body: JSON.stringify({ preAuthToken, code }),
     }),
 
+  forgotPassword: (email: string) =>
+    adminRequest<{
+      ok: boolean;
+      email?: string;
+      next?: string;
+      message?: string;
+      delivery?: { email?: string; emailError?: string | null };
+    }>("/auth/forgot-password", {
+      method: "POST",
+      body: JSON.stringify({ email }),
+    }),
+
+  resendPasswordReset: (email: string) =>
+    adminRequest<{
+      ok: boolean;
+      email?: string;
+      message?: string;
+      delivery?: { email?: string; emailError?: string | null };
+    }>("/auth/resend-password-reset", {
+      method: "POST",
+      body: JSON.stringify({ email }),
+    }),
+
+  resetPassword: (payload: {
+    email: string;
+    code: string;
+    totpCode: string;
+    password: string;
+    confirmPassword: string;
+  }) =>
+    adminRequest<{ ok: boolean; email?: string; next?: string; message?: string }>(
+      "/auth/reset-password",
+      {
+        method: "POST",
+        body: JSON.stringify(payload),
+      }
+    ),
+
   me: () =>
     adminRequest<{
       id: string;

@@ -134,7 +134,7 @@ model VerificationCode {
   phone     String?
   channel   String // email | sms
   code      String
-  purpose   String // register | login | topup | password_reset
+  purpose   String // register | login | topup | password_reset | admin_password_reset
   expiresAt DateTime
   usedAt    DateTime?
   createdAt DateTime  @default(now())

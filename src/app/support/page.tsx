@@ -15,7 +15,7 @@ const FAQS = [
   },
   {
     q: "I forgot my password / old account has no password",
-    a: "On Sign In, tap Forgot password? We email a 6-digit code — enter it with a new strong password. Accounts created before password auth may need to register again, or contact support with your account email.",
+    a: "Users: on Sign In (or Create Account), tap Forgot password? We email a 6-digit code — enter it with a new strong password. Super Admin: on /admin/login tap Forgot password? You need the email code plus your authenticator. If you lost 2FA, recreate the admin from the VPS CLI.",
   },
   {
     q: "How do multi-client workspaces work?",

@@ -417,15 +417,13 @@ export function RegisterFlow() {
               required
               autoComplete="current-password"
             />
-            <div className="flex justify-end -mt-2">
-              <button
-                type="button"
-                onClick={() => setStep("forgot")}
-                className="text-[10px] font-bold text-orange-400 hover:text-orange-300"
-              >
-                Forgot password?
-              </button>
-            </div>
+            <button
+              type="button"
+              onClick={() => setStep("forgot")}
+              className="w-full text-orange-400 hover:text-orange-300 font-bold py-2"
+            >
+              Forgot password?
+            </button>
             <button
               type="submit"
               disabled={loading}
@@ -576,6 +574,13 @@ export function RegisterFlow() {
               className="w-full text-slate-500 font-bold py-2"
             >
               ← Back to sign in
+            </button>
+            <button
+              type="button"
+              onClick={() => setStep("forgot")}
+              className="w-full text-[10px] font-bold text-orange-400 hover:text-orange-300 py-1"
+            >
+              Forgot password?
             </button>
           </form>
         )}

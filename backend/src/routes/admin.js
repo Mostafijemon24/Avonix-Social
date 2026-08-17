@@ -6,6 +6,9 @@ import {
   changeAdminPassword,
   changeAdminEmail,
   getAdminProfile,
+  requestAdminPasswordReset,
+  resendAdminPasswordReset,
+  resetAdminPasswordWithCode,
   getDashboardStats,
   getAllUsers,
   getUserDetail,
@@ -57,6 +60,36 @@ router.post("/auth/verify-2fa", async (req, res) => {
     const { preAuthToken, code } = req.body;
     const result = await adminLoginStep2(preAuthToken, code, clientIp(req));
     if (!result.ok) return res.status(401).json(result);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post("/auth/forgot-password", async (req, res) => {
+  try {
+    const result = await requestAdminPasswordReset(req.body.email, clientIp(req));
+    if (!result.ok) return res.status(400).json(result);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post("/auth/resend-password-reset", async (req, res) => {
+  try {
+    const result = await resendAdminPasswordReset(req.body.email, clientIp(req));
+    if (!result.ok) return res.status(400).json(result);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post("/auth/reset-password", async (req, res) => {
+  try {
+    const result = await resetAdminPasswordWithCode(req.body, clientIp(req));
+    if (!result.ok) return res.status(400).json(result);
     res.json(result);
   } catch (err) {
     res.status(500).json({ error: err.message });

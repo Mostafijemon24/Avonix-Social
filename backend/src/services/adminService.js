@@ -12,6 +12,9 @@ export {
   getAdminProfile,
   validatePasswordStrength,
   MAX_SUPER_ADMINS,
+  requestAdminPasswordReset,
+  resendAdminPasswordReset,
+  resetAdminPasswordWithCode,
 } from "./adminAuthService.js";
 
 /** @deprecated — use adminLoginStep1 + adminLoginStep2 */

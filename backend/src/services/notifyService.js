@@ -53,6 +53,21 @@ export async function sendPasswordResetEmail(user, { emailCode }) {
   return { email: emailResult };
 }
 
+/** Super Admin password reset OTP email */
+export async function sendAdminPasswordResetEmail(admin, { emailCode }) {
+  const emailResult = await sendEmail(
+    { email: admin.email, name: admin.name },
+    {
+      type: "admin_password_reset",
+      title: "Avonix Social — Super Admin password reset",
+      body: `Your Super Admin password reset code is: ${emailCode}\n\nValid for 10 minutes. You will also need your authenticator (2FA) code to finish the reset.\n\nIf you did not request this, ignore this email. If you lost your authenticator, use the VPS CLI instead.`,
+      code: emailCode,
+      codeLabel: "Admin reset code",
+    }
+  );
+  return { email: emailResult };
+}
+
 /** Welcome email when Super Admin creates a user */
 export async function sendAdminWelcomeEmail(user, { appUrl = "" } = {}) {
   const signInUrl = `${(appUrl || process.env.APP_URL || "https://social.avonixai.com").replace(/\/$/, "")}/register?step=signin`;
@@ -71,6 +86,7 @@ export async function sendRegistrationOtps(user, { emailCode }) {
 }
 
 async function logNotification(userId, channel, type, title, body, status) {
+  if (!userId) return null;
   return prisma.notificationLog.create({
     data: { userId, channel, type, title, body, status },
   });
