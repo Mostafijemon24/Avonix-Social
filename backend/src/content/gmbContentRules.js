@@ -421,13 +421,14 @@ export function pickRelevantSourcePage(pages = [], categoryId, location = "") {
     .filter((t) => t.length >= 3);
   const cat = getGmbCategory(categoryId);
 
+  const keywordText = (value) =>
+    Array.isArray(value) ? value.filter(Boolean).join(" ") : value ? String(value) : "";
+
   const scored = list.map((p) => {
     let score = 0;
-    const hay = `${p.title || ""} ${p.url || ""} ${p.keywords?.primary || ""} ${(
-      p.keywords?.secondary ||
-      p.keywords?.secondaryKeywords ||
-      []
-    ).join(" ")}`.toLowerCase();
+    const hay = `${p.title || ""} ${p.url || ""} ${p.keywords?.primary || ""} ${keywordText(
+      p.keywords?.secondaryKeywords || p.keywords?.general || p.keywords?.secondary
+    )}`.toLowerCase();
     if (isHomepageUrl(p.url)) score -= 8;
     if (inferPageType(p.url, p.title) === "Services") score += 6;
     if (p.keywords?.primary) score += 3;

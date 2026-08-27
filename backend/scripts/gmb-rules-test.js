@@ -61,6 +61,24 @@ const pages = [
 const picked = pickRelevantSourcePage(pages, GMB_CATEGORY_IDS.INTENT_PROXIMITY, "Plano, TX");
 assert(picked?.url.includes("emergency-care"), "does not default to homepage");
 
+const stringSecondaryPages = [
+  { url: "https://ex.com/", title: "Home", keywords: { primary: "home", secondary: "generic" } },
+  {
+    url: "https://ex.com/website-repair-houston",
+    title: "Website Repair Houston",
+    keywords: { primary: "website repair", secondary: "houston recovery" },
+  },
+];
+const pickedStringKw = pickRelevantSourcePage(
+  stringSecondaryPages,
+  GMB_CATEGORY_IDS.INTENT_PROXIMITY,
+  "Houston, TX"
+);
+assert(
+  pickedStringKw?.url.includes("website-repair"),
+  "string secondary keywords do not crash picker"
+);
+
 const offer = detectVerifiedOffer([
   { title: "Spring discount on exams", url: "https://ex.com/offer", keywords: { primary: "exam" } },
 ]);
