@@ -6,6 +6,7 @@ import jwt from "jsonwebtoken";
 import prisma from "../db.js";
 import { isFullyVerified } from "./verifyService.js";
 import { resolveActiveWorkspace } from "./workspaceService.js";
+import { sanitizeEligibleForClient } from "./oauthPicker.js";
 
 const PROVIDERS = ["facebook", "instagram", "google_business", "linkedin"];
 const STATE_SECRET = () =>
@@ -98,12 +99,37 @@ async function requireVerifiedUser(email) {
   return { ok: true, user };
 }
 
+const PENDING_STATUS = "pending_select";
+const pendingAccountId = (provider) => `pending:${provider}`;
+
+function stripSecretMeta(meta) {
+  if (!meta || typeof meta !== "object") return meta;
+  const out = { ...meta };
+  delete out.accessToken;
+  delete out.pageToken;
+  delete out.refreshToken;
+  delete out.userToken;
+  delete out.eligible;
+  return out;
+}
+
 function publicAccount(row) {
   let meta = null;
   try {
     meta = row.metadata ? JSON.parse(row.metadata) : null;
   } catch {
     meta = null;
+  }
+  const isDefault = !!(meta && meta.isDefault);
+  const expired =
+    row.tokenExpiresAt && new Date(row.tokenExpiresAt).getTime() < Date.now();
+  const publishReady =
+    row.authType === "oauth" && row.status === "connected" && !!row.accessToken && !expired;
+  let healthStatus = "disconnected";
+  if (publishReady) healthStatus = "publishing_ready";
+  else if (row.status === "expired" || expired) healthStatus = "needs_reauthorization";
+  else if (row.status === "error" || row.status === "linked" || row.authType === "manual") {
+    healthStatus = "permission_issue";
   }
   return {
     id: row.id,
@@ -114,10 +140,13 @@ function publicAccount(row) {
     accountName: row.accountName,
     accountUrl: row.accountUrl,
     tokenExpiresAt: row.tokenExpiresAt,
-    metadata: meta,
+    metadata: stripSecretMeta(meta),
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
-    publishReady: row.authType === "oauth" && row.status === "connected" && !!row.accessToken,
+    isDefault,
+    lastVerifiedAt: meta?.lastVerifiedAt || null,
+    publishReady,
+    healthStatus,
   };
 }
 
@@ -129,14 +158,20 @@ export async function listConnections(email, workspaceId) {
   const wid = workspaceId || activeId || workspace?.id;
 
   const rows = await prisma.connectedAccount.findMany({
-    where: { userId: gate.user.id, workspaceId: wid },
+    where: {
+      userId: gate.user.id,
+      workspaceId: wid,
+      NOT: { status: PENDING_STATUS },
+    },
     orderBy: [{ provider: "asc" }, { updatedAt: "desc" }],
   });
 
   const byProvider = Object.fromEntries(PROVIDERS.map((p) => [p, null]));
+  const grouped = Object.fromEntries(PROVIDERS.map((p) => [p, []]));
   const accounts = rows.map(publicAccount);
   for (const a of accounts) {
     if (!byProvider[a.provider]) byProvider[a.provider] = a;
+    if (grouped[a.provider]) grouped[a.provider].push(a);
   }
 
   return {
@@ -144,6 +179,7 @@ export async function listConnections(email, workspaceId) {
     workspaceId: wid,
     accounts,
     byProvider,
+    grouped,
     setup: getConnectionsSetupStatus(),
   };
 }
@@ -368,6 +404,16 @@ async function upsertOAuthAccount(userId, workspaceId, provider, fields) {
   const existing = await prisma.connectedAccount.findFirst({
     where: { userId, workspaceId, provider, accountId },
   });
+  let mergedMeta = fields.metadata && typeof fields.metadata === "object" ? { ...fields.metadata } : {};
+  if (existing?.metadata) {
+    try {
+      const prev = JSON.parse(existing.metadata);
+      mergedMeta = { ...prev, ...mergedMeta };
+      if (prev.isDefault) mergedMeta.isDefault = true;
+    } catch {
+      /* keep mergedMeta */
+    }
+  }
   const data = {
     authType: "oauth",
     status: "connected",
@@ -375,9 +421,9 @@ async function upsertOAuthAccount(userId, workspaceId, provider, fields) {
     accountName: fields.accountName || provider,
     accountUrl: fields.accountUrl || null,
     accessToken: fields.accessToken || null,
-    refreshToken: fields.refreshToken || null,
+    refreshToken: fields.refreshToken || existing?.refreshToken || null,
     tokenExpiresAt: fields.tokenExpiresAt || null,
-    metadata: fields.metadata ? JSON.stringify(fields.metadata) : null,
+    metadata: JSON.stringify(mergedMeta),
     workspaceId,
   };
   if (existing) {
@@ -438,50 +484,45 @@ async function handleMetaCallback({ code, provider, user, workspaceId }) {
     );
   }
 
-  const saved = [];
+  const eligible = [];
   for (const page of pages) {
-    if (provider === "facebook" || provider === "instagram") {
-      // Always store Facebook page when connecting Facebook
-      if (provider === "facebook") {
-        saved.push(
-          await upsertOAuthAccount(user.id, workspaceId, "facebook", {
-            accountId: page.id,
-            accountName: page.name,
-            accountUrl: `https://www.facebook.com/${page.id}`,
-            accessToken: page.access_token || userToken,
-            metadata: { pageId: page.id },
-          })
-        );
-      }
-      // Instagram business linked to page
-      if (page.instagram_business_account?.id) {
-        const ig = page.instagram_business_account;
-        saved.push(
-          await upsertOAuthAccount(user.id, workspaceId, "instagram", {
-            accountId: ig.id,
-            accountName: ig.username || `IG ${ig.id}`,
-            accountUrl: ig.username
-              ? `https://www.instagram.com/${ig.username}/`
-              : null,
-            accessToken: page.access_token || userToken,
-            metadata: { igUserId: ig.id, pageId: page.id },
-          })
-        );
-      }
+    if (provider === "facebook") {
+      eligible.push({
+        accountId: page.id,
+        accountName: page.name || `Facebook Page ${page.id}`,
+        accountUrl: `https://www.facebook.com/${page.id}`,
+        accessToken: page.access_token || userToken,
+        metadata: { pageId: page.id },
+      });
+    }
+    if (provider === "instagram" && page.instagram_business_account?.id) {
+      const ig = page.instagram_business_account;
+      eligible.push({
+        accountId: ig.id,
+        accountName: ig.username || `IG ${ig.id}`,
+        accountUrl: ig.username ? `https://www.instagram.com/${ig.username}/` : null,
+        accessToken: page.access_token || userToken,
+        metadata: { igUserId: ig.id, pageId: page.id },
+      });
     }
   }
 
-  if (provider === "instagram" && !saved.some((s) => s.provider === "instagram")) {
+  if (provider === "instagram" && !eligible.length) {
     throw new Error(
       "No Instagram Business account linked to your Facebook Pages. Link IG in Meta Business Suite, then retry."
     );
   }
 
-  if (provider === "facebook" && !saved.some((s) => s.provider === "facebook")) {
-    throw new Error("Could not save Facebook Page connection.");
+  if (provider === "facebook" && !eligible.length) {
+    throw new Error("Could not load Facebook Pages to connect.");
   }
 
-  return saved;
+  return {
+    eligible,
+    accessToken: userToken,
+    refreshToken: null,
+    tokenExpiresAt: null,
+  };
 }
 
 async function handleGoogleCallback({ code, user, workspaceId }) {
@@ -519,36 +560,81 @@ async function handleGoogleCallback({ code, user, workspaceId }) {
   const accounts = accountsData.accounts || [];
 
   if (!accounts.length) {
-    // Still save token so user is "connected" and can pick location later
-    return [
-      await upsertOAuthAccount(user.id, workspaceId, "google_business", {
-        accountId: "google-user",
-        accountName: "Google Business (no locations yet)",
-        accountUrl: "https://business.google.com/",
-        accessToken,
-        refreshToken,
-        tokenExpiresAt: expiresAt,
-        metadata: { note: "No GBP accounts returned — enable Business Profile API" },
-      }),
-    ];
+    return {
+      eligible: [
+        {
+          accountId: "google-user",
+          accountName: "Google Business (no locations yet)",
+          accountUrl: "https://business.google.com/",
+          accessToken,
+          refreshToken,
+          tokenExpiresAt: expiresAt,
+          metadata: { note: "No GBP accounts returned — enable Business Profile API" },
+        },
+      ],
+      accessToken,
+      refreshToken,
+      tokenExpiresAt: expiresAt,
+    };
   }
 
-  const saved = [];
-  for (const acc of accounts.slice(0, 5)) {
-    const accountName = acc.accountName || acc.name || "Google Business";
-    saved.push(
-      await upsertOAuthAccount(user.id, workspaceId, "google_business", {
+  const eligible = [];
+  for (const acc of accounts.slice(0, 8)) {
+    const accountName = acc.name || acc.accountName || "Google Business";
+    let locations = [];
+    try {
+      const locRes = await fetch(
+        `https://mybusinessbusinessinformation.googleapis.com/v1/${accountName}/locations?readMask=name,title,storefrontAddress,phoneNumbers,websiteUri,regularHours`,
+        { headers: { Authorization: `Bearer ${accessToken}` } }
+      );
+      if (locRes.ok) {
+        const locData = await locRes.json();
+        locations = Array.isArray(locData.locations) ? locData.locations : [];
+      }
+    } catch {
+      locations = [];
+    }
+
+    if (locations.length) {
+      for (const loc of locations.slice(0, 20)) {
+        const addr = loc.storefrontAddress
+          ? [loc.storefrontAddress.addressLines?.[0], loc.storefrontAddress.locality, loc.storefrontAddress.administrativeArea]
+              .filter(Boolean)
+              .join(", ")
+          : "";
+        const phone =
+          loc.phoneNumbers?.primaryPhone || loc.phoneNumbers?.primary || "";
+        eligible.push({
+          accountId: loc.name || `${accountName}/${loc.title}`,
+          accountName: loc.title || loc.name || "GBP location",
+          accountUrl: loc.websiteUri || "https://business.google.com/",
+          accessToken,
+          refreshToken,
+          tokenExpiresAt: expiresAt,
+          metadata: {
+            googleAccount: acc.name,
+            locationName: loc.name,
+            address: addr,
+            phone,
+            hours: loc.regularHours ? JSON.stringify(loc.regularHours) : null,
+            type: "location",
+          },
+        });
+      }
+    } else {
+      eligible.push({
         accountId: acc.name || accountName,
-        accountName,
+        accountName: acc.accountName || accountName,
         accountUrl: "https://business.google.com/",
         accessToken,
         refreshToken,
         tokenExpiresAt: expiresAt,
         metadata: { googleAccount: acc.name, type: acc.type },
-      })
-    );
+      });
+    }
   }
-  return saved;
+
+  return { eligible, accessToken, refreshToken, tokenExpiresAt: expiresAt };
 }
 
 async function handleLinkedInCallback({ code, user, workspaceId }) {
@@ -590,26 +676,26 @@ async function handleLinkedInCallback({ code, user, workspaceId }) {
 
   const orgs = orgData.elements || [];
   if (orgs.length) {
-    const saved = [];
-    for (const el of orgs.slice(0, 5)) {
+    const eligible = [];
+    for (const el of orgs.slice(0, 20)) {
       const target = el["organizationalTarget~"] || {};
       const id = String(target.id || el.organizationalTarget || "").replace(
         "urn:li:organization:",
         ""
       );
       if (!id) continue;
-      saved.push(
-        await upsertOAuthAccount(user.id, workspaceId, "linkedin", {
-          accountId: id,
-          accountName: target.localizedName || `LinkedIn Page ${id}`,
-          accountUrl: `https://www.linkedin.com/company/${id}/`,
-          accessToken,
-          tokenExpiresAt: expiresAt,
-          metadata: { organizationUrn: `urn:li:organization:${id}` },
-        })
-      );
+      eligible.push({
+        accountId: id,
+        accountName: target.localizedName || `LinkedIn Page ${id}`,
+        accountUrl: `https://www.linkedin.com/company/${id}/`,
+        accessToken,
+        tokenExpiresAt: expiresAt,
+        metadata: { organizationUrn: `urn:li:organization:${id}` },
+      });
     }
-    if (saved.length) return saved;
+    if (eligible.length) {
+      return { eligible, accessToken, refreshToken: null, tokenExpiresAt: expiresAt };
+    }
   }
 
   if (linkedinIsCommunityApp()) {
@@ -618,21 +704,25 @@ async function handleLinkedInCallback({ code, user, workspaceId }) {
     );
   }
 
-  // Fallback: member profile (Sign In / OpenID apps)
   const meRes = await fetch("https://api.linkedin.com/v2/userinfo", {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
   const me = await meRes.json().catch(() => ({}));
-  return [
-    await upsertOAuthAccount(user.id, workspaceId, "linkedin", {
-      accountId: me.sub || "linkedin-user",
-      accountName: me.name || me.email || "LinkedIn Profile",
-      accountUrl: "https://www.linkedin.com/",
-      accessToken,
-      tokenExpiresAt: expiresAt,
-      metadata: { type: "member" },
-    }),
-  ];
+  return {
+    eligible: [
+      {
+        accountId: me.sub || "linkedin-user",
+        accountName: me.name || me.email || "LinkedIn Profile",
+        accountUrl: "https://www.linkedin.com/",
+        accessToken,
+        tokenExpiresAt: expiresAt,
+        metadata: { type: "member" },
+      },
+    ],
+    accessToken,
+    refreshToken: null,
+    tokenExpiresAt: expiresAt,
+  };
 }
 
 export async function handleOAuthCallback({ provider, code, state, error, errorDescription }) {
@@ -661,20 +751,328 @@ export async function handleOAuthCallback({ provider, code, state, error, errorD
   }
 
   try {
+    let bundle;
     if (provider === "facebook" || provider === "instagram") {
-      await handleMetaCallback({ code, provider, user: gate.user, workspaceId });
+      bundle = await handleMetaCallback({ code, provider, user: gate.user, workspaceId });
     } else if (provider === "google_business") {
-      await handleGoogleCallback({ code, user: gate.user, workspaceId });
+      bundle = await handleGoogleCallback({ code, user: gate.user, workspaceId });
     } else if (provider === "linkedin") {
-      await handleLinkedInCallback({ code, user: gate.user, workspaceId });
+      bundle = await handleLinkedInCallback({ code, user: gate.user, workspaceId });
     } else {
       return { redirect: `${frontend}?error=${encodeURIComponent("Unknown provider")}` };
     }
-    return { redirect: `${frontend}?connected=${encodeURIComponent(provider)}` };
+    await savePendingSelection({
+      userId: gate.user.id,
+      workspaceId,
+      provider,
+      bundle,
+    });
+    return { redirect: `${frontend}?select=${encodeURIComponent(provider)}` };
   } catch (err) {
     console.error(`[connections/oauth/${provider}]`, err);
     return {
       redirect: `${frontend}?error=${encodeURIComponent(err.message || "OAuth failed")}`,
     };
   }
+}
+
+export { sanitizeEligibleForClient } from "./oauthPicker.js";
+
+async function savePendingSelection({ userId, workspaceId, provider, bundle }) {
+  const eligible = Array.isArray(bundle?.eligible) ? bundle.eligible : [];
+  if (!eligible.length) {
+    throw new Error(`No ${provider} accounts were returned to connect.`);
+  }
+
+  const existingRows = await prisma.connectedAccount.findMany({
+    where: {
+      userId,
+      workspaceId,
+      provider,
+      NOT: { status: PENDING_STATUS },
+    },
+  });
+  const connectedIds = new Set(existingRows.map((r) => String(r.accountId)));
+
+  for (const item of eligible) {
+    if (!connectedIds.has(String(item.accountId))) continue;
+    await upsertOAuthAccount(userId, workspaceId, provider, {
+      accountId: item.accountId,
+      accountName: item.accountName,
+      accountUrl: item.accountUrl,
+      accessToken: item.accessToken || bundle.accessToken,
+      refreshToken: item.refreshToken || bundle.refreshToken || null,
+      tokenExpiresAt: item.tokenExpiresAt || bundle.tokenExpiresAt || null,
+      metadata: item.metadata || {},
+    });
+  }
+
+  const pendingData = {
+    authType: "oauth",
+    status: PENDING_STATUS,
+    accountId: pendingAccountId(provider),
+    accountName: `Pending ${provider} selection`,
+    accountUrl: null,
+    accessToken: bundle.accessToken || null,
+    refreshToken: bundle.refreshToken || null,
+    tokenExpiresAt: bundle.tokenExpiresAt || null,
+    metadata: JSON.stringify({ eligible }),
+    workspaceId,
+  };
+
+  const existingPending = await prisma.connectedAccount.findFirst({
+    where: {
+      userId,
+      workspaceId,
+      provider,
+      accountId: pendingAccountId(provider),
+    },
+  });
+
+  if (existingPending) {
+    await prisma.connectedAccount.update({
+      where: { id: existingPending.id },
+      data: pendingData,
+    });
+  } else {
+    await prisma.connectedAccount.create({
+      data: { userId, provider, ...pendingData },
+    });
+  }
+}
+
+export async function listPendingSelection({ email, provider, workspaceId }) {
+  if (!PROVIDERS.includes(provider)) {
+    return { ok: false, status: 400, error: "Unsupported provider" };
+  }
+  const gate = await requireVerifiedUser(email);
+  if (!gate.ok) return gate;
+
+  const { activeId, workspace } = await resolveActiveWorkspace(gate.user);
+  const wid = workspaceId || activeId || workspace?.id;
+  if (!wid) return { ok: false, status: 400, error: "No active client workspace" };
+
+  const pending = await prisma.connectedAccount.findFirst({
+    where: {
+      userId: gate.user.id,
+      workspaceId: wid,
+      provider,
+      status: PENDING_STATUS,
+      accountId: pendingAccountId(provider),
+    },
+  });
+  if (!pending) {
+    return { ok: true, provider, items: [], pending: false };
+  }
+
+  let eligible = [];
+  try {
+    const meta = pending.metadata ? JSON.parse(pending.metadata) : {};
+    eligible = Array.isArray(meta.eligible) ? meta.eligible : [];
+  } catch {
+    eligible = [];
+  }
+
+  const connected = await prisma.connectedAccount.findMany({
+    where: {
+      userId: gate.user.id,
+      workspaceId: wid,
+      provider,
+      NOT: { status: PENDING_STATUS },
+    },
+    select: { accountId: true, accountName: true },
+  });
+
+  return {
+    ok: true,
+    pending: true,
+    provider,
+    items: sanitizeEligibleForClient(
+      eligible,
+      connected.map((c) => c.accountId)
+    ),
+  };
+}
+
+export async function connectSelectedAccounts({ email, provider, accountIds, workspaceId }) {
+  if (!PROVIDERS.includes(provider)) {
+    return { ok: false, status: 400, error: "Unsupported provider" };
+  }
+  const ids = Array.isArray(accountIds)
+    ? [...new Set(accountIds.map((id) => String(id).trim()).filter(Boolean))]
+    : [];
+  if (!ids.length) {
+    return { ok: false, status: 400, error: "Select at least one account to connect" };
+  }
+
+  const gate = await requireVerifiedUser(email);
+  if (!gate.ok) return gate;
+
+  const { activeId, workspace } = await resolveActiveWorkspace(gate.user);
+  const wid = workspaceId || activeId || workspace?.id;
+  if (!wid) return { ok: false, status: 400, error: "No active client workspace" };
+
+  const pending = await prisma.connectedAccount.findFirst({
+    where: {
+      userId: gate.user.id,
+      workspaceId: wid,
+      provider,
+      status: PENDING_STATUS,
+      accountId: pendingAccountId(provider),
+    },
+  });
+  if (!pending) {
+    return { ok: false, status: 404, error: "No pending account selection. Start Connect another again." };
+  }
+
+  let eligible = [];
+  try {
+    const meta = pending.metadata ? JSON.parse(pending.metadata) : {};
+    eligible = Array.isArray(meta.eligible) ? meta.eligible : [];
+  } catch {
+    eligible = [];
+  }
+
+  const byId = new Map(eligible.map((item) => [String(item.accountId), item]));
+  const connected = await prisma.connectedAccount.findMany({
+    where: {
+      userId: gate.user.id,
+      workspaceId: wid,
+      provider,
+      NOT: { status: PENDING_STATUS },
+    },
+    select: { accountId: true },
+  });
+  const already = new Set(connected.map((c) => String(c.accountId)));
+
+  const saved = [];
+  const skipped = [];
+  for (const id of ids) {
+    if (already.has(id)) {
+      skipped.push(id);
+      continue;
+    }
+    const item = byId.get(id);
+    if (!item) {
+      return { ok: false, status: 400, error: `Account ${id} was not in the provider-returned list.` };
+    }
+    saved.push(
+      await upsertOAuthAccount(gate.user.id, wid, provider, {
+        accountId: item.accountId,
+        accountName: item.accountName,
+        accountUrl: item.accountUrl,
+        accessToken: item.accessToken || pending.accessToken,
+        refreshToken: item.refreshToken || pending.refreshToken || null,
+        tokenExpiresAt: item.tokenExpiresAt || pending.tokenExpiresAt || null,
+        metadata: item.metadata || {},
+      })
+    );
+  }
+
+  await prisma.connectedAccount.delete({ where: { id: pending.id } });
+
+  return {
+    ok: true,
+    provider,
+    connected: saved.map(publicAccount),
+    skippedAlreadyConnected: skipped,
+    workspaceId: wid,
+  };
+}
+
+export async function discardPendingSelection({ email, provider, workspaceId }) {
+  if (!PROVIDERS.includes(provider)) {
+    return { ok: false, status: 400, error: "Unsupported provider" };
+  }
+  const gate = await requireVerifiedUser(email);
+  if (!gate.ok) return gate;
+
+  const { activeId, workspace } = await resolveActiveWorkspace(gate.user);
+  const wid = workspaceId || activeId || workspace?.id;
+
+  await prisma.connectedAccount.deleteMany({
+    where: {
+      userId: gate.user.id,
+      workspaceId: wid,
+      provider,
+      status: PENDING_STATUS,
+    },
+  });
+  return { ok: true };
+}
+
+export async function setDefaultAccount({ email, accountId }) {
+  const gate = await requireVerifiedUser(email);
+  if (!gate.ok) return gate;
+
+  const row = await prisma.connectedAccount.findFirst({
+    where: { id: accountId, userId: gate.user.id, NOT: { status: PENDING_STATUS } },
+  });
+  if (!row) return { ok: false, status: 404, error: "Connection not found" };
+
+  const siblings = await prisma.connectedAccount.findMany({
+    where: {
+      userId: gate.user.id,
+      workspaceId: row.workspaceId,
+      provider: row.provider,
+      NOT: { status: PENDING_STATUS },
+    },
+  });
+
+  for (const sib of siblings) {
+    let meta = {};
+    try {
+      meta = sib.metadata ? JSON.parse(sib.metadata) : {};
+    } catch {
+      meta = {};
+    }
+    meta.isDefault = sib.id === row.id;
+    await prisma.connectedAccount.update({
+      where: { id: sib.id },
+      data: { metadata: JSON.stringify(meta) },
+    });
+  }
+
+  const updated = await prisma.connectedAccount.findUnique({ where: { id: row.id } });
+  return { ok: true, account: publicAccount(updated) };
+}
+
+export async function verifyAccount({ email, accountId }) {
+  const gate = await requireVerifiedUser(email);
+  if (!gate.ok) return gate;
+
+  const row = await prisma.connectedAccount.findFirst({
+    where: { id: accountId, userId: gate.user.id, NOT: { status: PENDING_STATUS } },
+  });
+  if (!row) return { ok: false, status: 404, error: "Connection not found" };
+
+  const expired =
+    row.tokenExpiresAt && new Date(row.tokenExpiresAt).getTime() < Date.now();
+  const okToken = row.authType === "oauth" && !!row.accessToken && !expired;
+
+  let meta = {};
+  try {
+    meta = row.metadata ? JSON.parse(row.metadata) : {};
+  } catch {
+    meta = {};
+  }
+  meta.lastVerifiedAt = new Date().toISOString();
+  meta.lastVerifyOk = okToken;
+
+  const nextStatus = okToken ? "connected" : expired ? "expired" : row.status === "linked" ? "error" : row.status;
+  const updated = await prisma.connectedAccount.update({
+    where: { id: row.id },
+    data: { status: nextStatus, metadata: JSON.stringify(meta) },
+  });
+
+  return {
+    ok: true,
+    account: publicAccount(updated),
+    verified: okToken,
+    message: okToken
+      ? "Token is present and not expired."
+      : expired
+        ? "Token expired — reauthorize this account."
+        : "No publishing token on this connection.",
+  };
 }

@@ -10,15 +10,26 @@ export const PUBLIC_NAV = [
   { href: "/contact", label: "Contact Us", match: "contact" },
 ] as const;
 
-export const DASHBOARD_NAV = [
+export const DASHBOARD_PRIMARY_NAV = [
   { href: "/dashboard", label: "Dashboard", id: "dashboard" },
   { href: "/dashboard/social-post", label: "Content Studio", id: "socialpost" },
   { href: "/dashboard/connections", label: "Connections", id: "connections" },
+] as const;
+
+export const DASHBOARD_MORE_NAV = [
+  { href: "/dashboard/library", label: "Post Library", id: "library" },
+  { href: "/dashboard/scheduling", label: "Scheduling", id: "scheduling" },
   { href: "/dashboard/review-reply", label: "Review Reply", id: "reviewreply" },
-  { href: "/dashboard/notification", label: "Notification", id: "notification" },
-  { href: "/dashboard/report", label: "Report", id: "report" },
-  { href: "/dashboard/billing", label: "Plan & Price", id: "billing" },
+  { href: "/dashboard/notification", label: "Notifications", id: "notification" },
+  { href: "/dashboard/report", label: "Reports", id: "report" },
+  { href: "/dashboard/billing", label: "Billing", id: "billing" },
   { href: "/dashboard/support", label: "Support", id: "support" },
+  { href: "/dashboard/audit", label: "Pre-Production Audit", id: "audit" },
+] as const;
+
+export const DASHBOARD_NAV = [
+  ...DASHBOARD_PRIMARY_NAV,
+  ...DASHBOARD_MORE_NAV,
 ] as const;
 
 export const PRICING_PLANS = [

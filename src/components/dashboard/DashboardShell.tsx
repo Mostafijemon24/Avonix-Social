@@ -15,9 +15,13 @@ import {
   X,
   Link2,
   LifeBuoy,
+  ChevronDown,
+  Library,
+  CalendarClock,
+  ClipboardCheck,
 } from "lucide-react";
 import { BrandLogo } from "@/components/ui/BrandLogo";
-import { DASHBOARD_NAV } from "@/lib/constants";
+import { DASHBOARD_MORE_NAV, DASHBOARD_PRIMARY_NAV } from "@/lib/constants";
 import { useToast } from "@/components/ui/Toast";
 import { useWorkspace, PLAN_CONFIG } from "@/context/WorkspaceContext";
 import { api } from "@/lib/api-client";
@@ -28,11 +32,14 @@ const ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
   socialpost: PenLine,
   connections: Link2,
   gbppost: MapPin,
+  library: Library,
+  scheduling: CalendarClock,
   reviewreply: MessageSquare,
   notification: Bell,
   report: FileText,
   billing: CreditCard,
   support: LifeBuoy,
+  audit: ClipboardCheck,
 };
 
 export function DashboardShell({ children }: { children: React.ReactNode }) {
@@ -41,6 +48,8 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
   const { showToast } = useToast();
   const { state, logout: workspaceLogout, switchWorkspace } = useWorkspace();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
   const [connStatus, setConnStatus] = useState<
     Record<"facebook" | "instagram" | "linkedin" | "google_business", "Connected" | "Linked" | "Off">
   >({
@@ -94,6 +103,14 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
       cancelled = true;
     };
   }, [state.email, state.activeWorkspaceId]);
+
+  const moreActive = DASHBOARD_MORE_NAV.some(
+    (item) => pathname === item.href || pathname.startsWith(`${item.href}/`)
+  );
+
+  useEffect(() => {
+    if (moreActive) setMoreOpen(true);
+  }, [moreActive]);
 
   const plan = PLAN_CONFIG[state.planId];
   const unlimited = !!state.unlimitedCredits;
@@ -171,18 +188,40 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
             )}
           </div>
           <Link
+            href="/dashboard/notification"
+            className="relative p-2 rounded-xl text-slate-400 hover:text-white hover:bg-navy-800"
+            aria-label="Notifications"
+          >
+            <Bell className="w-4 h-4" />
+          </Link>
+          <Link
             href="/dashboard/billing"
             className="px-3.5 py-1.5 text-xs font-bold rounded-xl text-white bg-orange-500 hover:bg-orange-600 transition-all shadow-md shadow-orange-500/20"
           >
             Top-Up / Upgrade
           </Link>
-          <button
-            type="button"
-            onClick={handleLogout}
-            className="text-xs font-bold text-slate-400 hover:text-white px-3 py-1.5 rounded-xl border border-navy-800 bg-navy-900"
-          >
-            Sign Out
-          </button>
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setProfileOpen((v) => !v)}
+              className="w-8 h-8 rounded-full bg-navy-800 border border-navy-700 text-[11px] font-black text-orange-400"
+              aria-label="Profile"
+            >
+              {(state.email || "U").slice(0, 1).toUpperCase()}
+            </button>
+            {profileOpen && (
+              <div className="absolute right-0 mt-2 w-44 bg-navy-900 border border-navy-700 rounded-xl shadow-xl z-40 p-2">
+                <p className="text-[10px] text-slate-500 px-2 truncate mb-1">{state.email}</p>
+                <button
+                  type="button"
+                  onClick={handleLogout}
+                  className="w-full text-left text-xs font-bold text-slate-300 hover:text-white px-2 py-1.5 rounded-lg hover:bg-navy-800"
+                >
+                  Sign Out
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </header>
 
@@ -228,9 +267,9 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
         >
           <div className="p-4 space-y-1 overflow-y-auto custom-scrollbar">
             <div className="text-[10px] font-extrabold text-slate-500 px-3 uppercase tracking-wider mb-2">
-              Main Navigation
+              Workspace
             </div>
-            {DASHBOARD_NAV.map((item) => {
+            {DASHBOARD_PRIMARY_NAV.map((item) => {
               const Icon = ICONS[item.id];
               const active = isActive(item.href);
               return (
@@ -249,6 +288,41 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
                 </Link>
               );
             })}
+
+            <button
+              type="button"
+              onClick={() => setMoreOpen((v) => !v)}
+              className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-bold mt-2 ${
+                moreActive || moreOpen
+                  ? "text-white bg-navy-800"
+                  : "text-slate-400 hover:text-white hover:bg-navy-800"
+              }`}
+            >
+              <span className="uppercase tracking-wider text-[10px]">More</span>
+              <ChevronDown
+                className={`w-4 h-4 transition-transform ${moreOpen ? "rotate-180" : ""}`}
+              />
+            </button>
+            {moreOpen &&
+              DASHBOARD_MORE_NAV.map((item) => {
+                const Icon = ICONS[item.id];
+                const active = isActive(item.href);
+                return (
+                  <Link
+                    key={item.id}
+                    href={item.href}
+                    onClick={() => setSidebarOpen(false)}
+                    className={`w-full flex items-center space-x-3 px-3.5 py-2 rounded-xl text-xs font-bold transition-all ${
+                      active
+                        ? "bg-orange-500 text-white shadow-md shadow-orange-500/20"
+                        : "text-slate-400 hover:text-white hover:bg-navy-800 font-semibold"
+                    }`}
+                  >
+                    {Icon && <Icon className="w-4 h-4" />}
+                    <span>{item.label}</span>
+                  </Link>
+                );
+              })}
           </div>
 
           <div className="p-4 border-t border-navy-800 bg-navy-950/60 text-center sm:text-left">

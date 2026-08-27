@@ -92,6 +92,7 @@ export type StudioPostRecord = {
   content: string;
   contentHtml: string;
   wordCount?: number;
+  charCount?: number;
   image: string | null;
   status: "draft" | "scheduled" | "published" | string;
   locked: boolean;
@@ -105,6 +106,17 @@ export type StudioPostRecord = {
   archived?: boolean;
   archivedAt?: string | null;
   publishLocked?: boolean;
+  gmbCategory?: string | null;
+  cta?: string | null;
+  sourceTitle?: string | null;
+  validation?: {
+    status?: string;
+    ready?: boolean;
+    issues?: string[];
+    charCount?: number;
+    wordCount?: number;
+  } | null;
+  ruleset?: string | null;
 };
 
 export type ArchiveWebsiteTable = {
@@ -119,6 +131,7 @@ export type StudioPageAnalysis = {
   url: string;
   reachable?: boolean;
   title?: string;
+  pageType?: string;
   areaCoverage: string;
   writingIntent: string;
   masterIntent: string;
@@ -143,6 +156,14 @@ export type WebsiteAnalyzeResult = {
   masterIntent: string;
   dominantIntent: string;
   pages: StudioPageAnalysis[];
+  intelligence?: {
+    primaryKeywords: string[];
+    secondaryKeywords: string[];
+    location: string;
+    pagesAnalyzed: number;
+    servicesFound: number;
+    linksFound: number;
+  };
   error?: string;
 };
 
@@ -429,6 +450,69 @@ export const api = {
       method: "DELETE",
     }),
 
+  getPendingConnections: (email: string, provider: string, workspaceId?: string) =>
+    request<{
+      ok: boolean;
+      pending: boolean;
+      provider: string;
+      items: Array<{
+        accountId: string;
+        accountName: string;
+        accountUrl: string | null;
+        alreadyConnected: boolean;
+        metadata?: {
+          type?: string | null;
+          address?: string | null;
+          phone?: string | null;
+          hours?: string | null;
+          locationName?: string | null;
+          note?: string | null;
+        } | null;
+      }>;
+    }>(
+      `/connections/pending?email=${encodeURIComponent(email)}&provider=${encodeURIComponent(provider)}${
+        workspaceId ? `&workspaceId=${encodeURIComponent(workspaceId)}` : ""
+      }`
+    ),
+
+  connectSelectedAccounts: (payload: {
+    email: string;
+    provider: string;
+    accountIds: string[];
+    workspaceId?: string;
+  }) =>
+    request<{
+      ok: boolean;
+      connected: ConnectedAccount[];
+      skippedAlreadyConnected?: string[];
+      error?: string;
+    }>("/connections/connect-selected", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
+  discardPendingConnections: (payload: {
+    email: string;
+    provider: string;
+    workspaceId?: string;
+  }) =>
+    request<{ ok: boolean }>("/connections/pending/discard", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
+  setDefaultConnection: (email: string, id: string) =>
+    request<{ ok: boolean; account: ConnectedAccount }>(
+      `/connections/${encodeURIComponent(id)}/default`,
+      { method: "POST", body: JSON.stringify({ email }) }
+    ),
+
+  verifyConnection: (email: string, id: string) =>
+    request<{ ok: boolean; account: ConnectedAccount; verified: boolean; message?: string }>(
+      `/connections/${encodeURIComponent(id)}/verify`,
+      { method: "POST", body: JSON.stringify({ email }) }
+    ),
+
   publishContent: (payload: {
     email: string;
     content: string;
@@ -527,6 +611,7 @@ export const api = {
     imageSource?: "auto" | "ai" | "free";
     platforms?: string[];
     websiteUrl?: string;
+    gmbCategory?: string;
   }) =>
     request<{
       ok: boolean;
@@ -591,11 +676,13 @@ export const api = {
       timeoutMs: 3 * 60 * 1000,
     }),
 
-  listStudioPosts: (email: string, workspaceId?: string, status?: string) =>
+  listStudioPosts: (email: string, workspaceId?: string, status?: string, includeArchived = false) =>
     request<{ ok: boolean; posts: StudioPostRecord[] }>(
       `/auto-poster/posts?email=${encodeURIComponent(email)}${
         workspaceId ? `&workspaceId=${encodeURIComponent(workspaceId)}` : ""
-      }${status ? `&status=${encodeURIComponent(status)}` : ""}`
+      }${status ? `&status=${encodeURIComponent(status)}` : ""}${
+        includeArchived ? "&includeArchived=true" : ""
+      }`
     ),
 
   listArchivedStudioPosts: (email: string, workspaceId?: string) =>
@@ -627,6 +714,17 @@ export const api = {
       body: JSON.stringify(payload),
     }),
 
+  archiveStudioPosts: (payload: {
+    email: string;
+    postIds: string[];
+    confirm: boolean;
+    workspaceId?: string;
+  }) =>
+    request<{ ok: boolean; archived: number; error?: string }>("/auto-poster/archive/posts", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
   publishStudioPost: (payload: { email: string; postId: string; alsoLive?: boolean }) =>
     request<{ ok: boolean; post: StudioPostRecord; live?: unknown; error?: string }>(
       "/auto-poster/publish",
@@ -651,6 +749,7 @@ export const api = {
     tone?: string;
     includeImages?: boolean;
     imageSource?: "auto" | "ai" | "free";
+    gmbCategory?: string;
   }) =>
     request<{
       ok: boolean;
@@ -711,6 +810,43 @@ export const api = {
       body: JSON.stringify(payload),
       timeoutMs: 5 * 60 * 1000,
     }),
+
+  getGmbRules: () =>
+    request<{
+      ok: boolean;
+      version: string;
+      char: {
+        min: number;
+        max: number;
+        targetMin: number;
+        targetMax: number;
+        frontLoad: number;
+      };
+      categories: Array<{
+        id: string;
+        label: string;
+        short: string;
+        recommendedUse: string;
+        searchIntent: string;
+        accent: string;
+        defaultCta: string;
+        tone: string[];
+        hookName: string;
+        requiresVerifiedOffer?: boolean;
+        objective: string;
+      }>;
+    }>("/auto-poster/gmb-rules"),
+
+  updateStudioPostContent: (payload: {
+    email: string;
+    postId: string;
+    content?: string;
+    heading?: string;
+  }) =>
+    request<{ ok: boolean; post: StudioPostRecord; validation?: StudioPostRecord["validation"] }>(
+      "/auto-poster/validate",
+      { method: "POST", body: JSON.stringify(payload) }
+    ),
 };
 
 export type ConnectedAccount = {
@@ -724,6 +860,9 @@ export type ConnectedAccount = {
   tokenExpiresAt?: string | null;
   metadata?: Record<string, unknown> | null;
   publishReady?: boolean;
+  isDefault?: boolean;
+  healthStatus?: "publishing_ready" | "needs_reauthorization" | "permission_issue" | "disconnected" | string;
+  lastVerifiedAt?: string | null;
   createdAt?: string;
   updatedAt?: string;
 };

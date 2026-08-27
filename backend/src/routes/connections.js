@@ -6,6 +6,11 @@ import {
   saveManualLink,
   disconnectAccount,
   getConnectionsSetupStatus,
+  listPendingSelection,
+  connectSelectedAccounts,
+  discardPendingSelection,
+  setDefaultAccount,
+  verifyAccount,
 } from "../services/connectionsService.js";
 import { publishContent } from "../services/publishService.js";
 import { assertSessionMatchesEmail } from "../middleware/userAuth.js";
@@ -37,6 +42,66 @@ router.post("/publish", requireSessionForEmail, async (req, res) => {
 router.get("/", requireSessionForEmail, async (req, res) => {
   try {
     const result = await listConnections(req.query.email, req.query.workspaceId);
+    if (!result.ok) return res.status(result.status || 400).json(result);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.get("/pending", requireSessionForEmail, async (req, res) => {
+  try {
+    const result = await listPendingSelection({
+      email: req.query.email,
+      provider: req.query.provider,
+      workspaceId: req.query.workspaceId,
+    });
+    if (!result.ok) return res.status(result.status || 400).json(result);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post("/connect-selected", requireSessionForEmail, async (req, res) => {
+  try {
+    const result = await connectSelectedAccounts(req.body);
+    if (!result.ok) return res.status(result.status || 400).json(result);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post("/pending/discard", requireSessionForEmail, async (req, res) => {
+  try {
+    const result = await discardPendingSelection(req.body);
+    if (!result.ok) return res.status(result.status || 400).json(result);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post("/:id/default", requireSessionForEmail, async (req, res) => {
+  try {
+    const result = await setDefaultAccount({
+      email: req.body?.email || req.query.email,
+      accountId: req.params.id,
+    });
+    if (!result.ok) return res.status(result.status || 400).json(result);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post("/:id/verify", requireSessionForEmail, async (req, res) => {
+  try {
+    const result = await verifyAccount({
+      email: req.body?.email || req.query.email,
+      accountId: req.params.id,
+    });
     if (!result.ok) return res.status(result.status || 400).json(result);
     res.json(result);
   } catch (err) {

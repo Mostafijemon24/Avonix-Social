@@ -10,6 +10,7 @@ const config: Config = {
     extend: {
       fontFamily: {
         sans: ["var(--font-plus-jakarta)", "Plus Jakarta Sans", "sans-serif"],
+        mono: ["var(--font-jetbrains)", "JetBrains Mono", "ui-monospace", "monospace"],
       },
       colors: {
         orange: {
@@ -20,8 +21,8 @@ const config: Config = {
         },
         navy: {
           950: "#070d1d",
-          900: "#0b132b",
-          800: "#1c2541",
+          900: "#0a1124",
+          800: "#111a35",
           700: "#2a3759",
           600: "#3a506b",
         },

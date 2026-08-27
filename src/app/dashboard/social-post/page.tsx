@@ -49,6 +49,53 @@ const PLATFORM_MIN_WORDS: Record<string, number> = {
   GMB: 90,
 };
 
+const PLATFORM_RULE_SUMMARY: Record<
+  string,
+  { spec: string; img: string; key: "Facebook" | "Instagram" | "LinkedIn" | "GMB" }
+> = {
+  Facebook: { key: "Facebook", spec: "120+ words · link included", img: "1920×1008" },
+  Instagram: { key: "Instagram", spec: "70+ words · bio/link rules", img: "1080×1080" },
+  LinkedIn: { key: "LinkedIn", spec: "150+ words · link included", img: "1920×1005" },
+  GMB: { key: "GMB", spec: "1,000–1,100 chars (target 1,020–1,050)", img: "1200×900" },
+};
+
+const GMB_CATEGORY_FALLBACK = [
+  {
+    id: "INTENT_PROXIMITY",
+    label: "Intent & Proximity",
+    short: "Local service + location, near-me searches",
+    recommendedUse: "High-intent mobile, Maps, voice, and AI local searches.",
+    accent: "#ff7a1a",
+    requiresVerifiedOffer: false,
+  },
+  {
+    id: "OFFER_PROMOTION_EVENT",
+    label: "Offer / Promotion / Event",
+    short: "Verified offers, promotions, events, registrations",
+    recommendedUse: "Only when a real offer, promotion, or event is verified.",
+    accent: "#f5a524",
+    requiresVerifiedOffer: true,
+  },
+  {
+    id: "AUTHORITY_TRUST_PROOF",
+    label: "Authority / Trust / Proof",
+    short: "Expertise, credentials, technology, verified proof",
+    recommendedUse: "Consideration / trust — only verified credibility signals.",
+    accent: "#2dd4bf",
+    requiresVerifiedOffer: false,
+  },
+  {
+    id: "FAQ_EDUCATIONAL",
+    label: "FAQ & Educational",
+    short: "Customer questions, long-tail, voice & AI search",
+    recommendedUse: "Answer one specific customer problem; informational / conversational.",
+    accent: "#56b6f2",
+    requiresVerifiedOffer: false,
+  },
+];
+
+const PAGE_FILTERS = ["All", "Services", "Offers", "Blog", "About", "Other"] as const;
+
 /** Perfect publish sizes (match backend PLATFORM_CONFIG) */
 const PLATFORM_IMAGE_SIZE: Record<string, { w: number; h: number; label: string }> = {
   Facebook: { w: 1920, h: 1008, label: "1920×1008 · 16:9" },
@@ -130,6 +177,13 @@ export default function ContentStudioPage() {
   // —— Part 3: images ——
   const [includeImages, setIncludeImages] = useState(false);
   const [imageSource, setImageSource] = useState<ImageSource>("auto");
+  const [channels, setChannels] = useState<string[]>(["Facebook", "Instagram", "LinkedIn", "GMB"]);
+  const [gmbCategory, setGmbCategory] = useState<string>("INTENT_PROXIMITY");
+  const [gmbCategories, setGmbCategories] = useState(GMB_CATEGORY_FALLBACK);
+  const [sourceFilter, setSourceFilter] = useState<(typeof PAGE_FILTERS)[number]>("All");
+  const [sourceSearch, setSourceSearch] = useState("");
+  const [seoOpen, setSeoOpen] = useState(false);
+  const [generatePhase, setGeneratePhase] = useState("");
   const [isAttachingImages, setIsAttachingImages] = useState(false);
   const [imageBusyId, setImageBusyId] = useState<string | null>(null);
   const [actionBusyId, setActionBusyId] = useState<string | null>(null);
@@ -190,6 +244,25 @@ export default function ContentStudioPage() {
   }, [state.email, state.activeWorkspaceId]);
 
   useEffect(() => {
+    api.getGmbRules().then((data) => {
+      if (data.categories?.length) {
+        setGmbCategories(
+          data.categories.map((c) => ({
+            id: c.id,
+            label: c.label,
+            short: c.short,
+            recommendedUse: c.recommendedUse,
+            accent: c.accent,
+            requiresVerifiedOffer: !!c.requiresVerifiedOffer,
+          }))
+        );
+      }
+    }).catch(() => {
+      /* keep fallback catalog — prompts stay on the server */
+    });
+  }, []);
+
+  useEffect(() => {
     setGeneratedPosts([]);
     setAnalysis(null);
     setSelectedPages([]);
@@ -200,12 +273,14 @@ export default function ContentStudioPage() {
     setMainTab("active");
     setProviderDecision(null);
     setStep(1);
-    setLocation(state.sitemap?.location || "");
+    const active = (state.workspaces || []).find((w) => w.id === state.activeWorkspaceId);
+    setWebsiteUrl(active?.websiteUrl || state.sitemap?.url || "");
+    setLocation(active?.sitemap?.location || state.sitemap?.location || "");
     loadRecords().then((posts) => {
       if (posts.length) setStep(4);
     });
     loadArchive();
-  }, [state.activeWorkspaceId, state.email, state.sitemap?.location, loadRecords, loadArchive]);
+  }, [state.activeWorkspaceId, state.email, state.sitemap?.location, state.sitemap?.url, loadRecords, loadArchive, state.workspaces]);
 
   const handleAnalyzeWebsite = async () => {
     if (!websiteUrl.trim()) {
@@ -233,9 +308,8 @@ export default function ContentStudioPage() {
       if (result.location && !location.trim()) {
         setLocation(result.location);
       }
-      setStep(2);
       showToast(
-        `Found ${result.pageCount} pages — pick which to use`,
+        `Found ${result.pageCount} pages — review intelligence, then continue`,
         "success"
       );
     } catch (err) {
@@ -271,11 +345,20 @@ export default function ContentStudioPage() {
       showToast("Target location is required before generating posts", "error");
       return;
     }
+    if (!channels.length) {
+      showToast("Select at least one social channel", "error");
+      return;
+    }
+    if (channels.includes("GMB") && !gmbCategory) {
+      showToast("Select a Google Business content type", "error");
+      return;
+    }
     if (!state.email) return;
 
     setIsScanning(true);
     setGenerateDone(false);
     setGeneratedPosts([]);
+    setGeneratePhase("Analyzing");
 
     try {
       const result = await api.generateAutoPoster({
@@ -287,8 +370,9 @@ export default function ContentStudioPage() {
         masterIntent: analysis?.masterIntent,
         includeImages,
         imageSource,
-        platforms: ["Facebook", "Instagram", "LinkedIn", "GMB"],
+        platforms: channels,
         websiteUrl: analysis?.websiteUrl || websiteUrl.trim() || undefined,
+        gmbCategory: channels.includes("GMB") ? gmbCategory : undefined,
       });
 
       const posts = result.posts || [];
@@ -562,11 +646,33 @@ export default function ContentStudioPage() {
     .sort()
     .reverse()[0] as string | undefined;
 
+  const intel = analysis?.intelligence;
+  const visiblePages = (analysis?.pages || []).filter((p) => {
+    const type = p.pageType || "Other";
+    if (sourceFilter !== "All" && type !== sourceFilter) return false;
+    if (sourceSearch.trim()) {
+      const q = sourceSearch.toLowerCase();
+      return `${p.title || ""} ${p.url} ${p.keywords?.primary || ""}`.toLowerCase().includes(q);
+    }
+    return true;
+  });
+  const offerLikely = selectedPages.some((p) =>
+    /offer|promo|discount|event|deal/i.test(`${p.title} ${p.url} ${p.keywords?.primary}`)
+  );
+  const gmbOn = channels.includes("GMB");
+  const canContinue3 = channels.length > 0 && (!gmbOn || !!gmbCategory);
+  const canGenerate =
+    !!analysis &&
+    !!location.trim() &&
+    selectedPages.length > 0 &&
+    canContinue3 &&
+    !isScanning;
+
   const STEPS = [
-    { n: 1 as StudioStep, label: "Website", hint: "Add your site" },
-    { n: 2 as StudioStep, label: "Pages", hint: "Pick pages" },
-    { n: 3 as StudioStep, label: "Create", hint: "Tone & images" },
-    { n: 4 as StudioStep, label: "Publish", hint: "Review & post" },
+    { n: 1 as StudioStep, label: "Website & Location", hint: "Analyze the site" },
+    { n: 2 as StudioStep, label: "Content Sources", hint: "Select crawled links" },
+    { n: 3 as StudioStep, label: "Channels & Content", hint: "Platforms + GMB type" },
+    { n: 4 as StudioStep, label: "Generate & Review", hint: "Create & validate" },
   ];
 
   const goStep = (n: StudioStep) => {
@@ -578,8 +684,8 @@ export default function ContentStudioPage() {
       showToast("Select at least one page first", "error");
       return;
     }
-    if (n === 4 && !generatedPosts.length && !generateDone) {
-      showToast("Create posts first", "error");
+    if (n === 4 && (!channels.length || (channels.includes("GMB") && !gmbCategory))) {
+      showToast("Select at least one channel, and a GMB type if Google Business is on", "error");
       return;
     }
     setStep(n);
@@ -592,7 +698,7 @@ export default function ContentStudioPage() {
       <div className="text-center space-y-1">
         <h2 className="text-xl font-bold text-white tracking-tight">Content Studio</h2>
         <p className="text-sm text-slate-400">
-          Four simple steps: website → pages → create → publish.
+          Four steps: website & location → sources → channels → generate.
         </p>
       </div>
 
@@ -633,44 +739,44 @@ export default function ContentStudioPage() {
         </ol>
       </nav>
 
-      {/* —— STEP 1: Website —— */}
+      {/* —— STEP 1: Website & Location —— */}
       {step === 1 && (
         <div className="glass-card p-5 sm:p-7 rounded-2xl border border-navy-800 space-y-5">
           <div>
-            <h3 className="text-base font-bold text-white">1. Your website</h3>
+            <h3 className="text-base font-bold text-white">Website &amp; Location</h3>
             <p className="text-sm text-slate-400 mt-1">
-              Enter the site URL. We find important pages automatically.
+              Location drives local keywords, GMB content, and hashtags. Pre-filled from this client when saved.
             </p>
           </div>
 
-          <div className="space-y-4">
+          <div className="grid grid-cols-1 gap-4">
             <div>
-              <label className="block text-xs font-bold text-slate-300 mb-1.5">
-                Website URL
+              <label className="block text-[11px] font-extrabold uppercase tracking-wider text-slate-400 mb-2">
+                Website
               </label>
               <div className="relative">
-                <Globe className="absolute left-3 top-3.5 w-4 h-4 text-slate-500" />
+                <Globe className="absolute left-4 top-4 w-5 h-5 text-slate-500" />
                 <input
                   type="url"
                   value={websiteUrl}
                   onChange={(e) => setWebsiteUrl(e.target.value)}
                   placeholder="https://yourbusiness.com"
-                  className="w-full text-sm font-semibold border border-navy-700 bg-navy-900 rounded-xl pl-10 pr-4 py-3 text-white focus:ring-2 focus:ring-orange-500 outline-none"
+                  className="w-full text-base font-semibold border border-navy-700 bg-navy-900 rounded-2xl pl-12 pr-4 py-4 text-white focus:ring-2 focus:ring-orange-500 outline-none min-h-[56px]"
                 />
               </div>
             </div>
             <div>
-              <label className="block text-xs font-bold text-slate-300 mb-1.5">
-                City / area <span className="text-slate-500 font-normal">(optional)</span>
+              <label className="block text-[11px] font-extrabold uppercase tracking-wider text-slate-400 mb-2">
+                Location
               </label>
               <div className="relative">
-                <MapPin className="absolute left-3 top-3.5 w-4 h-4 text-slate-500" />
+                <MapPin className="absolute left-4 top-4 w-5 h-5 text-orange-400" />
                 <input
                   type="text"
                   value={location}
                   onChange={(e) => setLocation(e.target.value)}
-                  placeholder="e.g. Denver, CO"
-                  className="w-full text-sm font-semibold border border-navy-700 bg-navy-900 rounded-xl pl-10 pr-4 py-3 text-white focus:ring-2 focus:ring-orange-500 outline-none"
+                  placeholder="City, neighborhood, or service area"
+                  className="w-full text-base font-semibold border border-navy-700 bg-navy-900 rounded-2xl pl-12 pr-4 py-4 text-white focus:ring-2 focus:ring-orange-500 outline-none min-h-[56px]"
                 />
               </div>
             </div>
@@ -684,16 +790,79 @@ export default function ContentStudioPage() {
           >
             {isAnalyzing ? (
               <>
-                <RefreshCw className="w-4 h-4 animate-spin" /> Finding pages…
+                <RefreshCw className="w-4 h-4 animate-spin" /> Analyzing website…
+              </>
+            ) : analysis ? (
+              <>
+                <Search className="w-4 h-4" /> Re-analyze website
               </>
             ) : (
               <>
-                <Search className="w-4 h-4" /> Continue
+                <Search className="w-4 h-4" /> Analyze website
               </>
             )}
           </button>
           {isAnalyzing && (
             <p className="text-xs text-slate-400">This can take up to a minute.</p>
+          )}
+
+          {analysis && intel && (
+            <div className="rounded-2xl border border-navy-700 bg-navy-950/60 p-4 space-y-3">
+              <p className="text-[11px] font-extrabold uppercase tracking-wider text-slate-400">
+                Website intelligence
+              </p>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs">
+                <div>
+                  <span className="block text-slate-500">Primary keywords</span>
+                  <span className="text-white font-semibold">
+                    {intel.primaryKeywords.slice(0, 3).join(", ") || "—"}
+                  </span>
+                </div>
+                <div>
+                  <span className="block text-slate-500">Secondary keywords</span>
+                  <span className="text-white font-semibold">
+                    {intel.secondaryKeywords.slice(0, 3).join(", ") || "—"}
+                  </span>
+                </div>
+                <div>
+                  <span className="block text-slate-500">Location</span>
+                  <span className="text-white font-semibold">{intel.location || location || "—"}</span>
+                </div>
+                <div>
+                  <span className="block text-slate-500">Pages analyzed</span>
+                  <span className="text-white font-semibold">{intel.pagesAnalyzed}</span>
+                </div>
+                <div>
+                  <span className="block text-slate-500">Services found</span>
+                  <span className="text-white font-semibold">{intel.servicesFound}</span>
+                </div>
+                <div>
+                  <span className="block text-slate-500">Links found</span>
+                  <span className="text-white font-semibold">{intel.linksFound}</span>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSeoOpen((v) => !v)}
+                className="text-[11px] font-bold text-orange-400"
+              >
+                {seoOpen ? "Hide SEO intelligence" : "Show SEO intelligence"}
+              </button>
+              {seoOpen && (
+                <div className="text-[11px] text-slate-400 space-y-1 font-mono">
+                  <p>Primary: {intel.primaryKeywords.join(" · ") || "—"}</p>
+                  <p>Secondary: {intel.secondaryKeywords.join(" · ") || "—"}</p>
+                  <p>Intent: {analysis.dominantIntent}</p>
+                </div>
+              )}
+              <button
+                type="button"
+                onClick={() => setStep(2)}
+                className="bg-orange-500 hover:bg-orange-600 text-white font-bold py-2.5 px-5 rounded-xl text-sm"
+              >
+                Continue
+              </button>
+            </div>
           )}
 
           {generatedPosts.length > 0 && (
@@ -702,21 +871,23 @@ export default function ContentStudioPage() {
               onClick={() => goStep(4)}
               className="block text-xs font-bold text-orange-400 hover:underline"
             >
-              Skip to your existing posts →
+              Skip to existing posts →
             </button>
           )}
         </div>
       )}
 
-      {/* —— STEP 2: Pages —— */}
+      {/* —— STEP 2: Content Sources —— */}
       {step === 2 && analysis && (
         <div className="glass-card p-5 sm:p-7 rounded-2xl border border-navy-800 space-y-5">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
-              <h3 className="text-base font-bold text-white">2. Choose pages</h3>
+              <h3 className="text-base font-bold text-white">Content sources</h3>
               <p className="text-sm text-slate-400 mt-1">
-                We write posts from the pages you keep selected ({selectedPages.length} of{" "}
-                {(analysis.pages || []).length}).
+                Only selected links are used as content sources.{" "}
+                <span className="text-white font-bold">
+                  {selectedPages.length} of {(analysis.pages || []).length} selected
+                </span>
               </p>
             </div>
             <button
@@ -724,23 +895,62 @@ export default function ContentStudioPage() {
               onClick={() => setStep(1)}
               className="text-xs font-bold text-slate-400 hover:text-white"
             >
-              ← Edit website
+              ← Website
             </button>
           </div>
 
-          <div className="rounded-xl border border-navy-700 bg-navy-950/50 px-3 py-2 text-xs text-slate-300">
-            <span className="font-bold text-white">{analysis.areaCoverage?.summary || location || "—"}</span>
-            <span className="text-slate-500"> · </span>
-            Focus: <span className="text-emerald-400 font-semibold">{analysis.dominantIntent}</span>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => setSelectedPages(analysis.pages.slice(0, 15))}
+              className="text-[11px] font-bold border border-navy-700 px-3 py-1.5 rounded-lg text-slate-300"
+            >
+              Select all
+            </button>
+            <button
+              type="button"
+              onClick={() => setSelectedPages([])}
+              className="text-[11px] font-bold border border-navy-700 px-3 py-1.5 rounded-lg text-slate-300"
+            >
+              Clear
+            </button>
+            <input
+              value={sourceSearch}
+              onChange={(e) => setSourceSearch(e.target.value)}
+              placeholder="Search pages…"
+              className="flex-1 min-w-[140px] text-xs border border-navy-700 bg-navy-900 rounded-lg px-3 py-1.5 text-white"
+            />
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {PAGE_FILTERS.map((f) => (
+              <button
+                key={f}
+                type="button"
+                onClick={() => setSourceFilter(f)}
+                className={`text-[10px] font-bold px-2.5 py-1 rounded-full ${
+                  sourceFilter === f
+                    ? "bg-orange-500 text-white"
+                    : "bg-navy-900 text-slate-400 border border-navy-700"
+                }`}
+              >
+                {f}
+              </button>
+            ))}
           </div>
 
+          {!selectedPages.length && (
+            <p className="text-xs text-amber-300 bg-amber-950/30 border border-amber-500/20 rounded-xl px-3 py-2">
+              Select at least one website page to generate content.
+            </p>
+          )}
+
           <ul className="space-y-2 max-h-[420px] overflow-y-auto pr-1">
-            {(analysis.pages || []).map((page) => {
+            {visiblePages.map((page) => {
               const checked = selectedPages.some((p) => p.url === page.url);
               return (
                 <li key={page.url}>
                   <label
-                    className={`flex items-start gap-3 rounded-xl border px-3 py-3 cursor-pointer transition-colors ${
+                    className={`flex items-start gap-3 rounded-xl border px-3 py-3 cursor-pointer min-h-[44px] ${
                       checked
                         ? "border-orange-500/50 bg-orange-950/20"
                         : "border-navy-700 bg-navy-900/40"
@@ -750,22 +960,24 @@ export default function ContentStudioPage() {
                       type="checkbox"
                       checked={checked}
                       onChange={() => togglePage(page.url)}
-                      className="mt-1 rounded border-navy-600 bg-navy-900 text-orange-500 focus:ring-orange-500"
+                      className="mt-1 rounded border-navy-600 bg-navy-900 text-orange-500 focus:ring-orange-500 w-4 h-4"
                     />
                     <span className="min-w-0 flex-1">
                       <span className="block text-sm font-bold text-white truncate">
                         {page.title || page.url.replace(/^https?:\/\//, "")}
                       </span>
-                      <span className="block text-[11px] text-slate-500 truncate mt-0.5">
+                      <span className="block text-[11px] text-slate-500 truncate mt-0.5 font-mono">
                         {page.url.replace(/^https?:\/\//, "")}
                       </span>
                       <span className="mt-1.5 flex flex-wrap gap-1.5 text-[10px]">
                         <span className="bg-navy-950 border border-navy-700 text-slate-300 px-1.5 py-0.5 rounded font-semibold">
-                          {page.writingIntent}
+                          {page.pageType || page.writingIntent}
                         </span>
-                        <span className="bg-navy-950 border border-navy-700 text-orange-300 px-1.5 py-0.5 rounded font-semibold truncate max-w-[200px]">
-                          {page.keywords.primary}
-                        </span>
+                        {page.keywords.primary && (
+                          <span className="bg-navy-950 border border-navy-700 text-orange-300 px-1.5 py-0.5 rounded font-semibold truncate max-w-[200px]">
+                            {page.keywords.primary}
+                          </span>
+                        )}
                       </span>
                     </span>
                   </label>
@@ -774,28 +986,25 @@ export default function ContentStudioPage() {
             })}
           </ul>
 
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              disabled={!selectedPages.length}
-              onClick={() => setStep(3)}
-              className="bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white font-bold py-3 px-6 rounded-xl text-sm"
-            >
-              Next: Create posts →
-            </button>
-          </div>
+          <button
+            type="button"
+            disabled={!selectedPages.length}
+            onClick={() => setStep(3)}
+            className="bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white font-bold py-3 px-6 rounded-xl text-sm"
+          >
+            Continue
+          </button>
         </div>
       )}
 
-      {/* —— STEP 3: Create —— */}
+      {/* —— STEP 3: Channels & Content —— */}
       {step === 3 && (
         <div className="glass-card p-5 sm:p-7 rounded-2xl border border-navy-800 space-y-6">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
-              <h3 className="text-base font-bold text-white">3. How should posts sound?</h3>
+              <h3 className="text-base font-bold text-white">Channels &amp; content</h3>
               <p className="text-sm text-slate-400 mt-1">
-                Writing for Facebook, Instagram, LinkedIn & Google Business from{" "}
-                {selectedPages.length} pages.
+                Platform rules apply automatically. CTA is chosen by the system.
               </p>
             </div>
             <button
@@ -803,135 +1012,92 @@ export default function ContentStudioPage() {
               onClick={() => setStep(2)}
               className="text-xs font-bold text-slate-400 hover:text-white"
             >
-              ← Pages
+              ← Sources
             </button>
           </div>
 
-          <div>
-            <p className="text-xs font-bold text-slate-300 mb-2">Tone</p>
-            <div className="flex flex-wrap gap-2">
-              {TONE_PRESETS.map((tone) => (
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
+            {Object.values(PLATFORM_RULE_SUMMARY).map((ch) => {
+              const on = channels.includes(ch.key);
+              return (
                 <button
-                  key={tone}
+                  key={ch.key}
                   type="button"
-                  onClick={() => setSelectedTone(tone)}
-                  className={`px-3 py-2 rounded-xl text-xs font-bold ${
-                    selectedTone === tone
-                      ? "bg-orange-500 text-white"
-                      : "bg-navy-900 text-slate-400 border border-navy-700"
+                  onClick={() =>
+                    setChannels((prev) =>
+                      prev.includes(ch.key) ? prev.filter((x) => x !== ch.key) : [...prev, ch.key]
+                    )
+                  }
+                  className={`text-left rounded-2xl border px-4 py-4 min-h-[44px] ${
+                    on ? "border-orange-500 bg-orange-950/30" : "border-navy-700 bg-navy-900/50"
                   }`}
                 >
-                  {tone}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div>
-            <p className="text-xs font-bold text-slate-300 mb-2">Images</p>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-              {(
-                [
-                  {
-                    id: "best" as const,
-                    title: "Best quality",
-                    desc: "AI picks the best paid model",
-                  },
-                  {
-                    id: "free" as const,
-                    title: "Free",
-                    desc: "$0 images · lower quality",
-                  },
-                  {
-                    id: "none" as const,
-                    title: "No images",
-                    desc: "Text posts only",
-                  },
-                ] as const
-              ).map((opt) => {
-                const active =
-                  (opt.id === "none" && !includeImages) ||
-                  (opt.id === "best" && includeImages && imageSource === "auto") ||
-                  (opt.id === "free" && includeImages && imageSource === "free") ||
-                  (opt.id === "best" && includeImages && imageSource === "ai");
-                return (
-                  <button
-                    key={opt.id}
-                    type="button"
-                    onClick={() => {
-                      if (opt.id === "none") {
-                        setIncludeImages(false);
-                      } else if (opt.id === "free") {
-                        setIncludeImages(true);
-                        setImageSource("free");
-                      } else {
-                        setIncludeImages(true);
-                        setImageSource("auto");
-                      }
-                    }}
-                    className={`text-left rounded-xl border px-3 py-3 ${
-                      active
-                        ? "border-orange-500 bg-orange-950/30"
-                        : "border-navy-700 bg-navy-900/50"
-                    }`}
-                  >
-                    <span className="block text-sm font-bold text-white">{opt.title}</span>
-                    <span className="block text-[11px] text-slate-400 mt-0.5">{opt.desc}</span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {providerDecision && (
-            <p className="text-[11px] text-slate-500">
-              Last run used{" "}
-              <span className="text-slate-300 font-semibold">
-                {providerDecision.writing?.label || "writer"}
-              </span>
-              {providerDecision.image?.label ? (
-                <>
-                  {" "}
-                  · images via{" "}
-                  <span className="text-slate-300 font-semibold">
-                    {providerDecision.image.label}
+                  <span className="flex items-center gap-2 text-sm font-bold text-white">
+                    {platformIcon(ch.key)} {ch.key === "GMB" ? "Google Business" : ch.key}
                   </span>
-                </>
-              ) : null}
-            </p>
+                  <span className="block text-[11px] text-slate-400 mt-2">{ch.spec}</span>
+                  <span className="block text-[10px] text-slate-500 font-mono mt-1">{ch.img}</span>
+                </button>
+              );
+            })}
+          </div>
+
+          {gmbOn && (
+            <div className="space-y-3">
+              <p className="text-[11px] font-extrabold uppercase tracking-wider text-slate-400">
+                GMB content type
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {gmbCategories.map((cat) => {
+                  const selected = gmbCategory === cat.id;
+                  const blocked = cat.requiresVerifiedOffer && !offerLikely;
+                  return (
+                    <button
+                      key={cat.id}
+                      type="button"
+                      onClick={() => setGmbCategory(cat.id)}
+                      className={`text-left rounded-2xl border px-4 py-4 ${
+                        selected ? "bg-navy-900" : "bg-navy-900/40 border-navy-700"
+                      }`}
+                      style={{ borderColor: selected ? cat.accent : undefined }}
+                    >
+                      <span className="block text-sm font-bold text-white">{cat.label}</span>
+                      <span className="block text-[11px] text-slate-400 mt-1">{cat.short}</span>
+                      <span className="block text-[11px] mt-2" style={{ color: cat.accent }}>
+                        {cat.recommendedUse}
+                      </span>
+                      {blocked && (
+                        <span className="block text-[11px] text-amber-300 mt-2">
+                          No verified offer or event found for this content type.
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
           )}
 
           <button
             type="button"
-            onClick={handleScanAndGenerate}
-            disabled={isScanning || !selectedPages.length}
-            className="w-full sm:w-auto bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white font-bold py-3.5 px-8 rounded-xl text-sm inline-flex items-center justify-center gap-2 shadow-lg shadow-orange-500/20"
+            disabled={!canContinue3}
+            onClick={() => setStep(4)}
+            className="bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white font-bold py-3 px-6 rounded-xl text-sm"
           >
-            {isScanning ? (
-              <>
-                <RefreshCw className="w-4 h-4 animate-spin" />
-                {includeImages ? "Writing posts + images…" : "Writing posts…"}
-              </>
-            ) : (
-              <>
-                <Play className="w-4 h-4" />
-                Create posts
-              </>
-            )}
+            Continue
           </button>
         </div>
       )}
 
-      {/* —— STEP 4: Publish —— */}
+      {/* —— STEP 4: Generate & Review —— */}
       {step === 4 && (
         <div className="space-y-4">
           <div className="glass-card p-5 sm:p-6 rounded-2xl border border-navy-800 space-y-4">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
-                <h3 className="text-base font-bold text-white">4. Review & publish</h3>
+                <h3 className="text-base font-bold text-white">Generate &amp; review</h3>
                 <p className="text-sm text-slate-400 mt-1">
-                  Open a post → Publish live or Schedule. Published posts lock until you
-                  re-generate.
+                  Image is optional. Generate, then edit, rewrite, schedule, or publish.
                 </p>
               </div>
               <button
@@ -943,6 +1109,78 @@ export default function ContentStudioPage() {
                 className="text-xs font-bold text-orange-400 hover:underline"
               >
                 + New website
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <p className="text-[11px] font-extrabold uppercase tracking-wider text-slate-400">Image</p>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                {(
+                  [
+                    { id: "none" as const, title: "No image", desc: "Text only" },
+                    { id: "free" as const, title: "Free source", desc: "Relevant stock / free" },
+                    { id: "ai" as const, title: "AI / Paid", desc: "Generated from the post" },
+                  ] as const
+                ).map((opt) => {
+                  const active =
+                    (opt.id === "none" && !includeImages) ||
+                    (opt.id === "free" && includeImages && imageSource === "free") ||
+                    (opt.id === "ai" && includeImages && (imageSource === "ai" || imageSource === "auto"));
+                  return (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      onClick={() => {
+                        if (opt.id === "none") setIncludeImages(false);
+                        else {
+                          setIncludeImages(true);
+                          setImageSource(opt.id === "free" ? "free" : "ai");
+                        }
+                      }}
+                      className={`text-left rounded-xl border px-3 py-3 ${
+                        active ? "border-orange-500 bg-orange-950/30" : "border-navy-700 bg-navy-900/50"
+                      }`}
+                    >
+                      <span className="block text-sm font-bold text-white">{opt.title}</span>
+                      <span className="block text-[11px] text-slate-400 mt-0.5">{opt.desc}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-navy-700 bg-navy-950/50 p-4 space-y-2">
+              <p className="text-[11px] font-extrabold uppercase tracking-wider text-slate-400">
+                Ready to generate
+              </p>
+              {[
+                [!!analysis, "Website analyzed"],
+                [!!location.trim(), "Location"],
+                [selectedPages.length > 0, `${selectedPages.length} source(s) selected`],
+                [channels.length > 0, `Channels: ${channels.join(", ") || "none"}`],
+                [!gmbOn || !!gmbCategory, gmbOn ? `GMB type selected` : "GMB not selected"],
+              ].map(([ok, label]) => (
+                <p key={String(label)} className={`text-xs ${ok ? "text-emerald-400" : "text-amber-300"}`}>
+                  {ok ? "✓" : "⚠"} {label}
+                </p>
+              ))}
+              <button
+                type="button"
+                onClick={handleScanAndGenerate}
+                disabled={!canGenerate}
+                className="mt-2 w-full sm:w-auto bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white font-bold py-3 px-8 rounded-xl text-sm inline-flex items-center justify-center gap-2 shadow-lg shadow-orange-500/20"
+              >
+                {isScanning ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                    {generatePhase || "Generating…"}
+                  </>
+                ) : (
+                  <>
+                    <Play className="w-4 h-4" />
+                    Generate posts
+                  </>
+                )}
               </button>
             </div>
 
@@ -1342,6 +1580,15 @@ function PostListRow({
             )}
             Publish live
           </button>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => onRewrite(post.id)}
+            className="inline-flex items-center justify-center gap-1.5 border border-orange-800/50 text-orange-300 text-[11px] font-bold px-2.5 py-1.5 rounded-lg bg-orange-950/30 disabled:opacity-50"
+          >
+            <RefreshCw className="w-3.5 h-3.5" />
+            Rewrite
+          </button>
         </>
       )}
 
@@ -1408,17 +1655,47 @@ function PostListRow({
             {platformIcon(post.platform)}
             <span className="text-sm font-bold text-white">{post.platform}</span>
             <span className="text-[10px] uppercase font-bold text-slate-500 border border-navy-600 px-1.5 py-0.5 rounded">
-              {post.tone}
+              {post.gmbCategory || post.tone}
             </span>
-            <span
-              className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
-                words >= minWords
-                  ? "text-emerald-400 bg-emerald-950/30"
-                  : "text-red-400 bg-red-950/30"
-              }`}
-            >
-              {words} words · min {minWords}
-            </span>
+            {post.platform === "GMB" ? (
+              <span
+                className={`text-[10px] font-bold px-1.5 py-0.5 rounded font-mono ${
+                  (post.charCount || 0) >= 1000 && (post.charCount || 0) <= 1100
+                    ? "text-emerald-400 bg-emerald-950/30"
+                    : "text-amber-300 bg-amber-950/30"
+                }`}
+              >
+                {post.charCount ?? countWords(post.content)} chars
+              </span>
+            ) : (
+              <span
+                className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                  words >= minWords
+                    ? "text-emerald-400 bg-emerald-950/30"
+                    : "text-red-400 bg-red-950/30"
+                }`}
+              >
+                {words} words · min {minWords}
+              </span>
+            )}
+            {post.validation && (
+              <span
+                className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                  post.validation.ready || post.validation.status === "READY"
+                    ? "text-emerald-400 bg-emerald-950/30"
+                    : "text-amber-300 bg-amber-950/30"
+                }`}
+              >
+                {post.validation.ready || post.validation.status === "READY"
+                  ? "✓ Ready"
+                  : "⚠ Needs Review"}
+              </span>
+            )}
+            {post.cta && (
+              <span className="text-[10px] font-bold text-orange-300 bg-orange-950/30 px-1.5 py-0.5 rounded">
+                CTA · {post.cta}
+              </span>
+            )}
             {post.image ? (
               <span className="text-[10px] font-bold text-violet-300 bg-violet-950/30 px-1.5 py-0.5 rounded">
                 Image on · {sizeLabel}
@@ -1509,7 +1786,24 @@ function PostListRow({
                   S{i + 1}: {kw}
                 </span>
               ))}
+            {post.url && (
+              <a
+                href={post.url}
+                target="_blank"
+                rel="noreferrer"
+                className="text-[10px] font-semibold text-slate-300 bg-navy-900 border border-navy-700 px-2 py-1 rounded font-mono truncate max-w-full"
+              >
+                Based on: {post.sourceTitle || "Source"} · {post.url.replace(/^https?:\/\//, "")}
+              </a>
+            )}
           </div>
+          {post.validation?.issues && post.validation.issues.length > 0 && (
+            <div className="text-[11px] text-amber-200 bg-amber-950/30 border border-amber-500/20 rounded-xl px-3 py-2 space-y-1">
+              {post.validation.issues.map((issue, i) => (
+                <p key={i}>{issue}</p>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>

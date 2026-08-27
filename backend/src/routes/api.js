@@ -29,6 +29,7 @@ import {
   generateAutoPosterSuite,
   listStudioPosts,
   listArchivedStudioPosts,
+  archiveStudioPosts,
   clearStudioArchive,
   publishStudioPost,
   scheduleStudioPost,
@@ -37,6 +38,8 @@ import {
   setStudioPostImage,
   attachImagesToStudioPosts,
   TONE_PRESETS,
+  updateStudioPostContent,
+  getGmbRulesCatalog,
 } from "../services/autoPosterService.js";
 import connectionsRoutes from "./connections.js";
 import workspacesRoutes from "./workspaces.js";
@@ -372,6 +375,7 @@ router.post("/auto-poster/generate", async (req, res) => {
       imageSource,
       platforms,
       websiteUrl,
+      gmbCategory,
     } = req.body;
     if (!email) return res.status(400).json({ error: "email is required" });
     const gate = assertSessionMatchesEmail(req, email);
@@ -388,6 +392,7 @@ router.post("/auto-poster/generate", async (req, res) => {
       imageSource: imageSource || "auto",
       platforms,
       websiteUrl,
+      gmbCategory,
     });
     if (!result.ok) return res.status(result.status || 400).json(result);
     res.json(result);
@@ -398,6 +403,26 @@ router.post("/auto-poster/generate", async (req, res) => {
 });
 
 /** Part 1 — website root → pages + area coverage + intent + keywords (no posts) */
+router.get("/auto-poster/gmb-rules", (_req, res) => {
+  res.json({ ok: true, ...getGmbRulesCatalog() });
+});
+
+router.post("/auto-poster/validate", async (req, res) => {
+  try {
+    const { email, postId, content, heading } = req.body;
+    if (!email || !postId) {
+      return res.status(400).json({ error: "email and postId are required" });
+    }
+    const gate = assertSessionMatchesEmail(req, email);
+    if (!gate.ok) return res.status(gate.status).json({ error: gate.error });
+    const result = await updateStudioPostContent({ email, postId, content, heading });
+    if (!result.ok) return res.status(result.status || 400).json(result);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.post("/auto-poster/analyze-website", async (req, res) => {
   try {
     const { email, workspaceId, websiteUrl, location, maxPages } = req.body;
@@ -433,6 +458,26 @@ router.get("/auto-poster/posts", async (req, res) => {
       workspaceId: req.query.workspaceId || undefined,
       status: req.query.status || undefined,
       archived: req.query.archived === "true",
+      includeArchived: req.query.includeArchived === "true",
+    });
+    if (!result.ok) return res.status(result.status || 400).json(result);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post("/auto-poster/archive/posts", async (req, res) => {
+  try {
+    const { email, postIds, confirm } = req.body || {};
+    if (!email) return res.status(400).json({ error: "email is required" });
+    const gate = assertSessionMatchesEmail(req, email);
+    if (!gate.ok) return res.status(gate.status).json({ error: gate.error });
+    const result = await archiveStudioPosts({
+      email,
+      postIds,
+      confirm,
+      workspaceId: req.body?.workspaceId,
     });
     if (!result.ok) return res.status(result.status || 400).json(result);
     res.json(result);
@@ -538,7 +583,7 @@ router.post("/auto-poster/unschedule", async (req, res) => {
 
 router.post("/auto-poster/rewrite", async (req, res) => {
   try {
-    const { email, postId, tone, includeImages, imageSource } = req.body;
+    const { email, postId, tone, includeImages, imageSource, gmbCategory } = req.body;
     if (!email || !postId) {
       return res.status(400).json({ error: "email and postId are required" });
     }
@@ -550,6 +595,7 @@ router.post("/auto-poster/rewrite", async (req, res) => {
       tone,
       includeImages: !!includeImages,
       imageSource: imageSource || "auto",
+      gmbCategory,
     });
     if (!result.ok) return res.status(result.status || 400).json(result);
     res.json(result);

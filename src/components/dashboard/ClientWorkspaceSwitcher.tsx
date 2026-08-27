@@ -80,6 +80,9 @@ export function ClientWorkspaceSwitcher() {
       <label htmlFor="workspaceSelect" className="text-xs text-slate-400 font-semibold shrink-0">
         Client Workspace:
       </label>
+      <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-400">
+        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" /> Active
+      </span>
       <select
         id="workspaceSelect"
         value={activeId}

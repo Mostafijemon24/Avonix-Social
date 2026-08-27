@@ -22,6 +22,22 @@ import {
   buildRelevantImagePrompt,
 } from "./freeImageService.js";
 import prisma from "../db.js";
+import {
+  GMB_CHAR,
+  GMB_CATEGORY_IDS,
+  GMB_RULESET_VERSION,
+  buildGmbRefinePrompt,
+  buildGmbSystemPrompt,
+  buildGmbUserPrompt,
+  detectVerifiedOffer,
+  getGmbCategory,
+  inferPageType,
+  isGmbCategoryId,
+  pickRelevantSourcePage,
+  resolveGmbCta,
+  uiCatalog as gmbUiCatalog,
+} from "../content/gmbContentRules.js";
+import { validateGmbPost, validateSocialPost } from "../content/gmbValidator.js";
 
 async function stampPostActivity(userId, platform) {
   const data =
@@ -89,10 +105,13 @@ export const PLATFORM_CONFIG = {
   GMB: {
     key: "google_business",
     minWords: 90,
-    maxWords: 130,
+    maxWords: 180,
+    minChars: GMB_CHAR.min,
+    maxChars: GMB_CHAR.max,
+    targetCharsMin: GMB_CHAR.targetMin,
+    targetCharsMax: GMB_CHAR.targetMax,
     allowLinks: false,
-    allowHashtags: false,
-    // Google Business Profile post — HD 16:9
+    allowHashtags: true,
     image: { width: 1200, height: 900, aspect: "4:3" },
   },
 };
@@ -669,6 +688,240 @@ export function countWords(text) {
   return plain.split(/\s+/).filter(Boolean).length;
 }
 
+export function countChars(text) {
+  return String(text || "").length;
+}
+
+function unpackKeywordPack(raw) {
+  try {
+    const v = JSON.parse(raw || "[]");
+    if (Array.isArray(v)) return { keywords: v.map(String), meta: {} };
+    if (v && typeof v === "object") {
+      const keywords = Array.isArray(v.keywords)
+        ? v.keywords.map(String)
+        : [];
+      return { keywords, meta: v };
+    }
+  } catch {
+    /* ignore */
+  }
+  return { keywords: [], meta: {} };
+}
+
+function packKeywordPack(keywords, meta = {}) {
+  return JSON.stringify({
+    keywords: (keywords || []).map(String).slice(0, 8),
+    gmbCategory: meta.gmbCategory || null,
+    cta: meta.cta || null,
+    sourceTitle: meta.sourceTitle || null,
+    validation: meta.validation || null,
+    ruleset: meta.ruleset || GMB_RULESET_VERSION,
+  });
+}
+
+async function resolveBusinessContext(userId, workspaceId, workspace) {
+  const business = {
+    name: workspace?.name || "",
+    address: workspace?.address || "",
+    city: workspace?.location || "",
+    phone: "",
+    hours: "",
+    differentiators: "",
+  };
+  try {
+    const gbp = await prisma.connectedAccount.findFirst({
+      where: {
+        userId,
+        provider: "google_business",
+        ...(workspaceId ? { workspaceId } : {}),
+      },
+      orderBy: { updatedAt: "desc" },
+    });
+    if (gbp) {
+      let meta = {};
+      try {
+        meta = gbp.metadata ? JSON.parse(gbp.metadata) : {};
+      } catch {
+        meta = {};
+      }
+      business.name = meta.locationName || gbp.accountName || business.name;
+      business.address = meta.address || meta.formattedAddress || business.address;
+      business.phone = meta.phone || meta.primaryPhone || business.phone;
+      business.hours = meta.hours || meta.regularHours || business.hours;
+    }
+  } catch {
+    /* optional */
+  }
+  return business;
+}
+
+function buildGmbTemplatePost({
+  categoryId,
+  keywords,
+  location,
+  url,
+  business = {},
+  sourceTitle,
+}) {
+  const cat = getGmbCategory(categoryId);
+  const place = normalizeLocation(location) || "your area";
+  const primary = polishKeyword(keywords.primary, place);
+  const secondaryList = (
+    keywords.secondaryKeywords ||
+    keywords.general ||
+    [keywords.secondary]
+  )
+    .map((x) => polishKeyword(x, place))
+    .filter(Boolean);
+  const services = secondaryList.slice(0, 6);
+  while (services.length < 4) services.push(`${primary} support`);
+  const cta = resolveGmbCta(categoryId, business);
+  const name = business.name || "Our team";
+  const address = business.address || place;
+  const phone = business.phone || "";
+  const hours = business.hours || "";
+  const city = String(place).split(",")[0].trim() || place;
+
+  const nap = [name, address, phone, hours].filter(Boolean).join("\n");
+  const ctaLine =
+    cta === "CALL NOW"
+      ? `Click "Call Now" to speak with our team.`
+      : cta === "BOOK"
+        ? `Click "Book" to schedule with our ${city} team.`
+        : cta === "SIGN UP"
+          ? `Click "Sign Up" to take the next step.`
+          : `Click "Learn More" to read the details on this page.`;
+
+  const cityTag = city.replace(/[^\w]/g, "");
+  const svcTag = primary.replace(/[^\w]/g, "");
+  const tags = [`#${cityTag}`, `#${svcTag}`, `#${cityTag}NearMe`, `#Local${svcTag}`, `#${cityTag}Local`]
+    .filter((t) => t.length > 2)
+    .slice(0, 5)
+    .join(" ");
+
+  let heading = "";
+  let body = "";
+
+  if (cat.id === GMB_CATEGORY_IDS.INTENT_PROXIMITY) {
+    heading = `Looking for ${primary} near you in ${city}?`;
+    body = `${heading} ${name} is conveniently located in ${place} and ready to help nearby customers who need ${primary} today.
+
+We serve local families and businesses around ${city} with clear communication and practical next steps. ${hours ? `Hours: ${hours}.` : "Ask us about current hours before you visit."}
+
+Core services:
+${services.map((s) => `• ${s}`).join("\n")}
+
+Why choose us: our ${city} team focuses on reliable ${primary} and ${services[0] || "local service"}, with straightforward guidance from the first call. We do not make unverified ranking claims — we let verified work and local availability speak for us.
+
+${nap}
+
+${ctaLine}
+
+${tags}`;
+  } else if (cat.id === GMB_CATEGORY_IDS.OFFER_PROMOTION_EVENT) {
+    heading = `Special ${primary} offer in ${city}`;
+    body = `${heading}: see the verified details from our ${sourceTitle || "service"} page and visit ${name} to learn what currently applies.
+
+If a promotion, package, or event is listed on the selected website pages, our team will confirm eligibility, dates, and any limits before you redeem. We will not invent discounts or expiration dates.
+
+How to redeem:
+• Call or visit our ${city} location
+• Mention this Google post
+• Ask which verified offer is active
+• Follow any posted registration steps
+
+This opportunity is for customers in and around ${place}.
+
+${nap}
+
+${ctaLine}
+
+${tags}`;
+  } else if (cat.id === GMB_CATEGORY_IDS.AUTHORITY_TRUST_PROOF) {
+    heading = `Why ${city} customers choose ${name} for ${primary}`;
+    body = `${heading}. Choosing the right local provider matters when you need ${primary} you can trust.
+
+Our team focuses on verified capabilities described on the selected website pages — training, process, and on-site support when those facts are published. We will not invent ratings, certifications, years of experience, or awards.
+
+Customer benefit: a clearer process, local access in ${city}, and practical help with ${services[0] || primary} without unsupported guarantees.
+
+Neighbors across ${place} can reach us for ${primary} and related needs such as ${services.slice(0, 3).join(", ")}.
+
+${nap}
+
+${ctaLine}
+
+${tags}`;
+  } else {
+    heading = `When should you get help with ${primary} in ${city}?`;
+    body = `${heading} If you are searching for clear, local guidance, here is a straightforward answer from ${name}.
+
+Most people need professional ${primary} when the problem is recurring, urgent, or beyond a simple home or DIY fix. Use the selected website page for the detailed process that applies to your situation.
+
+Helpful tips:
+• Note your symptoms, timing, or project scope
+• Check whether same-day or scheduled help is available
+• Ask what to bring or prepare before you visit
+• Call if you are unsure whether you need ${primary} now
+
+Our ${city} team is here if you need professional ${primary} in ${place}.
+
+${nap}
+
+${ctaLine}
+
+${tags}`;
+  }
+
+  body = body.replace(/\n{3,}/g, "\n\n").trim();
+  body = padGmbToTarget(body, {
+    primary,
+    place,
+    name,
+    services,
+    ctaLine,
+  });
+  return { heading, content: body, cta };
+}
+
+function padGmbToTarget(text, { primary, place, name, services, ctaLine }) {
+  let body = String(text || "").trim();
+  const hashMatch = body.match(/(\n\n(?:#[A-Za-z0-9_]+(?:\s+#[A-Za-z0-9_]+)+)\s*)$/);
+  const tags = hashMatch ? hashMatch[1] : "";
+  if (tags) body = body.slice(0, -tags.length).trim();
+
+  const extras = [
+    `${name} serves people searching for ${primary} in ${place} with a clear, local next step.`,
+    `Ask about ${services.slice(0, 3).join(", ")} and how those services apply to your situation.`,
+    `${ctaLine} ${name} is a local option for ${primary} in ${place}.`,
+  ].filter(Boolean);
+
+  let i = 0;
+  while (body.length + tags.length < GMB_CHAR.targetMin && i < 12) {
+    const extra = extras[i % extras.length];
+    const projected = body.length + 2 + extra.length + tags.length;
+    if (projected > GMB_CHAR.max) break;
+    body = `${body}\n\n${extra}`.trim();
+    i += 1;
+  }
+
+  let combined = `${body}${tags}`.trim();
+  if (combined.length < GMB_CHAR.targetMin) {
+    const filler = ` ${name} provides ${primary} in ${place}.`;
+    while (combined.length < GMB_CHAR.targetMin) {
+      const room = GMB_CHAR.max - combined.length;
+      if (room < 8) break;
+      const next = filler.slice(0, Math.min(filler.length, room, GMB_CHAR.targetMin - combined.length));
+      if (!next) break;
+      combined += next;
+    }
+  }
+  if (combined.length > GMB_CHAR.max) {
+    combined = `${body}${tags}`.trim();
+  }
+  return combined;
+}
+
 function enforceMaxWords(text, max) {
   const paragraphs = String(text || "")
     .trim()
@@ -822,29 +1075,25 @@ Leaders evaluating ${promo} should prioritize process transparency, measurable m
     });
     html = plainToPreviewHtml(plain);
   } else {
-    // GMB / Google Business Profile — no links, no hashtags
-    heading = phraseHasLocation(primary, place)
-      ? `${primary} — open and ready to help`
-      : `${primary} in ${place} — open and ready to help`;
-    plain = `${opener} ${intentLead}
-
-Looking for ${secondary}? We provide ${offering} for local customers across ${place}, with clear communication from first message to finished work.
-
-Ask us about ${promo} and how ${proof} can support your next project. Consistent service pages and updates about ${primary} help nearby customers find the right provider faster.
-
-Visit or message us to learn more about ${primary} and schedule a conversation with our team.`;
-    plain = finalizeSocialCaption(plain, {
-      platform: "GMB",
+    // GMB — master category rules (character-based, hashtags + NAP + CTA required)
+    const gmbCategoryId = isGmbCategoryId(options.gmbCategory)
+      ? options.gmbCategory
+      : GMB_CATEGORY_IDS.INTENT_PROXIMITY;
+    const gmb = buildGmbTemplatePost({
+      categoryId: gmbCategoryId,
+      keywords,
+      location: place,
       url,
-      primary,
-      secondary,
-      place,
-      writingIntent,
+      business: options.business || {},
+      sourceTitle: options.sourceTitle || "",
     });
+    heading = gmb.heading;
+    plain = gmb.content;
     html = plainToPreviewHtml(plain);
   }
 
   const applyRange = (body) => {
+    if (platform === "GMB") return body;
     // Pad body copy only — CTA / hashtags are re-attached after
     let next = stripCtaHashtagsAndUrls(body);
     next = padToMinWords(next, cfg.minWords, padCtx);
@@ -866,18 +1115,50 @@ Visit or message us to learn more about ${primary} and schedule a conversation w
     });
   };
 
-  plain = applyRange(plain);
+  if (platform !== "GMB") {
+    plain = applyRange(plain);
+  }
   html = plainToPreviewHtml(plain);
+
+  const gmbCategoryId = isGmbCategoryId(options.gmbCategory)
+    ? options.gmbCategory
+    : platform === "GMB"
+      ? GMB_CATEGORY_IDS.INTENT_PROXIMITY
+      : null;
+  const gmbValidation =
+    platform === "GMB"
+      ? validateGmbPost({
+          content: plain,
+          heading,
+          categoryId: gmbCategoryId,
+          location: place,
+          keywords,
+          business: options.business || {},
+        })
+      : null;
+  const socialValidation =
+    platform === "GMB"
+      ? null
+      : validateSocialPost({
+          content: plain,
+          platform,
+          minWords: cfg.minWords,
+          maxWords: cfg.maxWords,
+        });
 
   return {
     heading,
     content: plain,
     contentHtml: html || plain,
     wordCount: countWords(plain),
+    charCount: countChars(plain),
     minWords: cfg.minWords,
     maxWords: cfg.maxWords,
     writingIntent,
     masterIntent,
+    gmbCategory: gmbCategoryId,
+    cta: platform === "GMB" ? resolveGmbCta(gmbCategoryId, options.business || {}) : null,
+    validation: gmbValidation || socialValidation,
   };
 }
 
@@ -894,6 +1175,18 @@ export async function generatePostContentWithAi(
 ) {
   const template = generatePostContent(platform, keywords, location, url, tone, options);
   const model = options.writingModel;
+
+  if (platform === "GMB") {
+    return generateGmbWithMasterRules({
+      keywords,
+      location,
+      url,
+      options,
+      template,
+      model,
+    });
+  }
+
   if (!model || !process.env.OPENROUTER_API_KEY) {
     return { ...template, writingProvider: "template" };
   }
@@ -977,21 +1270,195 @@ Write one complete post body that naturally uses the primary keyword and at leas
       writingIntent: options.writingIntent || "Awareness",
     });
 
+    const socialValidation = validateSocialPost({
+      content,
+      platform,
+      minWords: cfg.minWords,
+      maxWords: cfg.maxWords,
+    });
+
     return {
       heading: heading || template.heading,
       content,
       contentHtml: plainToPreviewHtml(content),
       wordCount: countWords(content),
+      charCount: countChars(content),
       minWords: cfg.minWords,
       maxWords: cfg.maxWords,
       writingIntent: options.writingIntent || template.writingIntent,
       masterIntent: options.masterIntent || template.masterIntent,
       writingProvider: model,
+      validation: socialValidation,
     };
   } catch (err) {
     console.error("[generatePostContentWithAi]", err.message);
     return { ...template, writingProvider: "template-fallback" };
   }
+}
+
+function parseModelJson(raw) {
+  const m = String(raw || "").match(/\{[\s\S]*\}/);
+  if (!m) return null;
+  try {
+    return JSON.parse(m[0]);
+  } catch {
+    return null;
+  }
+}
+
+async function generateGmbWithMasterRules({
+  keywords,
+  location,
+  url,
+  options,
+  template,
+  model,
+}) {
+  const categoryId = isGmbCategoryId(options.gmbCategory)
+    ? options.gmbCategory
+    : GMB_CATEGORY_IDS.INTENT_PROXIMITY;
+  const business = options.business || {};
+  const selectedPages = options.selectedPages || [
+    { url, title: options.sourceTitle, keywords },
+  ];
+  const verifiedOffer = options.verifiedOffer || detectVerifiedOffer(selectedPages);
+
+  if (
+    categoryId === GMB_CATEGORY_IDS.OFFER_PROMOTION_EVENT &&
+    !verifiedOffer.found
+  ) {
+    return {
+      ...template,
+      error: "NO_VERIFIED_OFFER",
+      gmbCategory: categoryId,
+      validation: {
+        status: "NEEDS_REVISION",
+        ready: false,
+        issues: [
+          "No verified offer or event found for this content type. Choose another category or provide verified promotional facts.",
+        ],
+      },
+      writingProvider: "gmb-master-blocked",
+    };
+  }
+
+  const sourcePage = options.sourcePage || {
+    url,
+    title: options.sourceTitle || "",
+    keywords,
+  };
+
+  const applyValidation = (heading, content, provider) => {
+    const validation = validateGmbPost({
+      content,
+      heading,
+      categoryId,
+      location,
+      keywords,
+      business,
+    });
+    return {
+      heading,
+      content,
+      contentHtml: plainToPreviewHtml(content),
+      wordCount: countWords(content),
+      charCount: countChars(content),
+      minWords: PLATFORM_CONFIG.GMB.minWords,
+      maxWords: PLATFORM_CONFIG.GMB.maxWords,
+      writingIntent: options.writingIntent || template.writingIntent,
+      masterIntent: options.masterIntent || template.masterIntent,
+      writingProvider: provider,
+      gmbCategory: categoryId,
+      cta: resolveGmbCta(categoryId, { ...business, offerSummary: verifiedOffer.summary }),
+      validation,
+      ruleset: GMB_RULESET_VERSION,
+    };
+  };
+
+  let result = applyValidation(template.heading, template.content, "template");
+
+  if (!model || !process.env.OPENROUTER_API_KEY) {
+    return result;
+  }
+
+  try {
+    const data = await callOpenRouter({
+      model,
+      maxTokens: 1200,
+      messages: [
+        { role: "system", content: buildGmbSystemPrompt(categoryId) },
+        {
+          role: "user",
+          content: buildGmbUserPrompt({
+            categoryId,
+            business,
+            location,
+            keywords,
+            sourcePage,
+            selectedPages,
+            verifiedOffer,
+          }),
+        },
+      ],
+    });
+    const parsed = parseModelJson(data?.choices?.[0]?.message?.content);
+    if (parsed?.error === "NO_VERIFIED_OFFER") {
+      return applyValidation(template.heading, template.content, "gmb-master-blocked");
+    }
+    if (parsed?.content) {
+      const heading = sanitizeEnglishPost(String(parsed.heading || template.heading).trim());
+      const content = sanitizeEnglishPost(String(parsed.content || "").trim());
+      if (content && countChars(content) >= 400) {
+        result = applyValidation(heading, content, model);
+      }
+    }
+  } catch (err) {
+    console.error("[generateGmbWithMasterRules]", err.message);
+  }
+
+  const needsRefine =
+    result.validation &&
+    (!result.validation.ready ||
+      result.charCount < GMB_CHAR.min ||
+      result.charCount > GMB_CHAR.max);
+
+  if (needsRefine && model && process.env.OPENROUTER_API_KEY) {
+    try {
+      const refine = await callOpenRouter({
+        model,
+        maxTokens: 1200,
+        messages: [
+          { role: "system", content: buildGmbSystemPrompt(categoryId) },
+          {
+            role: "user",
+            content: buildGmbRefinePrompt({
+              categoryId,
+              content: result.content,
+              issues: result.validation?.issues || [],
+            }),
+          },
+        ],
+      });
+      const parsed = parseModelJson(refine?.choices?.[0]?.message?.content);
+      if (parsed?.content) {
+        const heading = sanitizeEnglishPost(String(parsed.heading || result.heading).trim());
+        const content = sanitizeEnglishPost(String(parsed.content).trim());
+        const refined = applyValidation(heading, content, `${model}+refine`);
+        if (
+          refined.charCount >= GMB_CHAR.min &&
+          refined.charCount <= GMB_CHAR.max
+        ) {
+          result = refined;
+        } else if ((refined.validation?.issues || []).length <= (result.validation?.issues || []).length) {
+          result = refined;
+        }
+      }
+    } catch (err) {
+      console.error("[generateGmbWithMasterRules refine]", err.message);
+    }
+  }
+
+  return result;
 }
 
 /** Scene-based photoreal prompt — keyword → visual subject, never render text/logos */
@@ -1330,6 +1797,7 @@ export async function analyzeWebsiteForStudio({
     url: row.url,
     reachable: row.reachable,
     title: row.title || "",
+    pageType: inferPageType(row.url, row.title || ""),
     areaCoverage: row.areaCoverage,
     writingIntent: row.writingIntent,
     masterIntent: row.masterIntent,
@@ -1338,6 +1806,15 @@ export async function analyzeWebsiteForStudio({
       secondary: row.keywords.secondaryKeywords || row.keywords.general || [],
     },
   }));
+
+  const primaryKeywords = [
+    ...new Set(pages.map((p) => p.keywords.primary).filter(Boolean)),
+  ].slice(0, 6);
+  const secondaryKeywords = [
+    ...new Set(pages.flatMap((p) => p.keywords.secondary || []).filter(Boolean)),
+  ].slice(0, 8);
+  const servicesFound = pages.filter((p) => p.pageType === "Services").length;
+  const linksFound = uniqueUrls.length;
 
   return {
     ok: true,
@@ -1354,6 +1831,14 @@ export async function analyzeWebsiteForStudio({
     masterIntent,
     dominantIntent,
     pages,
+    intelligence: {
+      primaryKeywords,
+      secondaryKeywords,
+      location: loc,
+      pagesAnalyzed: pages.length,
+      servicesFound,
+      linksFound,
+    },
   };
 }
 
@@ -1380,6 +1865,7 @@ export async function generateAutoPosterSuite({
   imageSource = "auto",
   platforms: platformOverride,
   websiteUrl,
+  gmbCategory,
 }) {
   const auth = await resolveUser(email);
   if (!auth.ok) return auth;
@@ -1398,6 +1884,17 @@ export async function generateAutoPosterSuite({
   );
   if (!platforms.length) {
     return { ok: false, status: 400, error: "No valid platforms selected." };
+  }
+
+  const wantsGmb = platforms.includes("GMB");
+  const gmbCategoryId = isGmbCategoryId(gmbCategory)
+    ? gmbCategory
+    : wantsGmb
+      ? GMB_CATEGORY_IDS.INTENT_PROXIMITY
+      : null;
+
+  if (wantsGmb && gmbCategory && !isGmbCategoryId(gmbCategory)) {
+    return { ok: false, status: 400, error: "Invalid GMB category." };
   }
 
   let analyzed = [];
@@ -1439,6 +1936,28 @@ export async function generateAutoPosterSuite({
   if (!analyzed.length) {
     return { ok: false, status: 400, error: "No pages to generate posts from." };
   }
+
+  const verifiedOffer = detectVerifiedOffer(analyzed);
+  let gmbSkipped = null;
+  if (
+    wantsGmb &&
+    gmbCategoryId === GMB_CATEGORY_IDS.OFFER_PROMOTION_EVENT &&
+    !verifiedOffer.found
+  ) {
+    gmbSkipped = {
+      reason:
+        "No verified offer or event found for this content type. Choose another GMB category or select pages that contain a real promotion.",
+    };
+  }
+
+  const business = await resolveBusinessContext(user.id, wid, workspace);
+  const selectedPagesForGmb = analyzed.map((p) => ({
+    url: p.url,
+    title: p.title,
+    keywords: p.keywords,
+    writingIntent: p.writingIntent,
+    masterIntent: p.masterIntent,
+  }));
 
   const origin =
     websiteOriginFromUrl(websiteUrl) ||
@@ -1517,33 +2036,60 @@ export async function generateAutoPosterSuite({
 
   const posts = [];
   const skippedLocked = [];
-  const expectedTotal = analyzed.length * platforms.length;
+  const expectedTotal = analyzed.length * platforms.filter((p) => !(p === "GMB" && gmbSkipped)).length;
 
   for (const item of analyzed) {
     for (const platform of platforms) {
-      const fp = fingerprintOf(item.url, platform, item.keywords.primary);
+      if (platform === "GMB") continue;
+
+      const sourceItem =
+        platform === "GMB"
+          ? pickRelevantSourcePage(selectedPagesForGmb, gmbCategoryId, loc) || item
+          : item;
+      const sourceUrl = platform === "GMB" ? sourceItem.url || item.url : item.url;
+      const sourceKeywords = platform === "GMB" ? sourceItem.keywords || item.keywords : item.keywords;
+
+      const fp = fingerprintOf(sourceUrl, platform, sourceKeywords.primary);
       if (lockedSet.has(fp)) {
-        skippedLocked.push({ url: item.url, platform, reason: "Already published & locked" });
+        skippedLocked.push({ url: sourceUrl, platform, reason: "Already published & locked" });
         continue;
       }
 
       const postData = await generatePostContentWithAi(
         platform,
-        item.keywords,
+        sourceKeywords,
         loc,
-        item.url,
-        selectedTone,
+        sourceUrl,
+        platform === "GMB" ? gmbCategoryId : selectedTone,
         {
-          writingIntent: item.writingIntent,
-          masterIntent: item.masterIntent || siteMasterIntent,
+          writingIntent: sourceItem.writingIntent || item.writingIntent,
+          masterIntent: sourceItem.masterIntent || item.masterIntent || siteMasterIntent,
           writingModel,
+          gmbCategory: platform === "GMB" ? gmbCategoryId : undefined,
+          business,
+          sourceTitle: sourceItem.title || item.title,
+          sourcePage: {
+            url: sourceUrl,
+            title: sourceItem.title || item.title,
+            keywords: sourceKeywords,
+          },
+          selectedPages: selectedPagesForGmb,
+          verifiedOffer,
         }
       );
+
+      if (platform === "GMB" && postData?.error === "NO_VERIFIED_OFFER") {
+        gmbSkipped = {
+          reason:
+            "No verified offer or event found for this content type. Choose another GMB category.",
+        };
+        continue;
+      }
 
       let imageUrl = null;
       if (includeImages) {
         imageUrl = await resolveImageUrl({
-          keyword: item.keywords.primary,
+          keyword: sourceKeywords.primary,
           location: loc,
           platform,
           heading: postData.heading,
@@ -1556,22 +2102,29 @@ export async function generateAutoPosterSuite({
       }
 
       const secondaryPack =
-        item.keywords.secondaryKeywords || item.keywords.general || [item.keywords.secondary];
+        sourceKeywords.secondaryKeywords || sourceKeywords.general || [sourceKeywords.secondary];
 
       const row = await prisma.studioPost.create({
         data: {
           userId: user.id,
           workspaceId: wid,
           fingerprint: fp,
-          websiteOrigin: origin || websiteOriginFromUrl(item.url),
-          sourceUrl: item.url,
+          websiteOrigin: origin || websiteOriginFromUrl(sourceUrl),
+          sourceUrl,
           platform,
-          tone: selectedTone,
+          tone: platform === "GMB" ? gmbCategoryId : selectedTone,
           location: loc,
-          primaryKeyword: polishKeyword(item.keywords.primary, loc),
-          secondaryKeyword: polishKeyword(secondaryPack[0] || item.keywords.secondary, loc),
-          generalKeywords: JSON.stringify(
-            secondaryPack.map((k) => polishKeyword(k, loc)).slice(0, 4)
+          primaryKeyword: polishKeyword(sourceKeywords.primary, loc),
+          secondaryKeyword: polishKeyword(secondaryPack[0] || sourceKeywords.secondary, loc),
+          generalKeywords: packKeywordPack(
+            secondaryPack.map((k) => polishKeyword(k, loc)).slice(0, 4),
+            {
+              gmbCategory: platform === "GMB" ? gmbCategoryId : null,
+              cta: postData.cta || null,
+              sourceTitle: sourceItem.title || item.title || "",
+              validation: postData.validation || null,
+              ruleset: postData.ruleset || (platform === "GMB" ? GMB_RULESET_VERSION : null),
+            }
           ),
           heading: postData.heading,
           content: postData.content,
@@ -1587,12 +2140,105 @@ export async function generateAutoPosterSuite({
     }
   }
 
+  if (wantsGmb && !gmbSkipped) {
+    const sourceItem =
+      pickRelevantSourcePage(selectedPagesForGmb, gmbCategoryId, loc) || analyzed[0];
+    const sourceUrl = sourceItem.url;
+    const sourceKeywords = sourceItem.keywords || analyzed[0].keywords;
+    const fp = fingerprintOf(sourceUrl, "GMB", sourceKeywords.primary);
+    if (lockedSet.has(fp)) {
+      skippedLocked.push({ url: sourceUrl, platform: "GMB", reason: "Already published & locked" });
+    } else {
+      const postData = await generatePostContentWithAi(
+        "GMB",
+        sourceKeywords,
+        loc,
+        sourceUrl,
+        gmbCategoryId,
+        {
+          writingIntent: sourceItem.writingIntent,
+          masterIntent: sourceItem.masterIntent || siteMasterIntent,
+          writingModel,
+          gmbCategory: gmbCategoryId,
+          business,
+          sourceTitle: sourceItem.title,
+          sourcePage: {
+            url: sourceUrl,
+            title: sourceItem.title,
+            keywords: sourceKeywords,
+          },
+          selectedPages: selectedPagesForGmb,
+          verifiedOffer,
+        }
+      );
+      if (postData?.error === "NO_VERIFIED_OFFER") {
+        gmbSkipped = {
+          reason:
+            "No verified offer or event found for this content type. Choose another GMB category.",
+        };
+      } else {
+        let imageUrl = null;
+        if (includeImages) {
+          imageUrl = await resolveImageUrl({
+            keyword: sourceKeywords.primary,
+            location: loc,
+            platform: "GMB",
+            heading: postData.heading,
+            imageSource: resolvedImageSource,
+            preferredModel: preferredImageModel,
+          });
+        }
+        const secondaryPack =
+          sourceKeywords.secondaryKeywords ||
+          sourceKeywords.general ||
+          [sourceKeywords.secondary];
+        const row = await prisma.studioPost.create({
+          data: {
+            userId: user.id,
+            workspaceId: wid,
+            fingerprint: fp,
+            websiteOrigin: origin || websiteOriginFromUrl(sourceUrl),
+            sourceUrl,
+            platform: "GMB",
+            tone: gmbCategoryId,
+            location: loc,
+            primaryKeyword: polishKeyword(sourceKeywords.primary, loc),
+            secondaryKeyword: polishKeyword(
+              secondaryPack[0] || sourceKeywords.secondary,
+              loc
+            ),
+            generalKeywords: packKeywordPack(
+              secondaryPack.map((k) => polishKeyword(k, loc)).slice(0, 4),
+              {
+                gmbCategory: gmbCategoryId,
+                cta: postData.cta || null,
+                sourceTitle: sourceItem.title || "",
+                validation: postData.validation || null,
+                ruleset: postData.ruleset || GMB_RULESET_VERSION,
+              }
+            ),
+            heading: postData.heading,
+            content: postData.content,
+            contentHtml: postData.contentHtml,
+            imageUrl,
+            status: "draft",
+            locked: false,
+            archived: false,
+          },
+        });
+        posts.push(serializePost(row));
+      }
+    }
+  }
+
   return {
     ok: true,
     workspaceId: wid,
     location: loc,
     tone: selectedTone,
     platforms,
+    gmbCategory: gmbCategoryId,
+    gmbSkipped,
     expectedTotal,
     pageCount: analyzed.length,
     websiteOrigin: origin,
@@ -1606,16 +2252,37 @@ export async function generateAutoPosterSuite({
     imageSource: includeImages ? resolvedImageSource : null,
     providerDecision,
     tones: TONE_PRESETS,
+    ruleset: GMB_RULESET_VERSION,
   };
 }
 
 function serializePost(row) {
-  let general = [];
-  try {
-    general = JSON.parse(row.generalKeywords || "[]");
-  } catch {
-    general = [];
-  }
+  const packed = unpackKeywordPack(row.generalKeywords);
+  const general = packed.keywords;
+  const meta = packed.meta || {};
+  const gmbCategory =
+    meta.gmbCategory ||
+    (row.platform === "GMB" && isGmbCategoryId(row.tone) ? row.tone : null);
+  const validation =
+    meta.validation ||
+    (row.platform === "GMB"
+      ? validateGmbPost({
+          content: row.content,
+          heading: row.heading,
+          categoryId: gmbCategory || GMB_CATEGORY_IDS.INTENT_PROXIMITY,
+          location: row.location,
+          keywords: {
+            primary: row.primaryKeyword,
+            secondary: row.secondaryKeyword,
+            general,
+          },
+        })
+      : validateSocialPost({
+          content: row.content,
+          platform: row.platform,
+          minWords: PLATFORM_CONFIG[row.platform]?.minWords,
+          maxWords: PLATFORM_CONFIG[row.platform]?.maxWords,
+        }));
   return {
     id: row.id,
     url: row.sourceUrl,
@@ -1631,6 +2298,7 @@ function serializePost(row) {
     content: row.content,
     contentHtml: row.contentHtml || row.content,
     wordCount: countWords(row.content || row.contentHtml || ""),
+    charCount: countChars(row.content || ""),
     image: row.imageUrl,
     status: row.status,
     locked: row.locked,
@@ -1643,20 +2311,33 @@ function serializePost(row) {
     workspaceId: row.workspaceId,
     archived: !!row.archived,
     archivedAt: row.archivedAt ? row.archivedAt.toISOString() : null,
-    /** Part 4 — true when publish is blocked until regenerate */
     publishLocked: !!(row.locked && row.status === "published"),
+    gmbCategory,
+    cta: meta.cta || null,
+    sourceTitle: meta.sourceTitle || null,
+    validation,
+    ruleset: meta.ruleset || (row.platform === "GMB" ? GMB_RULESET_VERSION : null),
   };
 }
 
-export async function listStudioPosts({ email, workspaceId, status, archived = false }) {
+export async function listStudioPosts({
+  email,
+  workspaceId,
+  status,
+  archived = false,
+  includeArchived = false,
+}) {
   const auth = await resolveUser(email);
   if (!auth.ok) return auth;
 
+  const includeAll = includeArchived === true || includeArchived === "true";
   const where = {
     userId: auth.user.id,
-    archived: archived === true || archived === "true",
   };
   if (workspaceId) where.workspaceId = workspaceId;
+  if (!includeAll) {
+    where.archived = archived === true || archived === "true";
+  }
   if (status) where.status = status;
 
   const rows = await prisma.studioPost.findMany({
@@ -1664,7 +2345,46 @@ export async function listStudioPosts({ email, workspaceId, status, archived = f
     orderBy: { updatedAt: "desc" },
   });
 
-  return { ok: true, posts: rows.map(serializePost), archived: where.archived };
+  return { ok: true, posts: rows.map(serializePost), archived: includeAll ? null : where.archived };
+}
+
+export async function archiveStudioPosts({ email, postIds, confirm, workspaceId }) {
+  const auth = await resolveUser(email);
+  if (!auth.ok) return auth;
+
+  if (confirm !== true && confirm !== "true") {
+    return {
+      ok: false,
+      status: 400,
+      error: "Confirmation required. Pass confirm: true to archive posts.",
+    };
+  }
+
+  const ids = Array.isArray(postIds)
+    ? [...new Set(postIds.map((id) => String(id).trim()).filter(Boolean))]
+    : [];
+  if (!ids.length) {
+    return { ok: false, status: 400, error: "postIds are required" };
+  }
+
+  const ownedWhere = { id: { in: ids }, userId: auth.user.id };
+  if (workspaceId) ownedWhere.workspaceId = workspaceId;
+
+  const owned = await prisma.studioPost.findMany({
+    where: ownedWhere,
+    select: { id: true },
+  });
+  const ownedIds = owned.map((p) => p.id);
+  if (!ownedIds.length) {
+    return { ok: false, status: 404, error: "No matching posts to archive" };
+  }
+
+  const result = await prisma.studioPost.updateMany({
+    where: { id: { in: ownedIds }, userId: auth.user.id, archived: false },
+    data: { archived: true, archivedAt: new Date() },
+  });
+
+  return { ok: true, archived: result.count };
 }
 
 /**
@@ -1908,6 +2628,7 @@ export async function rewriteStudioPost({
   tone,
   includeImages = false,
   imageSource = "auto",
+  gmbCategory,
 }) {
   const auth = await resolveUser(email);
   if (!auth.ok) return auth;
@@ -1917,13 +2638,19 @@ export async function rewriteStudioPost({
   });
   if (!post) return { ok: false, status: 404, error: "Post not found" };
 
-  const selectedTone = TONE_PRESETS.includes(tone) ? tone : post.tone;
-  let general = [];
-  try {
-    general = JSON.parse(post.generalKeywords || "[]");
-  } catch {
-    general = [];
-  }
+  const packed = unpackKeywordPack(post.generalKeywords);
+  const general = packed.keywords;
+  const storedCategory =
+    packed.meta?.gmbCategory ||
+    (post.platform === "GMB" && isGmbCategoryId(post.tone) ? post.tone : null);
+  const gmbCategoryId = isGmbCategoryId(gmbCategory) ? gmbCategory : storedCategory;
+
+  const selectedTone =
+    post.platform === "GMB"
+      ? gmbCategoryId || GMB_CATEGORY_IDS.INTENT_PROXIMITY
+      : TONE_PRESETS.includes(tone)
+        ? tone
+        : post.tone;
 
   const keywords = {
     primary: post.primaryKeyword,
@@ -1932,7 +2659,6 @@ export async function rewriteStudioPost({
     general: general.length ? general : [post.secondaryKeyword],
   };
 
-  // Recover intent line from prior draft when present
   const intentMatch = String(post.content || "").match(
     /Intent focus \(([^)]+)\):\s*(.+?)(?:\n|$)/
   );
@@ -1940,6 +2666,18 @@ export async function rewriteStudioPost({
   const masterIntent =
     intentMatch?.[2]?.trim() ||
     `Rewrite for ${post.platform} using ${post.primaryKeyword} in ${post.location}`;
+
+  const workspace = post.workspaceId
+    ? await prisma.clientWorkspace.findUnique({ where: { id: post.workspaceId } })
+    : null;
+  const business = await resolveBusinessContext(auth.user.id, post.workspaceId, workspace);
+  const verifiedOffer = detectVerifiedOffer([
+    {
+      url: post.sourceUrl,
+      title: packed.meta?.sourceTitle,
+      keywords,
+    },
+  ]);
 
   const providerDecision = await selectBestStudioProviders({
     websiteUrl: post.websiteOrigin || post.sourceUrl,
@@ -1961,10 +2699,25 @@ export async function rewriteStudioPost({
       writingIntent,
       masterIntent,
       writingModel: providerDecision.writing.model,
+      gmbCategory: post.platform === "GMB" ? selectedTone : undefined,
+      business,
+      sourceTitle: packed.meta?.sourceTitle,
+      sourcePage: {
+        url: post.sourceUrl,
+        title: packed.meta?.sourceTitle,
+        keywords,
+      },
+      selectedPages: [
+        {
+          url: post.sourceUrl,
+          title: packed.meta?.sourceTitle,
+          keywords,
+        },
+      ],
+      verifiedOffer,
     }
   );
 
-  // New fingerprint → unlocks reuse / re-publish of this page+platform combo
   const newFingerprint = fingerprintOf(
     post.sourceUrl,
     post.platform,
@@ -1993,6 +2746,13 @@ export async function rewriteStudioPost({
       heading: rewritten.heading,
       content: rewritten.content,
       contentHtml: rewritten.contentHtml,
+      generalKeywords: packKeywordPack(keywords.secondaryKeywords, {
+        gmbCategory: post.platform === "GMB" ? selectedTone : packed.meta?.gmbCategory,
+        cta: rewritten.cta || packed.meta?.cta || null,
+        sourceTitle: packed.meta?.sourceTitle || "",
+        validation: rewritten.validation || null,
+        ruleset: rewritten.ruleset || packed.meta?.ruleset || null,
+      }),
       imageUrl,
       status: "draft",
       locked: false,
@@ -2011,6 +2771,69 @@ export async function rewriteStudioPost({
     previousPublishedAt: post.publishedAt ? post.publishedAt.toISOString() : null,
     providerDecision,
   };
+}
+
+export async function updateStudioPostContent({ email, postId, content, heading }) {
+  const auth = await resolveUser(email);
+  if (!auth.ok) return auth;
+
+  const post = await prisma.studioPost.findFirst({
+    where: { id: postId, userId: auth.user.id },
+  });
+  if (!post) return { ok: false, status: 404, error: "Post not found" };
+  if (post.locked && post.status === "published") {
+    return {
+      ok: false,
+      status: 409,
+      error: "Published posts are locked. Regenerate first to edit.",
+    };
+  }
+
+  const packed = unpackKeywordPack(post.generalKeywords);
+  const nextHeading = heading != null ? String(heading) : post.heading;
+  const nextContent = content != null ? String(content) : post.content;
+  const gmbCategory =
+    packed.meta?.gmbCategory ||
+    (post.platform === "GMB" && isGmbCategoryId(post.tone) ? post.tone : null);
+
+  const validation =
+    post.platform === "GMB"
+      ? validateGmbPost({
+          content: nextContent,
+          heading: nextHeading,
+          categoryId: gmbCategory || GMB_CATEGORY_IDS.INTENT_PROXIMITY,
+          location: post.location,
+          keywords: {
+            primary: post.primaryKeyword,
+            secondary: post.secondaryKeyword,
+            general: packed.keywords,
+          },
+        })
+      : validateSocialPost({
+          content: nextContent,
+          platform: post.platform,
+          minWords: PLATFORM_CONFIG[post.platform]?.minWords,
+          maxWords: PLATFORM_CONFIG[post.platform]?.maxWords,
+        });
+
+  const updated = await prisma.studioPost.update({
+    where: { id: post.id },
+    data: {
+      heading: nextHeading,
+      content: nextContent,
+      contentHtml: plainToPreviewHtml(nextContent),
+      generalKeywords: packKeywordPack(packed.keywords, {
+        ...packed.meta,
+        validation,
+      }),
+    },
+  });
+
+  return { ok: true, post: serializePost(updated), validation };
+}
+
+export function getGmbRulesCatalog() {
+  return gmbUiCatalog();
 }
 
 /**
