@@ -6,12 +6,15 @@ import {
   GMB_CATEGORY_LIST,
   GMB_CHAR,
   detectVerifiedOffer,
+  ensureGmbHashtags,
+  extractHashtags,
   firstNChars,
   getGmbCategory,
   isGmbCategoryId,
   pickRelevantSourcePage,
   recommendGmbCategory,
   resolveGmbCta,
+  stripUnverifiedNap,
   uiCatalog,
 } from "../src/content/gmbContentRules.js";
 import { validateGmbPost } from "../src/content/gmbValidator.js";
@@ -143,6 +146,43 @@ const fakeReady = validateGmbPost({
 });
 assert(typeof fakeReady.charCount === "number", "validator computes character count");
 assert(fakeReady.charCount === fakeReady.contentLength || fakeReady.charCount > 0, "char count is programmatic");
+assert(fakeReady.status === "NEEDS_REVISION", "unverified street address and phone fail");
+
+const invented = validateGmbPost({
+  content: `${"Looking for website repair near you in Houston? Our team helps local businesses recover hacked sites and WordPress issues. ".repeat(8)}\n123 Main St\n(123) 456-7890\nClick "Call Now" to speak with our team.\n#Houston #WebsiteRepair #HoustonNearMe #LocalBusiness`,
+  heading: "Looking for website repair near you in Houston?",
+  categoryId: GMB_CATEGORY_IDS.INTENT_PROXIMITY,
+  location: "Houston, TX",
+  keywords: { primary: "website repair" },
+  business: { name: "Mostafij Emon" },
+});
+assert(
+  invented.issues.some((i) => /phone|address|placeholder/i.test(i)),
+  "invented NAP without verified data fails"
+);
+
+const stripped = stripUnverifiedNap(
+  "Call us at (123) 456-7890 on 123 Main St. Open 24/7. Houston website repair.",
+  {}
+);
+assert(!/\(123\)/.test(stripped) && !/123 Main/i.test(stripped), "strip removes unverified phone and street");
+assert(!/24\s*\/\s*7/i.test(stripped), "strip removes unverified hours");
+
+const tagged = ensureGmbHashtags(
+  "Looking for website repair near you in Houston? Click Call Now.",
+  { location: "Houston, TX", primary: "website repair", categoryId: GMB_CATEGORY_IDS.INTENT_PROXIMITY }
+);
+assert(extractHashtags(tagged).length >= 4, "ensureGmbHashtags adds at least 4 tags");
+
+const verifiedPhoneOk = validateGmbPost({
+  content: `${"Looking for website repair near you in Houston? Local WordPress and malware help for nearby businesses. ".repeat(8)}\nCore services:\n• Website repair\n• Malware removal\n• WordPress recovery\nWhy choose us: local team focused on verified website repair.\nClick "Call Now" to speak with our team.\n#Houston #WebsiteRepair #HoustonNearMe #LocalBusiness`,
+  heading: "Looking for website repair near you in Houston?",
+  categoryId: GMB_CATEGORY_IDS.INTENT_PROXIMITY,
+  location: "Houston, TX",
+  keywords: { primary: "website repair" },
+  business: {},
+});
+assert(!verifiedPhoneOk.issues.some((i) => /phone number/i.test(i)), "no phone is valid when phone is unverified");
 
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed) process.exit(1);

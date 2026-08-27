@@ -470,6 +470,68 @@ export function firstNChars(text, n = GMB_CHAR.frontLoad) {
   return String(text || "").slice(0, n);
 }
 
+export function digitsOnly(value) {
+  return String(value || "").replace(/\D/g, "");
+}
+
+const PHONE_RE = /\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}/g;
+const STREET_RE =
+  /\b\d{1,6}\s+[A-Za-z0-9.'-]+(?:\s+[A-Za-z0-9.'-]+)?\s+(?:st|street|ave|avenue|rd|road|blvd|boulevard|dr|drive|ln|lane|way|ct|court|hwy|highway|pkwy|parkway)\.?\b/gi;
+const FABRICATED_NAP_RE =
+  /\b123\s+main\s+st\.?\b|\(123\)\s*456-7890|\b555-0(?:1\d{2}|00)\b/gi;
+const HOURS_CLAIM_RE =
+  /\bopen\s+24\s*\/\s*7\b|\b24\s*\/\s*7\b|\bhours?:\s*\d{1,2}(?::\d{2})?\s*(?:am|pm)(?:\s*[-–]\s*\d{1,2}(?::\d{2})?\s*(?:am|pm))?/gi;
+
+export function extractPhoneNumbers(text) {
+  return String(text || "").match(PHONE_RE) || [];
+}
+
+export function extractStreetAddresses(text) {
+  return String(text || "").match(STREET_RE) || [];
+}
+
+/**
+ * Remove NAP claims that are not present in verified business data.
+ * City/location strings are left intact.
+ */
+export function stripUnverifiedNap(text, business = {}) {
+  let body = String(text || "");
+  const verifiedPhone = digitsOnly(business.phone);
+  body = body.replace(PHONE_RE, (m) => {
+    if (verifiedPhone && digitsOnly(m) === verifiedPhone) return m;
+    return "";
+  });
+  if (!String(business.address || "").trim()) {
+    body = body.replace(STREET_RE, "");
+  }
+  if (!String(business.hours || "").trim()) {
+    body = body.replace(HOURS_CLAIM_RE, "");
+  }
+  body = body.replace(FABRICATED_NAP_RE, "");
+  return body
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/[ ,]{2,}/g, " ")
+    .trim();
+}
+
+export function ensureGmbHashtags(text, { location, primary, categoryId } = {}) {
+  const raw = String(text || "").trim();
+  const tail = raw.match(/(\n+(?:#[A-Za-z0-9_]+(?:\s+#[A-Za-z0-9_]+)+)\s*)$/);
+  const body = tail ? raw.slice(0, -tail[1].length).trim() : raw.replace(/\s*#[A-Za-z0-9_]+/g, "").trim();
+  let hashes = extractHashtags(raw).slice(0, GMB_CHAR.hashtagMax);
+  if (hashes.length < GMB_CHAR.hashtagMin) {
+    for (const tag of buildHashtagLine({ location, primary, categoryId }).split(/\s+/)) {
+      if (!hashes.includes(tag)) hashes.push(tag);
+      if (hashes.length >= GMB_CHAR.hashtagMin) break;
+    }
+  }
+  hashes = hashes.slice(0, GMB_CHAR.hashtagMax);
+  while (hashes.length < GMB_CHAR.hashtagMin) hashes.push("#LocalBusiness");
+  return `${body}\n\n${hashes.join(" ")}`.trim();
+}
+
 function buildHashtagLine({ location, primary, categoryId }) {
   const cat = getGmbCategory(categoryId);
   const city = String(location || "")
@@ -578,7 +640,9 @@ OUTPUT RULES
 - No inline hyperlinks in the body (the source URL is stored separately).
 - Include 4–5 relevant hashtags on the last line.
 - The heading/hook is mandatory and category-specific (${cat.hookName}).
-- Stay within ${GMB_CHAR.min}–${GMB_CHAR.max} characters including spaces.`;
+- Stay within ${GMB_CHAR.min}–${GMB_CHAR.max} characters including spaces.
+- NAP HARD RULE: if Exact address, Phone, or Hours are marked not provided, do not write any street address, phone number, or opening-hours claim. City from verified location may be used. Never use placeholders such as 123 Main St or (123) 456-7890.
+- Never invent NAP, ratings, credentials, offers, or statistics to hit the character target.`
 }
 
 export function buildGmbUserPrompt(ctx) {
@@ -615,4 +679,4 @@ export function uiCatalog() {
   };
 }
 
-export { CTA as GMB_CTA, buildHashtagLine };
+export { CTA as GMB_CTA, buildHashtagLine, PHONE_RE, STREET_RE, FABRICATED_NAP_RE };

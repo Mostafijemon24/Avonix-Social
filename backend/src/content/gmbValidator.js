@@ -8,9 +8,12 @@ import {
   countChars,
   countWords,
   extractHashtags,
+  extractPhoneNumbers,
+  extractStreetAddresses,
   firstNChars,
   getGmbCategory,
   isGmbCategoryId,
+  digitsOnly,
 } from "./gmbContentRules.js";
 
 export const VALIDATION_STATUS = Object.freeze({
@@ -117,6 +120,42 @@ function unsupportedSuperatives(text) {
   );
 }
 
+export function findUnverifiedNapIssues(content, business = {}) {
+  const issues = [];
+  const body = String(content || "");
+  const verifiedPhone = digitsOnly(business.phone);
+  const phones = extractPhoneNumbers(body);
+  for (const phone of phones) {
+    if (!verifiedPhone || digitsOnly(phone) !== verifiedPhone) {
+      issues.push("Contains a phone number that is not in verified business data.");
+      break;
+    }
+  }
+  const streets = extractStreetAddresses(body);
+  const verifiedAddress = String(business.address || "").trim().toLowerCase();
+  if (streets.length && !verifiedAddress) {
+    issues.push("Contains a street address that is not in verified business data.");
+  } else if (streets.length && verifiedAddress) {
+    const unmatched = streets.some((s) => {
+      const streetDigits = digitsOnly(s).slice(0, 6);
+      return streetDigits && !verifiedAddress.includes(streetDigits);
+    });
+    if (unmatched) {
+      issues.push("Contains a street address that is not in verified business data.");
+    }
+  }
+  if (
+    !String(business.hours || "").trim() &&
+    /\b(open\s+24\s*\/\s*7|24\s*\/\s*7|hours?:\s*\d{1,2})/i.test(body)
+  ) {
+    issues.push("Contains hours that are not in verified business data.");
+  }
+  if (/\b123\s+main\s+st\b|\(123\)\s*456-7890/i.test(body)) {
+    issues.push("Contains fabricated placeholder NAP (123 Main St / sample phone).");
+  }
+  return issues;
+}
+
 /**
  * @returns {{
  *   status: 'READY'|'NEEDS_REVISION',
@@ -211,6 +250,8 @@ export function validateGmbPost({
     issues.push("Contains unsupported superlative or ranking language (#1 / best / top-rated).");
   }
 
+  issues.push(...findUnverifiedNapIssues(body, business));
+
   const hardFail = issues.some(
     (i) =>
       i.includes("below the") ||
@@ -219,7 +260,9 @@ export function validateGmbPost({
       i.includes("Required section") ||
       i.includes("Need 4") ||
       i.includes("Missing a direct CTA") ||
-      i.includes("NO_VERIFIED")
+      i.includes("NO_VERIFIED") ||
+      i.includes("not in verified business data") ||
+      i.includes("fabricated placeholder")
   );
 
   const targetOnly = issues.length > 0 && issues.every((i) => i.includes("outside the"));

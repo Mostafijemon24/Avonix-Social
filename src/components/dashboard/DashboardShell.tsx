@@ -136,9 +136,9 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
   };
 
   return (
-    <div className="h-full min-h-screen flex flex-col bg-navy-950">
-      <header className="h-16 border-b border-navy-800 bg-navy-900/90 backdrop-blur-md sticky top-0 z-30 flex items-center justify-between px-4 lg:px-8">
-        <div className="flex items-center space-x-4">
+    <div className="h-full min-h-screen min-w-0 flex flex-col bg-navy-950">
+      <header className="h-16 border-b border-navy-800 bg-navy-900/90 backdrop-blur-md sticky top-0 z-30 flex items-center justify-between gap-2 px-3 sm:px-4 lg:px-8 min-w-0">
+        <div className="flex items-center gap-2 min-w-0">
           <button
             type="button"
             onClick={() => setSidebarOpen(!sidebarOpen)}
@@ -147,14 +147,14 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
           >
             {sidebarOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
           </button>
-          <BrandLogo href="/dashboard" size="sm" />
+          <BrandLogo href="/dashboard" size="sm" compactOnMobile />
 
           <div className="relative">
             <ClientWorkspaceSwitcher />
           </div>
         </div>
 
-        <div className="flex items-center space-x-3">
+        <div className="flex items-center gap-1.5 sm:gap-3 shrink-0">
           <div
             className={`hidden sm:flex items-center border px-3.5 py-1.5 rounded-full text-xs font-bold ${
               unlimited
@@ -196,9 +196,10 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
           </Link>
           <Link
             href="/dashboard/billing"
-            className="px-3.5 py-1.5 text-xs font-bold rounded-xl text-white bg-orange-500 hover:bg-orange-600 transition-all shadow-md shadow-orange-500/20"
+            className="px-2.5 sm:px-3.5 py-1.5 text-xs font-bold rounded-xl text-white bg-orange-500 hover:bg-orange-600 transition-all shadow-md shadow-orange-500/20 whitespace-nowrap"
           >
-            Top-Up / Upgrade
+            <span className="sm:hidden">Top-Up</span>
+            <span className="hidden sm:inline">Top-Up / Upgrade</span>
           </Link>
           <div className="relative">
             <button
@@ -251,7 +252,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
         </div>
       )}
 
-      <div className="flex-1 flex overflow-hidden relative">
+      <div className="flex-1 flex overflow-hidden relative min-w-0">
         {sidebarOpen && (
           <div
             className="fixed inset-0 bg-navy-950/80 z-40 lg:hidden backdrop-blur-sm"
@@ -400,7 +401,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
           </div>
         </aside>
 
-        <main className="flex-1 overflow-y-auto custom-scrollbar p-4 sm:p-6 lg:p-8 bg-navy-950 text-slate-200">
+        <main className="flex-1 min-w-0 overflow-y-auto custom-scrollbar p-4 sm:p-6 lg:p-8 bg-navy-950 text-slate-200">
           {children}
         </main>
       </div>

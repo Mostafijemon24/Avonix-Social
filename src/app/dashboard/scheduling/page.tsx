@@ -103,42 +103,45 @@ export default function SchedulingPage() {
         </div>
       </div>
 
+      <div className="grid grid-cols-1 min-[900px]:grid-cols-2 min-[1120px]:grid-cols-7 gap-2">
+        {byDay.map((day) => (
+          <div key={day.label} className="glass-card rounded-xl p-2 min-h-[120px] min-[1120px]:min-h-[180px] min-w-0">
+            <p className="label-caps text-slate-500">{day.label}</p>
+            <p className="text-[11px] text-slate-400 mb-2">{day.date.getDate()}</p>
+            <div className="space-y-1.5">
+              {day.posts.length === 0 ? (
+                <p className="text-[11px] text-slate-500">No scheduled posts</p>
+              ) : (
+                day.posts.map((p) => (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => setDetail(p)}
+                    className="w-full text-left rounded-lg border border-white/[0.07] bg-[color:var(--color-card-inner)] px-2 py-1.5 hover:border-orange-500/40 min-h-[44px]"
+                  >
+                    <p className="text-[10px] font-bold text-orange-400">{p.platform}</p>
+                    <p className="text-[11px] text-white font-semibold line-clamp-2">{p.heading}</p>
+                    <p className="text-[10px] text-slate-400 mt-0.5">
+                      {new Date(p.scheduledDate || "").toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} ·{" "}
+                      {p.status}
+                    </p>
+                  </button>
+                ))
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+
       {posts.length === 0 ? (
         <p className="text-sm text-slate-500">
-          No scheduled posts.{" "}
+          Nothing is scheduled this week.{" "}
           <Link href="/dashboard/social-post" className="text-orange-400 font-bold">
             Generate in Content Studio
           </Link>
         </p>
       ) : (
-        <>
-          <div className="grid grid-cols-1 min-[900px]:grid-cols-2 min-[1120px]:grid-cols-7 gap-2">
-            {byDay.map((day) => (
-              <div key={day.label} className="glass-card rounded-xl p-2 min-h-[120px] min-[1120px]:min-h-[180px]">
-                <p className="label-caps text-slate-500">{day.label}</p>
-                <p className="text-[11px] text-slate-400 mb-2">{day.date.getDate()}</p>
-                <div className="space-y-1.5">
-                  {day.posts.map((p) => (
-                    <button
-                      key={p.id}
-                      type="button"
-                      onClick={() => setDetail(p)}
-                      className="w-full text-left rounded-lg border border-white/[0.07] bg-[color:var(--color-card-inner)] px-2 py-1.5 hover:border-orange-500/40 min-h-[44px]"
-                    >
-                      <p className="text-[10px] font-bold text-orange-400">{p.platform}</p>
-                      <p className="text-[11px] text-white font-semibold line-clamp-2">{p.heading}</p>
-                      <p className="text-[10px] text-slate-400 mt-0.5">
-                        {new Date(p.scheduledDate || "").toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} ·{" "}
-                        {p.status}
-                      </p>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>
-
-          <section>
+        <section>
             <h2 className="text-sm font-bold text-white mb-2">Upcoming</h2>
             {upcoming.length === 0 ? (
               <p className="text-xs text-slate-500">Nothing remaining after {weekEnd.toLocaleDateString()}.</p>
@@ -160,8 +163,7 @@ export default function SchedulingPage() {
                 ))}
               </ul>
             )}
-          </section>
-        </>
+        </section>
       )}
 
       {detail && state.email && (

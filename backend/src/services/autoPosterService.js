@@ -35,6 +35,8 @@ import {
   isGmbCategoryId,
   pickRelevantSourcePage,
   resolveGmbCta,
+  stripUnverifiedNap,
+  ensureGmbHashtags,
   uiCatalog as gmbUiCatalog,
 } from "../content/gmbContentRules.js";
 import { validateGmbPost, validateSocialPost } from "../content/gmbValidator.js";
@@ -766,21 +768,19 @@ function buildGmbTemplatePost({
   const cat = getGmbCategory(categoryId);
   const place = normalizeLocation(location) || "your area";
   const primary = polishKeyword(keywords.primary, place);
-  const secondaryList = (
-    keywords.secondaryKeywords ||
-    keywords.general ||
-    [keywords.secondary]
-  )
+  const rawSecondary =
+    keywords.secondaryKeywords || keywords.general || keywords.secondary || [];
+  const secondaryList = (Array.isArray(rawSecondary) ? rawSecondary : [rawSecondary])
     .map((x) => polishKeyword(x, place))
     .filter(Boolean);
   const services = secondaryList.slice(0, 6);
-  while (services.length < 4) services.push(`${primary} support`);
   const cta = resolveGmbCta(categoryId, business);
-  const name = business.name || "Our team";
-  const address = business.address || place;
-  const phone = business.phone || "";
-  const hours = business.hours || "";
+  const name = String(business.name || "").trim();
+  const address = String(business.address || "").trim();
+  const phone = String(business.phone || "").trim();
+  const hours = String(business.hours || "").trim();
   const city = String(place).split(",")[0].trim() || place;
+  const displayName = name || "Our team";
 
   const nap = [name, address, phone, hours].filter(Boolean).join("\n");
   const ctaLine =
@@ -804,14 +804,14 @@ function buildGmbTemplatePost({
 
   if (cat.id === GMB_CATEGORY_IDS.INTENT_PROXIMITY) {
     heading = `Looking for ${primary} near you in ${city}?`;
-    body = `${heading} ${name} is conveniently located in ${place} and ready to help nearby customers who need ${primary} today.
+    body = `${heading} ${displayName} is ready to help nearby customers in ${place} who need ${primary} today.
 
-We serve local families and businesses around ${city} with clear communication and practical next steps. ${hours ? `Hours: ${hours}.` : "Ask us about current hours before you visit."}
+We serve local families and businesses around ${city} with clear communication and practical next steps.${hours ? ` Hours: ${hours}.` : ""}
 
 Core services:
-${services.map((s) => `• ${s}`).join("\n")}
+${(services.length ? services : [primary]).map((s) => `• ${s}`).join("\n")}
 
-Why choose us: our ${city} team focuses on reliable ${primary} and ${services[0] || "local service"}, with straightforward guidance from the first call. We do not make unverified ranking claims — we let verified work and local availability speak for us.
+Why choose us: our ${city} team focuses on reliable ${primary}${services[0] ? ` and ${services[0]}` : ""}, with straightforward guidance from the first call. We do not make unverified ranking claims — we let verified work and local availability speak for us.
 
 ${nap}
 
@@ -820,7 +820,7 @@ ${ctaLine}
 ${tags}`;
   } else if (cat.id === GMB_CATEGORY_IDS.OFFER_PROMOTION_EVENT) {
     heading = `Special ${primary} offer in ${city}`;
-    body = `${heading}: see the verified details from our ${sourceTitle || "service"} page and visit ${name} to learn what currently applies.
+    body = `${heading}: see the verified details from our ${sourceTitle || "service"} page${name ? ` and visit ${name}` : ""} to learn what currently applies.
 
 If a promotion, package, or event is listed on the selected website pages, our team will confirm eligibility, dates, and any limits before you redeem. We will not invent discounts or expiration dates.
 
@@ -838,14 +838,14 @@ ${ctaLine}
 
 ${tags}`;
   } else if (cat.id === GMB_CATEGORY_IDS.AUTHORITY_TRUST_PROOF) {
-    heading = `Why ${city} customers choose ${name} for ${primary}`;
+    heading = `Why ${city} customers choose ${displayName} for ${primary}`;
     body = `${heading}. Choosing the right local provider matters when you need ${primary} you can trust.
 
 Our team focuses on verified capabilities described on the selected website pages — training, process, and on-site support when those facts are published. We will not invent ratings, certifications, years of experience, or awards.
 
 Customer benefit: a clearer process, local access in ${city}, and practical help with ${services[0] || primary} without unsupported guarantees.
 
-Neighbors across ${place} can reach us for ${primary} and related needs such as ${services.slice(0, 3).join(", ")}.
+Neighbors across ${place} can reach us for ${primary}${services.length ? ` and related needs such as ${services.slice(0, 3).join(", ")}` : ""}.
 
 ${nap}
 
@@ -854,7 +854,7 @@ ${ctaLine}
 ${tags}`;
   } else {
     heading = `When should you get help with ${primary} in ${city}?`;
-    body = `${heading} If you are searching for clear, local guidance, here is a straightforward answer from ${name}.
+    body = `${heading} If you are searching for clear, local guidance, here is a straightforward answer${name ? ` from ${name}` : ""}.
 
 Most people need professional ${primary} when the problem is recurring, urgent, or beyond a simple home or DIY fix. Use the selected website page for the detailed process that applies to your situation.
 
@@ -877,7 +877,7 @@ ${tags}`;
   body = padGmbToTarget(body, {
     primary,
     place,
-    name,
+    name: displayName,
     services,
     ctaLine,
   });
@@ -890,15 +890,16 @@ function padGmbToTarget(text, { primary, place, name, services, ctaLine }) {
   const tags = hashMatch ? hashMatch[1] : "";
   if (tags) body = body.slice(0, -tags.length).trim();
 
-  const extras = [
-    `${name} serves people searching for ${primary} in ${place} with a clear, local next step.`,
-    `Ask about ${services.slice(0, 3).join(", ")} and how those services apply to your situation.`,
-    `${ctaLine} ${name} is a local option for ${primary} in ${place}.`,
+  const verifiedBits = [
+    place && `${primary} for people in ${place} starts with a clear local next step.`.trim(),
+    services?.[0] && `Verified services from the selected pages include ${services.filter(Boolean).slice(0, 4).join(", ")}.`,
+    ctaLine,
+    name && place && `${name} helps customers looking for ${primary} in ${place}.`,
   ].filter(Boolean);
 
   let i = 0;
-  while (body.length + tags.length < GMB_CHAR.targetMin && i < 12) {
-    const extra = extras[i % extras.length];
+  while (body.length + tags.length < GMB_CHAR.targetMin && i < 12 && verifiedBits.length) {
+    const extra = verifiedBits[i % verifiedBits.length];
     const projected = body.length + 2 + extra.length + tags.length;
     if (projected > GMB_CHAR.max) break;
     body = `${body}\n\n${extra}`.trim();
@@ -906,12 +907,12 @@ function padGmbToTarget(text, { primary, place, name, services, ctaLine }) {
   }
 
   let combined = `${body}${tags}`.trim();
-  if (combined.length < GMB_CHAR.targetMin) {
-    const filler = ` ${name} provides ${primary} in ${place}.`;
+  if (combined.length < GMB_CHAR.targetMin && place && primary) {
+    const filler = ` Local ${primary} in ${place}.`;
     while (combined.length < GMB_CHAR.targetMin) {
-      const room = GMB_CHAR.max - combined.length;
+      const room = Math.min(GMB_CHAR.max - combined.length, GMB_CHAR.targetMin - combined.length);
       if (room < 8) break;
-      const next = filler.slice(0, Math.min(filler.length, room, GMB_CHAR.targetMin - combined.length));
+      const next = filler.slice(0, Math.min(filler.length, room));
       if (!next) break;
       combined += next;
     }
@@ -1375,7 +1376,41 @@ async function generateGmbWithMasterRules({
     };
   };
 
-  let result = applyValidation(template.heading, template.content, "template");
+  const polishGmbCandidate = (heading, content, provider) => {
+    const place = normalizeLocation(location) || "";
+    const primary = polishKeyword(keywords.primary, place);
+    const rawServices = keywords.secondaryKeywords || keywords.general || keywords.secondary || [];
+    const services = (Array.isArray(rawServices) ? rawServices : [rawServices])
+      .map((x) => polishKeyword(x, place))
+      .filter(Boolean)
+      .slice(0, 6);
+    const cta = resolveGmbCta(categoryId, { ...business, offerSummary: verifiedOffer.summary });
+    const ctaLine =
+      cta === "CALL NOW"
+        ? `Click "Call Now" to speak with our team.`
+        : cta === "BOOK"
+          ? `Click "Book" to schedule with our team.`
+          : cta === "SIGN UP"
+            ? `Click "Sign Up" to take the next step.`
+            : `Click "Learn More" to read the details on this page.`;
+    let next = stripUnverifiedNap(content, business);
+    next = ensureGmbHashtags(next, {
+      location: place,
+      primary,
+      categoryId,
+    });
+    next = padGmbToTarget(next, {
+      primary,
+      place,
+      name: String(business.name || "").trim(),
+      services,
+      ctaLine,
+    });
+    next = stripUnverifiedNap(next, business);
+    return applyValidation(heading, next, provider);
+  };
+
+  let result = polishGmbCandidate(template.heading, template.content, "template");
 
   if (!model || !process.env.OPENROUTER_API_KEY) {
     return result;
@@ -1409,20 +1444,20 @@ async function generateGmbWithMasterRules({
       const heading = sanitizeEnglishPost(String(parsed.heading || template.heading).trim());
       const content = sanitizeEnglishPost(String(parsed.content || "").trim());
       if (content && countChars(content) >= 400) {
-        result = applyValidation(heading, content, model);
+        result = polishGmbCandidate(heading, content, model);
       }
     }
   } catch (err) {
     console.error("[generateGmbWithMasterRules]", err.message);
   }
 
-  const needsRefine =
-    result.validation &&
-    (!result.validation.ready ||
-      result.charCount < GMB_CHAR.min ||
-      result.charCount > GMB_CHAR.max);
-
-  if (needsRefine && model && process.env.OPENROUTER_API_KEY) {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const needsRefine =
+      result.validation &&
+      (!result.validation.ready ||
+        result.charCount < GMB_CHAR.min ||
+        result.charCount > GMB_CHAR.max);
+    if (!needsRefine || !model || !process.env.OPENROUTER_API_KEY) break;
     try {
       const refine = await callOpenRouter({
         model,
@@ -1440,21 +1475,19 @@ async function generateGmbWithMasterRules({
         ],
       });
       const parsed = parseModelJson(refine?.choices?.[0]?.message?.content);
-      if (parsed?.content) {
-        const heading = sanitizeEnglishPost(String(parsed.heading || result.heading).trim());
-        const content = sanitizeEnglishPost(String(parsed.content).trim());
-        const refined = applyValidation(heading, content, `${model}+refine`);
-        if (
-          refined.charCount >= GMB_CHAR.min &&
-          refined.charCount <= GMB_CHAR.max
-        ) {
-          result = refined;
-        } else if ((refined.validation?.issues || []).length <= (result.validation?.issues || []).length) {
-          result = refined;
-        }
+      if (!parsed?.content) break;
+      const heading = sanitizeEnglishPost(String(parsed.heading || result.heading).trim());
+      const content = sanitizeEnglishPost(String(parsed.content).trim());
+      const refined = polishGmbCandidate(heading, content, `${model}+refine`);
+      const fewerIssues =
+        (refined.validation?.issues || []).length <= (result.validation?.issues || []).length;
+      if (refined.validation?.ready || fewerIssues) {
+        result = refined;
       }
+      if (result.validation?.ready) break;
     } catch (err) {
       console.error("[generateGmbWithMasterRules refine]", err.message);
+      break;
     }
   }
 
@@ -1964,7 +1997,6 @@ export async function generateAutoPosterSuite({
     websiteOriginFromUrl(analyzed[0]?.url) ||
     null;
 
-  // —— Part 5: archive previous batch when website changes (or same-site drafts) ——
   const activeSample = await prisma.studioPost.findFirst({
     where: {
       userId: user.id,
@@ -1980,32 +2012,8 @@ export async function generateAutoPosterSuite({
     !!activeSample?.websiteOrigin &&
     activeSample.websiteOrigin !== origin;
 
-  let archivedCount = 0;
-  if (switchingWebsite) {
-    // New website → move ALL previous active posts to Archive
-    const moved = await prisma.studioPost.updateMany({
-      where: {
-        userId: user.id,
-        ...(wid ? { workspaceId: wid } : {}),
-        archived: false,
-      },
-      data: { archived: true, archivedAt: new Date() },
-    });
-    archivedCount = moved.count;
-  } else {
-    // Same website regenerate → archive prior drafts/scheduled (keep published locked active)
-    const moved = await prisma.studioPost.updateMany({
-      where: {
-        userId: user.id,
-        ...(wid ? { workspaceId: wid } : {}),
-        archived: false,
-        status: { in: ["draft", "scheduled"] },
-        ...(origin ? { OR: [{ websiteOrigin: origin }, { websiteOrigin: null }] } : {}),
-      },
-      data: { archived: true, archivedAt: new Date() },
-    });
-    archivedCount = moved.count;
-  }
+  // Generation must not archive, delete, publish, or reschedule existing posts.
+  const archivedCount = 0;
 
   // Locked fingerprints for this user (never regenerate / republish same combo)
   const locked = await prisma.studioPost.findMany({
