@@ -8,6 +8,7 @@ import { sendRegistrationEmailOtp, sendPasswordResetEmail, normalizePhone } from
 import { validatePasswordStrength, PASSWORD_HINT } from "../password.js";
 import { signUserSession } from "../middleware/userAuth.js";
 import { validateRegistrationEmail } from "../emailPolicy.js";
+import { safeCreditInt } from "../credits.js";
 
 const OTP_TTL_MS = 10 * 60 * 1000; // 10 minutes
 const IS_PRODUCTION = process.env.NODE_ENV === "production";
@@ -246,7 +247,7 @@ export async function attachCard({ email, cardNumber, expMonth, expYear, cvc, br
       cardBrand: brand || detectBrand(digits),
       stripePaymentMethodId: IS_PRODUCTION ? null : `pm_dev_${last4}_${Date.now()}`,
       accountStatus: "trial",
-      remainingCredits: freePlan?.monthlyCredits ?? 10,
+      remainingCredits: safeCreditInt(freePlan?.monthlyCredits ?? 10),
       packageId: freePlan?.id || user.packageId,
     },
     include: { package: true },

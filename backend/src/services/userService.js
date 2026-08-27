@@ -1,5 +1,5 @@
 import prisma from "../db.js";
-import { usdCostToCredits, getFixedCost, fixedActionUsd } from "../credits.js";
+import { usdCostToCredits, getFixedCost, fixedActionUsd, safeCreditInt } from "../credits.js";
 import { recordPayment } from "./adminService.js";
 import { callOpenRouter, extractUsage } from "../openrouter.js";
 import { ACTION_MODELS } from "../credits.js";
@@ -435,7 +435,7 @@ export async function subscribeUser({ email, planSlug, gateway, gatewaySubId }) 
     where: { id: user.id },
     data: {
       packageId: plan.id,
-      remainingCredits: plan.monthlyCredits,
+      remainingCredits: safeCreditInt(plan.monthlyCredits),
       accountStatus: plan.priceUsd === 0 ? "trial" : "active",
     },
   });
@@ -504,7 +504,7 @@ export async function renewSubscription(userId) {
 
   await prisma.user.update({
     where: { id: userId },
-    data: { remainingCredits: user.package.monthlyCredits },
+    data: { remainingCredits: safeCreditInt(user.package.monthlyCredits) },
   });
 
   if (user.subscriptions[0]) {

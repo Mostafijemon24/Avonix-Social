@@ -191,10 +191,17 @@ export default function AdminUsersPage() {
             <label className="text-slate-500 font-bold block mb-1">Credits (optional)</label>
             <input
               type="number"
+              min={0}
+              max={2147483647}
               value={form.credits}
               onChange={(e) => setForm((f) => ({ ...f, credits: e.target.value }))}
+              placeholder="Leave blank for plan default"
               className="w-full border border-navy-700 bg-navy-950 rounded-xl p-2.5 text-white"
             />
+            <p className="text-[10px] text-slate-500 mt-1">
+              Leave blank for the plan default. For unlimited, tick the checkbox below — do not
+              type a huge number.
+            </p>
           </div>
           <div className="md:col-span-3 grid grid-cols-1 md:grid-cols-2 gap-3">
             <PasswordField

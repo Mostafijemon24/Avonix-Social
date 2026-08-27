@@ -3,6 +3,7 @@ import bcrypt from "bcryptjs";
 import { setConfig, getAllConfig, syncConfigToEnv, clearConfigCache } from "./configService.js";
 import { validatePasswordStrength, PASSWORD_HINT } from "../password.js";
 import { sendAdminWelcomeEmail } from "./notifyService.js";
+import { creditsNeedUnlimited, safeCreditInt } from "../credits.js";
 
 export {
   adminLoginStep1,
@@ -211,6 +212,12 @@ export async function createUser({
   const passwordHash = await bcrypt.hash(password, 12);
   const accountStatus = plan.slug === "free" ? "trial" : "active";
 
+  const typedCredits = credits != null && String(credits).trim() !== "" ? Number(credits) : null;
+  const unlimited = !!unlimitedCredits || creditsNeedUnlimited(typedCredits);
+  const remainingCredits = unlimited
+    ? 0
+    : safeCreditInt(typedCredits != null ? typedCredits : plan.monthlyCredits);
+
   const user = await prisma.user.create({
     data: {
       email: normalized,
@@ -219,8 +226,8 @@ export async function createUser({
       company: company || null,
       passwordHash,
       packageId: plan.id,
-      remainingCredits: credits != null ? Number(credits) : plan.monthlyCredits,
-      unlimitedCredits: !!unlimitedCredits,
+      remainingCredits,
+      unlimitedCredits: unlimited,
       notes: notes || null,
       source,
       // Admin-provisioned users can sign in immediately (no OTP/card funnel)
@@ -291,14 +298,21 @@ export async function updateUser(userId, data) {
   if (data.company !== undefined) update.company = data.company;
   if (data.notes !== undefined) update.notes = data.notes;
   if (data.unlimitedCredits !== undefined) update.unlimitedCredits = !!data.unlimitedCredits;
-  if (data.credits !== undefined) update.remainingCredits = Number(data.credits);
+  if (data.credits !== undefined) {
+    if (creditsNeedUnlimited(data.credits)) {
+      update.unlimitedCredits = true;
+      update.remainingCredits = 0;
+    } else {
+      update.remainingCredits = safeCreditInt(data.credits);
+    }
+  }
 
   if (data.planSlug) {
     const plan = await prisma.package.findUnique({ where: { slug: data.planSlug } });
     if (!plan) return { ok: false, error: "Plan not found" };
     update.packageId = plan.id;
     if (data.credits === undefined && data.resetCreditsOnPlanChange) {
-      update.remainingCredits = plan.monthlyCredits;
+      update.remainingCredits = safeCreditInt(plan.monthlyCredits);
     }
   }
 
@@ -355,7 +369,7 @@ export async function createPlan(data) {
     data: {
       slug,
       name: data.name || slug,
-      monthlyCredits: Number(data.monthlyCredits ?? 0),
+      monthlyCredits: safeCreditInt(data.monthlyCredits),
       priceUsd: Number(data.priceUsd ?? 0),
       renewalDays: Number(data.renewalDays ?? 30),
       isActive: data.isActive !== false,
@@ -479,7 +493,7 @@ export async function updatePlan(slug, data) {
     data: {
       ...(data.name !== undefined ? { name: data.name } : {}),
       ...(data.monthlyCredits !== undefined
-        ? { monthlyCredits: Number(data.monthlyCredits) }
+        ? { monthlyCredits: safeCreditInt(data.monthlyCredits) }
         : {}),
       ...(data.priceUsd !== undefined ? { priceUsd: Number(data.priceUsd) } : {}),
       ...(data.renewalDays !== undefined ? { renewalDays: Number(data.renewalDays) } : {}),

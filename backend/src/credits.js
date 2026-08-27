@@ -14,6 +14,25 @@ export const CREDITS_PER_DOLLAR = Number(process.env.CREDITS_PER_DOLLAR || 100);
 export const MARGIN_MULTIPLIER = Number(process.env.MARGIN_MULTIPLIER || 1.3);
 export const MIN_CREDITS_PER_REQUEST = 1;
 
+/** Prisma `Int` / SQLite INT32 max. Larger values must use `unlimitedCredits`. */
+export const MAX_STORED_CREDITS = 2_147_483_647;
+
+/**
+ * Clamp a credit amount into a Prisma Int. Non-finite → 0.
+ * Values above MAX_STORED_CREDITS do not fit remainingCredits.
+ */
+export function safeCreditInt(value, fallback = 0) {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return Math.max(0, Math.floor(Number(fallback) || 0));
+  return Math.min(MAX_STORED_CREDITS, Math.floor(n));
+}
+
+/** True when the admin typed a number that cannot be stored as remainingCredits. */
+export function creditsNeedUnlimited(value) {
+  const n = Number(value);
+  return Number.isFinite(n) && n > MAX_STORED_CREDITS;
+}
+
 /** Fixed credit costs for non-AI actions (sitemap parse, etc.) */
 export const FIXED_ACTION_COSTS = {
   sitemap_parse: 1,
