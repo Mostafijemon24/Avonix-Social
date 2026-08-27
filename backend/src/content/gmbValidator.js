@@ -12,6 +12,7 @@ import {
   extractStreetAddresses,
   firstNChars,
   getGmbCategory,
+  isFabricatedServiceName,
   isGmbCategoryId,
   digitsOnly,
 } from "./gmbContentRules.js";
@@ -31,6 +32,31 @@ function looksLikeQuestion(text) {
   return /(\?|when should|do i need|how (do|can|long|much)|what happens|how to know|should i|why do)/i.test(
     text
   );
+}
+
+function hasQuestionMark(text) {
+  return String(text || "").includes("?");
+}
+
+function questionRelevantToSource(front, keywords = {}, sourceTitle = "") {
+  if (!hasQuestionMark(front)) return false;
+  const hay = String(front || "").toLowerCase();
+  const tokens = `${keywords.primary || ""} ${sourceTitle || ""}`
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((w) => w.length >= 4);
+  if (!tokens.length) return true;
+  return tokens.some((t) => hay.includes(t));
+}
+
+function extractBulletItems(text) {
+  return String(text || "")
+    .split("\n")
+    .map((line) => {
+      const m = line.match(/^\s*(?:[•\-\*]|\d+[.)])\s*(.+)$/);
+      return m ? m[1].trim() : "";
+    })
+    .filter(Boolean);
 }
 
 function looksLikeOffer(text) {
@@ -79,11 +105,16 @@ function structureHits(categoryId, content) {
   };
 
   if (categoryId === GMB_CATEGORY_IDS.INTENT_PROXIMITY) {
+    const items = extractBulletItems(text);
+    const realBullets = items.filter((b) => !isFabricatedServiceName(b));
+    const mentionsServices =
+      /core services/i.test(text) ||
+      /\bwe (offer|provide|specialize|fix|repair|help with)\b/i.test(text);
     return {
       hook: hasLocalIntent(firstNChars(text)) || hasLocalIntent(text.slice(0, 220)),
-      proximity: /\b(located|in |near |open |hours|walk-in|same-day|neighborhood|street)\b/i.test(text),
-      services: bullets >= 3 || /\n\s*[•\-\*]/.test(text),
-      why: /\b(why |choose |team |experience|because |trusted|professional)\b/i.test(text),
+      proximity: /\b(located|in |near |open |hours|walk-in|same-day|neighborhood|street|around )\b/i.test(text),
+      services: realBullets.length >= 1 || (mentionsServices && items.length === 0),
+      why: /\b(why |choose |team |because |trusted|professional|straightforward|local team)\b/i.test(text),
       ...common,
     };
   }
@@ -106,7 +137,7 @@ function structureHits(categoryId, content) {
     };
   }
   return {
-    hook: looksLikeQuestion(firstNChars(text)),
+    hook: hasQuestionMark(firstNChars(text)) && looksLikeQuestion(firstNChars(text)),
     answer: text.trim().length > 80,
     tips: bullets >= 2,
     local: /\b(in |local|our team|community|near |city)\b/i.test(lower),
@@ -155,11 +186,18 @@ export function findUnverifiedNapIssues(content, business = {}) {
   }
   if (
     !String(business.differentiators || "").trim() &&
-    /\b(\d+\+?\s+years?(\s+of)?(\s+experience)?|years of experience|award-?winning|certified|board-certified|accredited)\b/i.test(
+    /\b(\d+\+?\s+years?(\s+of)?(\s+experience)?|years of experience|over a decade|more than a decade|decades of experience|decade of experience|award-?winning|certified|board-certified|accredited)\b/i.test(
       body
     )
   ) {
     issues.push("Contains unverified experience, certification, or award language.");
+  }
+  if (
+    /\bphone not provided\b|\bno phone\b|\bn\/a phone\b|\bphone unavailable\b|\b(?:phone|address|hours)(?:\s+(?:is|are))?\s+not provided\b/i.test(
+      body
+    )
+  ) {
+    issues.push("Contains a missing-field placeholder such as 'Phone not provided'.");
   }
   return issues;
 }
@@ -184,6 +222,7 @@ export function validateGmbPost({
   location,
   keywords = {},
   business = {},
+  sourceTitle = "",
 }) {
   const issues = [];
   const cat = isGmbCategoryId(categoryId)
@@ -226,9 +265,16 @@ export function validateGmbPost({
       issues.push("First 150 characters are missing the primary trust / authority message.");
     }
   } else if (cat.id === GMB_CATEGORY_IDS.FAQ_EDUCATIONAL) {
-    if (!looksLikeQuestion(front)) {
+    if (!hasQuestionMark(front)) {
       issues.push("First 150 characters are missing the customer question / topic.");
+    } else if (!questionRelevantToSource(front, keywords, sourceTitle)) {
+      issues.push("First 150 characters contain a question that is not relevant to the selected source.");
     }
+  }
+
+  const fabricatedServices = extractBulletItems(body).filter((b) => isFabricatedServiceName(b));
+  if (fabricatedServices.length) {
+    issues.push("Contains fabricated service names (educational tips labeled as Core Services).");
   }
 
   const hits = structureHits(cat.id, body);
@@ -271,7 +317,10 @@ export function validateGmbPost({
       i.includes("NO_VERIFIED") ||
       i.includes("not in verified business data") ||
       i.includes("fabricated placeholder") ||
-      i.includes("unverified experience")
+      i.includes("unverified experience") ||
+      i.includes("missing-field placeholder") ||
+      i.includes("fabricated service") ||
+      i.includes("not relevant to the selected source")
   );
 
   const targetOnly = issues.length > 0 && issues.every((i) => i.includes("outside the"));

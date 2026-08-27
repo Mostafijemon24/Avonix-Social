@@ -35,8 +35,10 @@ import {
   isGmbCategoryId,
   pickRelevantSourcePage,
   resolveGmbCta,
+  gmbCtaInstruction,
   stripUnverifiedNap,
   ensureGmbHashtags,
+  extractVerifiedServices,
   uiCatalog as gmbUiCatalog,
 } from "../content/gmbContentRules.js";
 import { validateGmbPost, validateSocialPost } from "../content/gmbValidator.js";
@@ -764,16 +766,18 @@ function buildGmbTemplatePost({
   url,
   business = {},
   sourceTitle,
+  sourcePage,
+  selectedPages,
 }) {
   const cat = getGmbCategory(categoryId);
   const place = normalizeLocation(location) || "your area";
   const primary = polishKeyword(keywords.primary, place);
-  const rawSecondary =
-    keywords.secondaryKeywords || keywords.general || keywords.secondary || [];
-  const secondaryList = (Array.isArray(rawSecondary) ? rawSecondary : [rawSecondary])
-    .map((x) => polishKeyword(x, place))
-    .filter(Boolean);
-  const services = secondaryList.slice(0, 6);
+  const services = extractVerifiedServices({
+    keywords,
+    sourcePage: sourcePage || { title: sourceTitle, url, keywords },
+    selectedPages: selectedPages || [],
+    business,
+  });
   const cta = resolveGmbCta(categoryId, business);
   const name = String(business.name || "").trim();
   const address = String(business.address || "").trim();
@@ -783,14 +787,7 @@ function buildGmbTemplatePost({
   const displayName = name || "Our team";
 
   const nap = [name, address, phone, hours].filter(Boolean).join("\n");
-  const ctaLine =
-    cta === "CALL NOW"
-      ? `Click "Call Now" to speak with our team.`
-      : cta === "BOOK"
-        ? `Click "Book" to schedule with our ${city} team.`
-        : cta === "SIGN UP"
-          ? `Click "Sign Up" to take the next step.`
-          : `Click "Learn More" to read the details on this page.`;
+  const ctaLine = gmbCtaInstruction(cta);
 
   const cityTag = city.replace(/[^\w]/g, "");
   const svcTag = primary.replace(/[^\w]/g, "");
@@ -801,16 +798,16 @@ function buildGmbTemplatePost({
 
   let heading = "";
   let body = "";
+  const serviceBlock = services.length
+    ? `Core services:\n${services.map((s) => `• ${s}`).join("\n")}`
+    : "";
 
   if (cat.id === GMB_CATEGORY_IDS.INTENT_PROXIMITY) {
     heading = `Looking for ${primary} near you in ${city}?`;
     body = `${heading} ${displayName} is ready to help nearby customers in ${place} who need ${primary} today.
 
 We serve local families and businesses around ${city} with clear communication and practical next steps.${hours ? ` Hours: ${hours}.` : ""}
-
-Core services:
-${(services.length ? services : [primary]).map((s) => `• ${s}`).join("\n")}
-
+${serviceBlock ? `\n${serviceBlock}\n` : ""}
 Why choose us: our ${city} team focuses on reliable ${primary}${services[0] ? ` and ${services[0]}` : ""}, with straightforward guidance from the first call. We do not make unverified ranking claims — we let verified work and local availability speak for us.
 
 ${nap}
@@ -891,10 +888,9 @@ function padGmbToTarget(text, { primary, place, name, services, ctaLine }) {
   if (tags) body = body.slice(0, -tags.length).trim();
 
   const verifiedBits = [
-    place && `${primary} for people in ${place} starts with a clear local next step.`.trim(),
-    services?.[0] && `Verified services from the selected pages include ${services.filter(Boolean).slice(0, 4).join(", ")}.`,
+    place && primary && `${primary} for people in ${place} starts with a clear local next step.`.trim(),
     ctaLine,
-    name && place && `${name} helps customers looking for ${primary} in ${place}.`,
+    name && place && primary && `${name} helps customers looking for ${primary} in ${place}.`,
   ].filter(Boolean);
 
   let i = 0;
@@ -985,8 +981,10 @@ export function generatePostContent(platform, keywords, location, url, tone, opt
   )
     .map((x) => polishKeyword(x, place))
     .filter(Boolean);
-  while (secondaryList.length < 4) {
-    secondaryList.push(polishKeyword(`${primary} related ${secondaryList.length + 1}`, place));
+  if (platform !== "GMB") {
+    while (secondaryList.length < 4) {
+      secondaryList.push(polishKeyword(`${primary} related ${secondaryList.length + 1}`, place));
+    }
   }
   const secondary = secondaryList[0];
   const g = secondaryList.slice();
@@ -1087,6 +1085,8 @@ Leaders evaluating ${promo} should prioritize process transparency, measurable m
       url,
       business: options.business || {},
       sourceTitle: options.sourceTitle || "",
+      sourcePage: options.sourcePage,
+      selectedPages: options.selectedPages,
     });
     heading = gmb.heading;
     plain = gmb.content;
@@ -1135,6 +1135,7 @@ Leaders evaluating ${promo} should prioritize process transparency, measurable m
           location: place,
           keywords,
           business: options.business || {},
+          sourceTitle: options.sourceTitle || "",
         })
       : null;
   const socialValidation =
@@ -1357,6 +1358,7 @@ async function generateGmbWithMasterRules({
       location,
       keywords,
       business,
+      sourceTitle: options.sourceTitle || sourcePage?.title || "",
     });
     return {
       heading,
@@ -1379,20 +1381,14 @@ async function generateGmbWithMasterRules({
   const polishGmbCandidate = (heading, content, provider) => {
     const place = normalizeLocation(location) || "";
     const primary = polishKeyword(keywords.primary, place);
-    const rawServices = keywords.secondaryKeywords || keywords.general || keywords.secondary || [];
-    const services = (Array.isArray(rawServices) ? rawServices : [rawServices])
-      .map((x) => polishKeyword(x, place))
-      .filter(Boolean)
-      .slice(0, 6);
+    const services = extractVerifiedServices({
+      keywords,
+      sourcePage,
+      selectedPages,
+      business,
+    });
     const cta = resolveGmbCta(categoryId, { ...business, offerSummary: verifiedOffer.summary });
-    const ctaLine =
-      cta === "CALL NOW"
-        ? `Click "Call Now" to speak with our team.`
-        : cta === "BOOK"
-          ? `Click "Book" to schedule with our team.`
-          : cta === "SIGN UP"
-            ? `Click "Sign Up" to take the next step.`
-            : `Click "Learn More" to read the details on this page.`;
+    const ctaLine = gmbCtaInstruction(cta);
     let next = stripUnverifiedNap(content, business);
     next = ensureGmbHashtags(next, {
       location: place,
@@ -1470,6 +1466,13 @@ async function generateGmbWithMasterRules({
               categoryId,
               content: result.content,
               issues: result.validation?.issues || [],
+              verifiedServices: extractVerifiedServices({
+                keywords,
+                sourcePage,
+                selectedPages,
+                business,
+              }),
+              sourceTitle: options.sourceTitle || sourcePage?.title || "",
             }),
           },
         ],
@@ -1613,12 +1616,7 @@ function packKeywordResult(keywords, page, location) {
     keywords.general ||
     [keywords.secondary].filter(Boolean);
 
-  const secondaryKeywords = [...secondary].slice(0, 4);
-  while (secondaryKeywords.length < 4) {
-    secondaryKeywords.push(
-      polishKeyword(`${keywords.primary} related ${secondaryKeywords.length + 1}`, location)
-    );
-  }
+  const secondaryKeywords = [...secondary].map(String).map((s) => s.trim()).filter(Boolean).slice(0, 8);
 
   return {
     primary: keywords.primary,
@@ -1941,10 +1939,7 @@ export async function generateAutoPosterSuite({
           : Array.isArray(p.keywords?.general)
             ? p.keywords.general
             : [p.keywords?.secondary].filter(Boolean);
-      const secondaryKeywords = secondary.map(String).filter(Boolean).slice(0, 4);
-      while (secondaryKeywords.length < 4) {
-        secondaryKeywords.push(`${p.keywords?.primary || "local service"} tip ${secondaryKeywords.length + 1}`);
-      }
+      const secondaryKeywords = secondary.map(String).filter(Boolean).slice(0, 8);
       return {
         url: normalizeUrl(p.url) || p.url,
         reachable: p.reachable !== false,
@@ -2264,6 +2259,25 @@ export async function generateAutoPosterSuite({
   };
 }
 
+function liveGmbValidation(row, packed) {
+  const meta = packed.meta || {};
+  const gmbCategory =
+    meta.gmbCategory ||
+    (row.platform === "GMB" && isGmbCategoryId(row.tone) ? row.tone : null);
+  return validateGmbPost({
+    content: row.content,
+    heading: row.heading,
+    categoryId: gmbCategory || GMB_CATEGORY_IDS.INTENT_PROXIMITY,
+    location: row.location,
+    keywords: {
+      primary: row.primaryKeyword,
+      secondary: row.secondaryKeyword,
+      general: packed.keywords,
+    },
+    sourceTitle: meta.sourceTitle || "",
+  });
+}
+
 function serializePost(row) {
   const packed = unpackKeywordPack(row.generalKeywords);
   const general = packed.keywords;
@@ -2272,25 +2286,15 @@ function serializePost(row) {
     meta.gmbCategory ||
     (row.platform === "GMB" && isGmbCategoryId(row.tone) ? row.tone : null);
   const validation =
-    meta.validation ||
-    (row.platform === "GMB"
-      ? validateGmbPost({
-          content: row.content,
-          heading: row.heading,
-          categoryId: gmbCategory || GMB_CATEGORY_IDS.INTENT_PROXIMITY,
-          location: row.location,
-          keywords: {
-            primary: row.primaryKeyword,
-            secondary: row.secondaryKeyword,
-            general,
-          },
-        })
-      : validateSocialPost({
+    row.platform === "GMB"
+      ? liveGmbValidation(row, packed)
+      : meta.validation ||
+        validateSocialPost({
           content: row.content,
           platform: row.platform,
           minWords: PLATFORM_CONFIG[row.platform]?.minWords,
           maxWords: PLATFORM_CONFIG[row.platform]?.maxWords,
-        }));
+        });
   return {
     id: row.id,
     url: row.sourceUrl,
@@ -2352,6 +2356,29 @@ export async function listStudioPosts({
     where,
     orderBy: { updatedAt: "desc" },
   });
+
+  for (const row of rows) {
+    if (row.platform !== "GMB") continue;
+    if (row.archived || row.status !== "draft") continue;
+    const packed = unpackKeywordPack(row.generalKeywords);
+    const stored = packed.meta?.validation;
+    if (!stored?.ready) continue;
+    const live = liveGmbValidation(row, packed);
+    if (live.ready) continue;
+    try {
+      await prisma.studioPost.update({
+        where: { id: row.id },
+        data: {
+          generalKeywords: packKeywordPack(packed.keywords, {
+            ...packed.meta,
+            validation: live,
+          }),
+        },
+      });
+    } catch {
+      /* listing still returns live validation even if persist fails */
+    }
+  }
 
   return { ok: true, posts: rows.map(serializePost), archived: includeAll ? null : where.archived };
 }

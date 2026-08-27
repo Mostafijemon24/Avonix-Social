@@ -74,7 +74,7 @@ export const GMB_CATEGORIES = Object.freeze({
       { key: "napCta", label: "NAP + Conversion CTA" },
       { key: "hashtags", label: "Local hashtags (4–5)" },
     ],
-    servicesCount: { min: 4, max: 7 },
+    servicesCount: { min: 1, max: 7 },
     objective:
       "Capture high-intent mobile, Google Maps, voice and AI-driven local searches.",
     systemPrompt: `You are an expert Local SEO and Google Business Profile (GBP) strategist.
@@ -97,7 +97,7 @@ Do not keyword-stuff. Use natural language useful to real customers.
 MANDATORY STRUCTURE (do not omit, merge away, or rearrange)
 1. Local Search Hook — headline targeting primary service + city with near-me intent.
 2. Proximity & Availability — city, street or neighborhood, service area, hours, convenience (only if factually true: walk-ins, 24/7, same-day, fast response, no appointment, book today).
-3. Core Services — 4–7 relevant services/conditions/products/solutions from VERIFIED source pages only.
+3. Core Services — list ONLY verified actual services from the selected source, website analysis, or workspace data. One real service is enough. Never invent extra services, never turn keywords into "Tip 2/3/4", and never pad with educational tips labeled as services.
 4. Why Choose Us — verified differentiators only. NEVER invent #1, best, or top-rated unless factually supported in the source data.
 5. NAP + Conversion CTA — Business Name, Exact Address, Phone, Hours (only when provided). Then a direct CTA instruction matching the recommended button. Then 4–5 relevant local hashtags.
 
@@ -242,7 +242,7 @@ Professional, authoritative, reassuring, local, evidence-based, conversion-focus
     frontLoad: {
       require: ["question"],
       description:
-        "Main customer question or topic must appear within the first 150 characters. Answer immediately.",
+        "A source-supported customer question ending with a question mark must appear within the first 150 characters. Answer immediately.",
     },
     structure: [
       { key: "hook", label: "Question Hook" },
@@ -264,7 +264,7 @@ MANDATORY LENGTH
 1,000–1,100 characters including spaces. Target 1,020–1,050. Never silently truncate.
 
 MANDATORY FRONT-LOADING
-Put the main customer question/topic within the first 150 characters.
+The first 150 characters MUST contain a natural question that ends with a question mark, based on the selected source (for example "Need help with…?", "Wondering how to…?", "How do you…?"). Do not use a generic unrelated question.
 Answer the question immediately — do not add a long introduction.
 
 MANDATORY STRUCTURE (do not omit)
@@ -311,8 +311,8 @@ export function getGmbCategory(id) {
 
 export function resolveGmbCta(categoryId, business = {}) {
   const cat = getGmbCategory(categoryId);
-  if (categoryId === GMB_CATEGORY_IDS.INTENT_PROXIMITY && business.phone) {
-    return CTA.CALL_NOW;
+  if (categoryId === GMB_CATEGORY_IDS.INTENT_PROXIMITY) {
+    return business.phone ? CTA.CALL_NOW : CTA.LEARN_MORE;
   }
   if (categoryId === GMB_CATEGORY_IDS.OFFER_PROMOTION_EVENT) {
     if (/event|register|registration|open house/i.test(String(business.offerSummary || ""))) {
@@ -320,7 +320,20 @@ export function resolveGmbCta(categoryId, business = {}) {
     }
     return CTA.SIGN_UP;
   }
+  if (categoryId === GMB_CATEGORY_IDS.AUTHORITY_TRUST_PROOF) {
+    return business.phone ? CTA.BOOK : CTA.LEARN_MORE;
+  }
   return cat.defaultCta || CTA.LEARN_MORE;
+}
+
+export function gmbCtaInstruction(cta) {
+  if (cta === CTA.CALL_NOW) return `Click "Call Now" to speak with our team.`;
+  if (cta === CTA.BOOK) return `Click "Book" to schedule with our team.`;
+  if (cta === CTA.SIGN_UP) return `Click "Sign Up" to take the next step.`;
+  if (cta === CTA.GET_DIRECTIONS) return `Click "Get Directions" for our location.`;
+  if (cta === CTA.CONTACT_US) return `Click "Contact Us" to reach our team.`;
+  if (cta === CTA.VISIT_WEBSITE) return `Click "Visit Website" to read the details on this page.`;
+  return `Click "Learn More" to read the details on this page.`;
 }
 
 const OFFER_SIGNAL =
@@ -490,9 +503,92 @@ export function extractStreetAddresses(text) {
   return String(text || "").match(STREET_RE) || [];
 }
 
+const FABRICATED_SERVICE_RE = /\b(?:tip|related)\s+\d+\b/i;
+const EDUCATIONAL_LABEL_RE =
+  /\b(tips?|guide|how to|what is|faq|blog|step[- ]by[- ]step|tutorial)\b/i;
+const SERVICE_SIGNAL_RE =
+  /\b(repair|service|services|design|hosting|seo|ssl|wordpress|malware|recovery|setup|development|marketing|fix|security|optimization)\b/i;
+const MISSING_FIELD_RE =
+  /\b(?:phone|address|hours|email)(?:\s+(?:is|are|number|info|information))?\s*(?::\s*)?(?:not provided|unavailable|n\/a|unknown|none)\b/gi;
+const PHONE_PLACEHOLDER_RE =
+  /\bphone not provided\b|\bno phone\b|\bn\/a phone\b|\bphone unavailable\b|\bphone:\s*(?:n\/a|none|not provided|unavailable|-)\b/gi;
+const UNVERIFIED_EXPERIENCE_RE =
+  /\b(?:with\s+)?(?:over\s+|more than\s+)?\d+\+?\s+years?(?:\s+of)?(?:\s+experience)?\b|\byears of experience\b|\bover a decade\b|\bmore than a decade\b|\bdecades of experience\b|\bdecade of experience\b/gi;
+
+export function isFabricatedServiceName(name) {
+  const s = String(name || "").trim();
+  if (!s) return true;
+  if (FABRICATED_SERVICE_RE.test(s)) return true;
+  if (/^local service$/i.test(s)) return true;
+  return false;
+}
+
+export function looksLikeEducationalLabel(name) {
+  return EDUCATIONAL_LABEL_RE.test(String(name || ""));
+}
+
+function keywordList(keywords = {}) {
+  const raw =
+    keywords.secondaryKeywords || keywords.general || keywords.secondary || [];
+  return (Array.isArray(raw) ? raw : [raw]).map(String).map((s) => s.trim()).filter(Boolean);
+}
+
+/**
+ * Actual business services only. Keywords and educational tips are not services.
+ */
+export function extractVerifiedServices({
+  keywords = {},
+  sourcePage = {},
+  selectedPages = [],
+  business = {},
+} = {}) {
+  const out = [];
+  const seen = new Set();
+  const push = (raw, { allowEducational = false } = {}) => {
+    const s = String(raw || "")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (!s || s.length < 3 || s.length > 80) return;
+    if (isFabricatedServiceName(s)) return;
+    if (!allowEducational && looksLikeEducationalLabel(s) && !SERVICE_SIGNAL_RE.test(s)) return;
+    const key = s.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push(s);
+  };
+
+  push(keywords.primary);
+  keywordList(keywords).forEach((s) => push(s));
+  push(sourcePage?.keywords?.primary);
+  keywordList(sourcePage?.keywords || {}).forEach((s) => push(s));
+  if (sourcePage?.title && !looksLikeEducationalLabel(sourcePage.title)) {
+    push(sourcePage.title);
+  }
+  for (const page of selectedPages) {
+    push(page?.keywords?.primary);
+    keywordList(page?.keywords || {}).forEach((s) => push(s));
+  }
+  const listed = business.services;
+  if (Array.isArray(listed)) listed.forEach((s) => push(s, { allowEducational: false }));
+  else if (listed) String(listed).split(/[,;]/).forEach((s) => push(s));
+
+  return out.slice(0, 7);
+}
+
+export function stripFabricatedServiceLines(text) {
+  return String(text || "")
+    .split("\n")
+    .filter((line) => {
+      const bullet = line.match(/^\s*(?:[•\-\*]|\d+[.)])\s*(.+)$/);
+      if (!bullet) return true;
+      return !isFabricatedServiceName(bullet[1]);
+    })
+    .join("\n");
+}
+
 /**
  * Remove NAP claims that are not present in verified business data.
- * City/location strings are left intact.
+ * City/location strings are left intact. Never leave "not provided" placeholders.
  */
 export function stripUnverifiedNap(text, business = {}) {
   let body = String(text || "");
@@ -508,16 +604,19 @@ export function stripUnverifiedNap(text, business = {}) {
     body = body.replace(HOURS_CLAIM_RE, "");
   }
   body = body.replace(FABRICATED_NAP_RE, "");
+  body = body.replace(PHONE_PLACEHOLDER_RE, "");
+  body = body.replace(MISSING_FIELD_RE, "");
   if (!String(business.differentiators || "").trim()) {
-    body = body.replace(/\b(?:with\s+)?(?:over\s+)?\d+\+?\s+years?(?:\s+of)?(?:\s+experience)?\b/gi, "");
-    body = body.replace(/\byears of experience\b/gi, "");
+    body = body.replace(UNVERIFIED_EXPERIENCE_RE, "");
     body = body.replace(/\baward-?winning\b/gi, "");
   }
+  body = stripFabricatedServiceLines(body);
   return body
     .replace(/[ \t]+\n/g, "\n")
     .replace(/\n{3,}/g, "\n\n")
     .replace(/[ \t]{2,}/g, " ")
     .replace(/[ ,]{2,}/g, " ")
+    .replace(/\.\s*\./g, ".")
     .trim();
 }
 
@@ -593,6 +692,12 @@ function buildUserContext({
     []
   );
   const secondaryList = Array.isArray(secondary) ? secondary : [secondary].filter(Boolean);
+  const verifiedServices = extractVerifiedServices({
+    keywords,
+    sourcePage,
+    selectedPages,
+    business,
+  });
 
   const pageLines = selectedPages
     .map((p) => {
@@ -601,15 +706,19 @@ function buildUserContext({
     })
     .join("\n");
 
+  const omit = "OMIT — do not mention this field at all. Never write 'not provided'.";
   const facts = [
-    `Business name: ${business.name || "(not provided — do not invent)"}`,
-    `Location / city: ${location || business.city || "(not provided — do not invent)"}`,
-    `Exact address: ${business.address || "(not provided — do not invent)"}`,
-    `Phone: ${business.phone || "(not provided — do not invent)"}`,
-    `Hours: ${business.hours || "(not provided — do not invent)"}`,
-    `Verified differentiators: ${business.differentiators || "(none provided — do not invent)"}`,
+    `Business name: ${business.name || omit}`,
+    `Location / city: ${location || business.city || omit}`,
+    `Exact address: ${business.address || omit}`,
+    `Phone: ${business.phone || omit}`,
+    `Hours: ${business.hours || omit}`,
+    `Verified differentiators: ${business.differentiators || omit}`,
     `Verified offer/event: ${
       verifiedOffer?.found ? verifiedOffer.summary : "(none — do not invent an offer)"
+    }`,
+    `Verified actual services (Core Services may use ONLY these; never invent Tip 2/3/4): ${
+      verifiedServices.length ? verifiedServices.join("; ") : "(none — do not invent service names)"
     }`,
   ].join("\n");
 
@@ -646,28 +755,73 @@ OUTPUT RULES
 - Include 4–5 relevant hashtags on the last line.
 - The heading/hook is mandatory and category-specific (${cat.hookName}).
 - Stay within ${GMB_CHAR.min}–${GMB_CHAR.max} characters including spaces.
-- NAP HARD RULE: if Exact address, Phone, or Hours are marked not provided, do not write any street address, phone number, or opening-hours claim. City from verified location may be used. Never use placeholders such as 123 Main St or (123) 456-7890.
-- Never invent NAP, ratings, credentials, offers, or statistics to hit the character target.`
+- NAP HARD RULE: if Exact address, Phone, or Hours are marked OMIT, do not write any street address, phone number, opening-hours claim, or phrases such as "Phone not provided". City from verified location may be used. Never use placeholders such as 123 Main St or (123) 456-7890.
+- Never invent NAP, ratings, credentials, offers, services, or statistics to hit the character target.
+- Keywords are wording hints only. They are not extra services. Never write "Tip 2", "Tip 3", or "related 4" as services.`
 }
 
 export function buildGmbUserPrompt(ctx) {
   return buildUserContext(ctx);
 }
 
-export function buildGmbRefinePrompt({ categoryId, content, issues }) {
+export function buildGmbRefinePrompt({
+  categoryId,
+  content,
+  issues,
+  verifiedServices = [],
+  sourceTitle = "",
+}) {
   const cat = getGmbCategory(categoryId);
-  return `Revise the following Google Business Profile post so it satisfies EVERY ${cat.label} rule.
+  const issueList = issues || [];
+  const targeted = [];
+  for (const issue of issueList) {
+    if (/Core Services/i.test(issue) || /fabricated service/i.test(issue)) {
+      targeted.push(
+        `Rewrite only the Core Services portion using ONLY these verified actual services: ${
+          verifiedServices.length
+            ? verifiedServices.join("; ")
+            : "(none — omit extra service names; describe the primary offering without inventing Tip 2/3/4)"
+        }. Do not label educational tips as services.`
+      );
+    } else if (/question/i.test(issue) || /Question Hook/i.test(issue) || /First 150/.test(issue) && cat.id === GMB_CATEGORY_IDS.FAQ_EDUCATIONAL) {
+      targeted.push(
+        `Rewrite the OPENING so a source-supported question ending with "?" appears within the first 150 characters. Base the question on "${sourceTitle || "the selected page topic"}". Keep the rest of the post. Do not use a generic unrelated question.`
+      );
+    } else if (/Need 4|hashtag/i.test(issue)) {
+      targeted.push("Adjust hashtags only: keep 4–5 relevant tags for service, industry, location, and topic. No stuffing.");
+    } else if (/below the/i.test(issue) || /too short/i.test(issue)) {
+      targeted.push("Expand using verified source facts only. Do not invent NAP, services, credentials, or offers.");
+    } else if (/above the/i.test(issue)) {
+      targeted.push("Compress without removing required factual elements, CTA, or hashtags.");
+    } else if (/unverified|fabricated placeholder|not in verified/i.test(issue)) {
+      targeted.push("Remove the unverified claim entirely. Do not replace it with another invented credential, phone, address, or statistic.");
+    } else if (/Phone not provided|not provided/i.test(issue)) {
+      targeted.push("Delete any 'not provided' / missing-field language. If a NAP field is unknown, omit it.");
+    } else if (/Missing a direct CTA/i.test(issue)) {
+      targeted.push("Add the recommended CTA instruction. Do not invent a phone number inside the CTA.");
+    } else if (/First 150/i.test(issue)) {
+      targeted.push(`Fix the first 150 characters only: ${cat.frontLoad.description}`);
+    }
+  }
+  if (!targeted.length) {
+    targeted.push("Meet the character target using verified source facts only.");
+  }
 
-Current issues to fix:
-${(issues || []).map((i) => `- ${i}`).join("\n") || "- meet character target"}
+  return `Revise the following Google Business Profile post with TARGETED fixes. Do not regenerate unrelated sections.
+
+Current issues:
+${issueList.map((i) => `- ${i}`).join("\n") || "- meet character target"}
+
+TARGETED REFINEMENT
+${targeted.map((t, i) => `${i + 1}. ${t}`).join("\n")}
 
 HARD RULES
 - Length ${GMB_CHAR.min}–${GMB_CHAR.max} characters including spaces (target ${GMB_CHAR.targetMin}–${GMB_CHAR.targetMax}).
 - Do not silently truncate.
-- Do not drop required sections: ${cat.structure.map((s) => s.label).join("; ")}.
-- Do not invent facts.
-- Keep the same category, tone, hook type (${cat.hookName}), CTA, NAP (only if present in the original/source), and 4–5 hashtags.
+- Do not invent facts, services, NAP, credentials, or offers.
+- Keep the same category, tone, hook type (${cat.hookName}), and source relationship.
 - Front-load requirement: ${cat.frontLoad.description}
+- Never write "Phone not provided", "N/A", or similar placeholders.
 
 Current post:
 ${content}
@@ -684,4 +838,11 @@ export function uiCatalog() {
   };
 }
 
-export { CTA as GMB_CTA, buildHashtagLine, PHONE_RE, STREET_RE, FABRICATED_NAP_RE };
+export {
+  CTA as GMB_CTA,
+  buildHashtagLine,
+  PHONE_RE,
+  STREET_RE,
+  FABRICATED_NAP_RE,
+  UNVERIFIED_EXPERIENCE_RE,
+};

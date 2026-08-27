@@ -1,6 +1,9 @@
 /**
  * GMB master-rule unit tests (no network, no ENV).
  */
+import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
 import {
   GMB_CATEGORY_IDS,
   GMB_CATEGORY_LIST,
@@ -8,8 +11,10 @@ import {
   detectVerifiedOffer,
   ensureGmbHashtags,
   extractHashtags,
+  extractVerifiedServices,
   firstNChars,
   getGmbCategory,
+  isFabricatedServiceName,
   isGmbCategoryId,
   pickRelevantSourcePage,
   recommendGmbCategory,
@@ -48,9 +53,11 @@ const catalog = uiCatalog();
 assert(catalog.categories.every((c) => c.structure.length >= 5), "each category has structure");
 assert(!JSON.stringify(catalog).includes("Act as an expert"), "UI catalog does not leak prompts");
 
-assert(resolveGmbCta(GMB_CATEGORY_IDS.INTENT_PROXIMITY) === "CALL NOW", "intent CTA");
+assert(resolveGmbCta(GMB_CATEGORY_IDS.INTENT_PROXIMITY, { phone: "(469) 392-4000" }) === "CALL NOW", "intent CTA uses Call Now only when phone is verified");
+assert(resolveGmbCta(GMB_CATEGORY_IDS.INTENT_PROXIMITY, {}) === "LEARN MORE", "intent CTA omits Call Now when phone is missing");
 assert(resolveGmbCta(GMB_CATEGORY_IDS.OFFER_PROMOTION_EVENT) === "SIGN UP", "offer CTA");
-assert(resolveGmbCta(GMB_CATEGORY_IDS.AUTHORITY_TRUST_PROOF) === "BOOK", "authority CTA");
+assert(resolveGmbCta(GMB_CATEGORY_IDS.AUTHORITY_TRUST_PROOF, { phone: "4693924000" }) === "BOOK", "authority CTA uses Book when phone exists");
+assert(resolveGmbCta(GMB_CATEGORY_IDS.AUTHORITY_TRUST_PROOF, {}) === "LEARN MORE", "authority CTA does not require a phone when none is verified");
 assert(resolveGmbCta(GMB_CATEGORY_IDS.FAQ_EDUCATIONAL) === "LEARN MORE", "faq CTA");
 
 const pages = [
@@ -197,5 +204,126 @@ assert(
   "unverified years of experience fails"
 );
 
+assert(isFabricatedServiceName("Website Repair Tip 2"), "tip 2 is a fabricated service name");
+assert(isFabricatedServiceName("Website Repair related 3"), "related N is a fabricated service name");
+assert(!isFabricatedServiceName("Website Repair"), "primary offering is not fabricated");
+
+const extracted = extractVerifiedServices({
+  keywords: {
+    primary: "website repair",
+    secondaryKeywords: ["Website Repair Tip 2", "Website Repair Tip 3", "SSL certificate"],
+  },
+  sourcePage: { title: "A step-by-step guide to e-commerce setup", keywords: { primary: "website repair" } },
+});
+assert(
+  extracted.every((s) => !/tip\s+\d/i.test(s)),
+  "service extraction drops educational tip fillers"
+);
+assert(
+  extracted.some((s) => /website repair/i.test(s)),
+  "service extraction keeps the real primary service"
+);
+assert(
+  !extracted.some((s) => /e-commerce setup/i.test(s) && /guide/i.test(s)),
+  "educational page titles are not converted into services"
+);
+
+const phonePlaceholder = stripUnverifiedNap(
+  "Mostafij Emon Houston TX. Phone not provided. Address not provided.",
+  { name: "Mostafij Emon" }
+);
+assert(!/phone not provided/i.test(phonePlaceholder), "strip removes Phone not provided");
+assert(!/address not provided/i.test(phonePlaceholder), "strip removes Address not provided");
+
+const decade = validateGmbPost({
+  content: `${"Looking for website repair near you in Houston? Local help for nearby businesses. ".repeat(10)}\nCore services:\n• Website repair\nWhy choose us: over a decade of trusted work.\nClick "Learn More" to read the details on this page.\n#Houston #WebsiteRepair #HoustonNearMe #LocalBusiness`,
+  heading: "Looking for website repair near you in Houston?",
+  categoryId: GMB_CATEGORY_IDS.INTENT_PROXIMITY,
+  location: "Houston, TX",
+  keywords: { primary: "website repair" },
+  business: {},
+});
+assert(
+  decade.issues.some((i) => /unverified experience/i.test(i)),
+  "unverified over-a-decade claim fails"
+);
+
+const fakeTips = validateGmbPost({
+  content: `${"Looking for website repair near you in Houston? Local help for nearby businesses. ".repeat(8)}\nCore services:\n• Website Repair Tip 2\n• Website Repair Tip 3\n• Website Repair Tip 4\nWhy choose us: local team.\nClick "Learn More" to read the details on this page.\n#Houston #WebsiteRepair #HoustonNearMe #LocalBusiness`,
+  heading: "Looking for website repair near you in Houston?",
+  categoryId: GMB_CATEGORY_IDS.INTENT_PROXIMITY,
+  location: "Houston, TX",
+  keywords: { primary: "website repair" },
+  business: {},
+});
+assert(
+  fakeTips.status === "NEEDS_REVISION" && fakeTips.issues.some((i) => /fabricated service/i.test(i)),
+  "fabricated Tip 2/3/4 core services fail"
+);
+
+const oneRealService = validateGmbPost({
+  content: `${"Looking for website repair near you in Houston? Mostafij Emon helps nearby customers today. ".repeat(7)}\nCore services:\n• Website Repair\nWhy choose us: our Houston team focuses on reliable website repair with straightforward guidance.\nClick "Learn More" to read the details on this page.\n#Houston #WebsiteRepair #HoustonNearMe #LocalBusiness`,
+  heading: "Looking for website repair near you in Houston?",
+  categoryId: GMB_CATEGORY_IDS.INTENT_PROXIMITY,
+  location: "Houston, TX",
+  keywords: { primary: "website repair" },
+  business: { name: "Mostafij Emon" },
+});
+assert(
+  !oneRealService.issues.some((i) => /Core Services/i.test(i)),
+  "a single verified core service is enough"
+);
+
+const faqNoQ = validateGmbPost({
+  content: `${"If your website shows a Not Secure warning it is crucial to address it immediately in Houston. ".repeat(9)}\nHelpful tips:\n• Check SSL\n• Renew the certificate\nOur Houston team can help.\nClick \"Learn More\" to read the details on this page.\n#Houston #WebsiteRepair #HoustonWebsiteRepair #LocalTips`,
+  heading: "When should I fix my Not Secure website?",
+  categoryId: GMB_CATEGORY_IDS.FAQ_EDUCATIONAL,
+  location: "Houston, TX",
+  keywords: { primary: "website repair" },
+  sourceTitle: "How to fix not secure website when SSL certificate expires",
+});
+assert(
+  faqNoQ.status === "NEEDS_REVISION" && faqNoQ.issues.some((i) => /question/i.test(i)),
+  "FAQ without a question mark in first 150 fails"
+);
+
+const faqOk = validateGmbPost({
+  content: `${"Need help with a Not Secure website warning in Houston? Renew or install an SSL certificate so visitors stay protected. ".repeat(6)}\nHelpful tips:\n• Check SSL status\n• Renew if expired\nOur Houston team can help with website repair.\nClick \"Learn More\" to read the details on this page.\n#Houston #WebsiteRepair #HoustonWebsiteRepair #LocalTips`,
+  heading: "Need help with a Not Secure website?",
+  categoryId: GMB_CATEGORY_IDS.FAQ_EDUCATIONAL,
+  location: "Houston, TX",
+  keywords: { primary: "website repair" },
+  sourceTitle: "How to fix not secure website when SSL certificate expires",
+});
+assert(/\?/.test(faqOk.frontLoad), "FAQ front-load keeps the question mark");
+assert(
+  !faqOk.issues.some((i) => /question/i.test(i)),
+  "FAQ with a source-supported question in first 150 passes the hook"
+);
+
+const placeholderFail = validateGmbPost({
+  content: `${"Looking for website repair near you in Houston? Local help for nearby businesses. ".repeat(8)}\nCore services:\n• Website Repair\nMostafij Emon Houston TX. Phone not provided.\nClick \"Learn More\" to read the details on this page.\n#Houston #WebsiteRepair #HoustonNearMe #LocalBusiness`,
+  heading: "Looking for website repair near you in Houston?",
+  categoryId: GMB_CATEGORY_IDS.INTENT_PROXIMITY,
+  location: "Houston, TX",
+  keywords: { primary: "website repair" },
+  business: { name: "Mostafij Emon" },
+});
+assert(
+  placeholderFail.status === "NEEDS_REVISION" &&
+    placeholderFail.issues.some((i) => /Phone not provided/i.test(i)),
+  "Phone not provided is a hard validation failure"
+);
+
+const here = path.dirname(fileURLToPath(import.meta.url));
+const suiteSrc = fs.readFileSync(path.join(here, "../src/services/autoPosterService.js"), "utf8");
+const genStart = suiteSrc.indexOf("export async function generateAutoPosterSuite");
+const genEnd = suiteSrc.indexOf("function liveGmbValidation");
+const genFn = suiteSrc.slice(genStart, genEnd);
+assert(/archivedCount = 0/.test(genFn), "generate suite hard-codes archivedCount 0");
+assert(!/updateMany/.test(genFn), "generate suite does not mass-update unrelated posts");
+assert(!/tip \$\{secondaryKeywords\.length/.test(genFn), "generate suite does not pad Tip N keywords");
+
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed) process.exit(1);
+
