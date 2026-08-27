@@ -508,6 +508,11 @@ export function stripUnverifiedNap(text, business = {}) {
     body = body.replace(HOURS_CLAIM_RE, "");
   }
   body = body.replace(FABRICATED_NAP_RE, "");
+  if (!String(business.differentiators || "").trim()) {
+    body = body.replace(/\b(?:with\s+)?(?:over\s+)?\d+\+?\s+years?(?:\s+of)?(?:\s+experience)?\b/gi, "");
+    body = body.replace(/\byears of experience\b/gi, "");
+    body = body.replace(/\baward-?winning\b/gi, "");
+  }
   return body
     .replace(/[ \t]+\n/g, "\n")
     .replace(/\n{3,}/g, "\n\n")

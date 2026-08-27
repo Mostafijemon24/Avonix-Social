@@ -153,6 +153,14 @@ export function findUnverifiedNapIssues(content, business = {}) {
   if (/\b123\s+main\s+st\b|\(123\)\s*456-7890/i.test(body)) {
     issues.push("Contains fabricated placeholder NAP (123 Main St / sample phone).");
   }
+  if (
+    !String(business.differentiators || "").trim() &&
+    /\b(\d+\+?\s+years?(\s+of)?(\s+experience)?|years of experience|award-?winning|certified|board-certified|accredited)\b/i.test(
+      body
+    )
+  ) {
+    issues.push("Contains unverified experience, certification, or award language.");
+  }
   return issues;
 }
 
@@ -262,7 +270,8 @@ export function validateGmbPost({
       i.includes("Missing a direct CTA") ||
       i.includes("NO_VERIFIED") ||
       i.includes("not in verified business data") ||
-      i.includes("fabricated placeholder")
+      i.includes("fabricated placeholder") ||
+      i.includes("unverified experience")
   );
 
   const targetOnly = issues.length > 0 && issues.every((i) => i.includes("outside the"));

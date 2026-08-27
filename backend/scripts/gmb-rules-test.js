@@ -184,5 +184,18 @@ const verifiedPhoneOk = validateGmbPost({
 });
 assert(!verifiedPhoneOk.issues.some((i) => /phone number/i.test(i)), "no phone is valid when phone is unverified");
 
+const fakeYears = validateGmbPost({
+  content: `${"Looking for website repair near you in Houston? Local help for nearby businesses. ".repeat(10)}\nCore services:\n• Repair\n• Malware\n• WordPress\nWhy choose us: 15 years of experience.\nClick "Call Now" to speak with our team.\n#Houston #WebsiteRepair #HoustonNearMe #LocalBusiness`,
+  heading: "Looking for website repair near you in Houston?",
+  categoryId: GMB_CATEGORY_IDS.INTENT_PROXIMITY,
+  location: "Houston, TX",
+  keywords: { primary: "website repair" },
+  business: {},
+});
+assert(
+  fakeYears.issues.some((i) => /unverified experience/i.test(i)),
+  "unverified years of experience fails"
+);
+
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed) process.exit(1);
