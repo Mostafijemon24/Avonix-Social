@@ -259,22 +259,53 @@ Admin routes are under `/api/admin/*` (JWT + 2FA protected).
 
 ## Production Deployment (VPS)
 
+Live site: **https://social.avonixai.com**  
+App path on the VPS: `/var/www/avonix-social`  
+PM2 apps: `avonix-social-web` (Next.js `:3000`) and `avonix-social-api` (Express `:4000`)
+
+### Update an existing VPS (normal deploy)
+
+From your Mac, commit and push `main`:
+
 ```bash
-# 1. Set production environment
-export NODE_ENV=production
+git add -A
+git commit -m "Your change summary"
+git push origin main
+```
 
-# 2. Backend
-cd backend
-npm install --production
-npm run db:setup
-npm run admin:create
-npm run start          # or use PM2: pm2 start server.js --name avonix-api
+Then on the VPS:
 
-# 3. Frontend
-cd ..
+```bash
+cd /var/www/avonix-social
+export GIT_TERMINAL_PROMPT=0
+git pull origin main
 npm install
 npm run build
-npm run start          # or PM2: pm2 start npm --name avonix-web -- start
+pm2 restart avonix-social-web
+```
+
+Frontend-only changes (pages, UI, `next.config.mjs`) need `npm run build` + `pm2 restart avonix-social-web`.  
+`git pull` alone does **not** update the live Next.js site.
+
+If backend/API or Prisma schema changed, also run:
+
+```bash
+cd /var/www/avonix-social/backend
+npm install
+npx prisma db push
+cd /var/www/avonix-social
+pm2 restart avonix-social-api
+```
+
+### First-time VPS setup
+
+```bash
+cd /var/www/avonix-social
+npm install
+cd backend && npm install && npx prisma db push && npm run admin:create && cd ..
+npm run build
+pm2 start ecosystem.config.cjs
+pm2 save
 ```
 
 **Production checklist:**
@@ -284,7 +315,7 @@ npm run start          # or PM2: pm2 start npm --name avonix-web -- start
 - [ ] SMTP, Twilio, and Telegram configured for real OTP delivery
 - [ ] OpenRouter API key configured
 - [ ] Super Admin created via `npm run admin:create` on VPS terminal
-- [ ] HTTPS enabled (Nginx/Caddy reverse proxy recommended)
+- [ ] HTTPS enabled (Apache/Nginx reverse proxy to `:3000` / `:4000`)
 - [ ] SQLite file backed up regularly (`backend/prisma/dev.db`)
 
 ---

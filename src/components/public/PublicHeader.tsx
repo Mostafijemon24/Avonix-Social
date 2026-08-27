@@ -34,10 +34,16 @@ export function PublicHeader() {
 
         <div className="flex items-center space-x-3">
           <Link
+            href="/login"
+            className="text-xs font-bold text-slate-300 hover:text-white px-4 py-2.5 rounded-xl border border-navy-700 bg-navy-800/60 transition-all"
+          >
+            Sign In
+          </Link>
+          <Link
             href="/register"
             className="bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold px-5 py-2.5 rounded-xl shadow-lg shadow-orange-500/25 transition-all"
           >
-            Register / Sign In
+            Register
           </Link>
         </div>
       </nav>

@@ -28,7 +28,7 @@ export function DashboardAuthGuard({ children }: { children: React.ReactNode }) 
 
       if (!email || !token) {
         clearSession();
-        router.replace("/register?step=signin");
+        router.replace("/login");
         return;
       }
 
@@ -60,7 +60,7 @@ export function DashboardAuthGuard({ children }: { children: React.ReactNode }) 
         }
 
         logout();
-        router.replace("/register?step=signin");
+        router.replace("/login");
       }
     }
 
