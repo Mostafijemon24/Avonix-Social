@@ -575,6 +575,26 @@ export function extractVerifiedServices({
   return out.slice(0, 7);
 }
 
+/**
+ * FAQ posts must open with a source-supported question in the first 150 characters.
+ * Uses the heading or source title when they already contain a question; otherwise a
+ * Need-help question built from the page primary keyword — never a generic unrelated Q.
+ */
+export function ensureFaqQuestionHook(content, { heading, sourceTitle, keywords } = {}) {
+  const body = String(content || "").trim();
+  if (body.slice(0, GMB_CHAR.frontLoad).includes("?")) return body;
+  let question = "";
+  if (String(heading || "").includes("?")) question = String(heading).trim();
+  else if (String(sourceTitle || "").includes("?")) question = String(sourceTitle).trim();
+  else {
+    const topic = String(keywords?.primary || sourceTitle || "").trim();
+    if (!topic) return body;
+    question = `Need help with ${topic}?`;
+  }
+  if (!question.endsWith("?")) question = `${question}?`;
+  return `${question} ${body}`.trim();
+}
+
 export function stripFabricatedServiceLines(text) {
   return String(text || "")
     .split("\n")

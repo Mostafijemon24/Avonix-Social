@@ -12,6 +12,7 @@ import {
   ensureGmbHashtags,
   extractHashtags,
   extractVerifiedServices,
+  ensureFaqQuestionHook,
   firstNChars,
   getGmbCategory,
   isFabricatedServiceName,
@@ -300,6 +301,15 @@ assert(
   !faqOk.issues.some((i) => /question/i.test(i)),
   "FAQ with a source-supported question in first 150 passes the hook"
 );
+
+const faqBodyNoQ = "When your SSL certificate expires your website will display a Not Secure warning to visitors. Renew it promptly.";
+const hooked = ensureFaqQuestionHook(faqBodyNoQ, {
+  heading: "How do I fix a Not Secure website when my SSL expires?",
+  sourceTitle: "How to fix not secure website when SSL certificate expires",
+  keywords: { primary: "SSL Certificate" },
+});
+assert(hooked.slice(0, 150).includes("?"), "ensureFaqQuestionHook puts a question in the first 150 characters");
+assert(/SSL|Not Secure/i.test(hooked.slice(0, 150)), "FAQ hook stays tied to the source topic");
 
 const placeholderFail = validateGmbPost({
   content: `${"Looking for website repair near you in Houston? Local help for nearby businesses. ".repeat(8)}\nCore services:\n• Website Repair\nMostafij Emon Houston TX. Phone not provided.\nClick \"Learn More\" to read the details on this page.\n#Houston #WebsiteRepair #HoustonNearMe #LocalBusiness`,

@@ -39,6 +39,7 @@ import {
   stripUnverifiedNap,
   ensureGmbHashtags,
   extractVerifiedServices,
+  ensureFaqQuestionHook,
   uiCatalog as gmbUiCatalog,
 } from "../content/gmbContentRules.js";
 import { validateGmbPost, validateSocialPost } from "../content/gmbValidator.js";
@@ -1390,6 +1391,13 @@ async function generateGmbWithMasterRules({
     const cta = resolveGmbCta(categoryId, { ...business, offerSummary: verifiedOffer.summary });
     const ctaLine = gmbCtaInstruction(cta);
     let next = stripUnverifiedNap(content, business);
+    if (categoryId === GMB_CATEGORY_IDS.FAQ_EDUCATIONAL) {
+      next = ensureFaqQuestionHook(next, {
+        heading,
+        sourceTitle: options.sourceTitle || sourcePage?.title || "",
+        keywords,
+      });
+    }
     next = ensureGmbHashtags(next, {
       location: place,
       primary,
