@@ -412,16 +412,6 @@ export async function requestPasswordReset(email, options = {}) {
     return generic;
   }
 
-  const now = new Date();
-  await prisma.verificationCode.updateMany({
-    where: {
-      userId: user.id,
-      purpose: "password_reset",
-      usedAt: null,
-    },
-    data: { usedAt: now },
-  });
-
   const emailCode = generateOtp();
   const expiresAt = new Date(Date.now() + RESET_OTP_TTL_MS);
 
@@ -500,29 +490,17 @@ export async function resetPasswordWithCode({
       channel: "email",
       purpose: "password_reset",
       usedAt: null,
+      expiresAt: { gt: now },
+      code: digits,
     },
     orderBy: { createdAt: "desc" },
   });
 
   if (!row) {
-    console.log(`[password-reset] no unused code for ${normalizedEmail}`);
+    console.log(`[password-reset] code mismatch or expired for ${normalizedEmail}`);
     return {
       ok: false,
-      error: "Invalid or expired reset code. Tap Resend and use only the newest email.",
-    };
-  }
-  if (row.expiresAt <= now) {
-    console.log(`[password-reset] expired code for ${normalizedEmail}`);
-    return {
-      ok: false,
-      error: "Reset code expired. Tap Resend and use only the newest email.",
-    };
-  }
-  if (row.code !== digits) {
-    console.log(`[password-reset] code mismatch for ${normalizedEmail}`);
-    return {
-      ok: false,
-      error: "That code does not match the latest email. Use only the newest 6-digit code.",
+      error: "That reset code is wrong or already used. Do not tap Send/Resend — ask for the live code, or use I already have a code.",
     };
   }
 
