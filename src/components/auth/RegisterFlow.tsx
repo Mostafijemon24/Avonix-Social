@@ -245,6 +245,18 @@ export function RegisterFlow() {
     }
   };
 
+  const handleHaveResetCode = (e: React.MouseEvent<HTMLButtonElement>) => {
+    const form = e.currentTarget.form;
+    const input = form?.querySelector<HTMLInputElement>('input[name="email"]');
+    const em = (input?.value || email).trim().toLowerCase();
+    if (!em.includes("@")) {
+      showToast("Enter your email first.", "error");
+      return;
+    }
+    setEmail(em);
+    setStep("reset");
+  };
+
   const handleResendPasswordReset = async () => {
     if (!email) {
       showToast("Enter your email first.", "error");
@@ -463,6 +475,14 @@ export function RegisterFlow() {
             </button>
             <button
               type="button"
+              disabled={loading}
+              onClick={handleHaveResetCode}
+              className="w-full text-orange-400 hover:text-orange-300 font-bold py-2"
+            >
+              I already have a code →
+            </button>
+            <button
+              type="button"
               onClick={() => setStep("signin")}
               className="w-full text-slate-500 font-bold py-2"
             >
@@ -475,7 +495,8 @@ export function RegisterFlow() {
           <form onSubmit={handleResetPassword} className="space-y-3 text-xs" autoComplete="off">
             <p className="text-[10px] text-slate-500">Account: {email}</p>
             <p className="text-[10px] text-amber-400/90 -mt-1">
-              Use the 6-digit code from the newest email only. Older reset emails will not work.
+              Use the latest 6-digit code you were given. Do not tap Resend — that cancels the
+              current code. Mail often does not arrive.
             </p>
             <div>
               <label className="block font-bold text-slate-300 mb-1">Email Reset Code</label>

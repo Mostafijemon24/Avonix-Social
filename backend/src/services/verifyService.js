@@ -11,6 +11,7 @@ import { validateRegistrationEmail } from "../emailPolicy.js";
 import { safeCreditInt } from "../credits.js";
 
 const OTP_TTL_MS = 10 * 60 * 1000; // 10 minutes
+const RESET_OTP_TTL_MS = 30 * 60 * 1000; // 30 minutes — email often does not arrive
 const IS_PRODUCTION = process.env.NODE_ENV === "production";
 
 const TEST_CARD_NUMBERS = new Set([
@@ -422,7 +423,7 @@ export async function requestPasswordReset(email, options = {}) {
   });
 
   const emailCode = generateOtp();
-  const expiresAt = new Date(Date.now() + OTP_TTL_MS);
+  const expiresAt = new Date(Date.now() + RESET_OTP_TTL_MS);
 
   await prisma.verificationCode.create({
     data: {
