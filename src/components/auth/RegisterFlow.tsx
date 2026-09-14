@@ -253,9 +253,12 @@ export function RegisterFlow() {
     setLoading(true);
     try {
       const result = await api.resendPasswordReset(email);
+      setResetCode("");
       const toast = deliveryToastMessage(result.delivery);
       showToast(
-        toast.ok ? "Reset code resent. Check inbox and spam." : toast.text,
+        toast.ok
+          ? "New reset code sent. Use only this latest email — older codes will not work."
+          : toast.text,
         toast.ok ? "success" : "error"
       );
     } catch (err: unknown) {
@@ -274,20 +277,27 @@ export function RegisterFlow() {
     e.preventDefault();
     setLoading(true);
     try {
-      const strengthErr = clientPasswordOk(password);
+      const form = new FormData(e.currentTarget);
+      const nextPassword = String(form.get("password") ?? password).trim();
+      const nextConfirm = String(form.get("confirmPassword") ?? confirmPassword).trim();
+      const nextCode = String(form.get("reset-code") ?? resetCode).replace(/\D/g, "").slice(0, 6);
+      setPassword(nextPassword);
+      setConfirmPassword(nextConfirm);
+      setResetCode(nextCode);
+      const strengthErr = clientPasswordOk(nextPassword);
       if (strengthErr) {
         showToast(`${strengthErr}. ${PASSWORD_HINT}`, "error");
         return;
       }
-      if (password !== confirmPassword) {
+      if (nextPassword !== nextConfirm) {
         showToast("Password and confirmation do not match", "error");
         return;
       }
       const result = await api.resetPassword({
         email,
-        code: resetCode,
-        password,
-        confirmPassword,
+        code: nextCode,
+        password: nextPassword,
+        confirmPassword: nextConfirm,
       });
       setPassword("");
       setConfirmPassword("");
@@ -464,6 +474,9 @@ export function RegisterFlow() {
         {step === "reset" && (
           <form onSubmit={handleResetPassword} className="space-y-3 text-xs" autoComplete="off">
             <p className="text-[10px] text-slate-500">Account: {email}</p>
+            <p className="text-[10px] text-amber-400/90 -mt-1">
+              Use the 6-digit code from the newest email only. Older reset emails will not work.
+            </p>
             <div>
               <label className="block font-bold text-slate-300 mb-1">Email Reset Code</label>
               <input
@@ -475,7 +488,7 @@ export function RegisterFlow() {
                 maxLength={6}
                 value={resetCode}
                 onChange={(e) => setResetCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
-                autoComplete="off"
+                autoComplete="one-time-code"
                 className="w-full border border-navy-700 rounded-xl p-3 bg-navy-950 font-bold text-white text-center text-lg tracking-[0.4em] font-mono"
               />
             </div>
@@ -497,10 +510,13 @@ export function RegisterFlow() {
               label="Confirm New Password"
               name="confirmPassword"
               required
-              autoComplete="new-password"
+              autoComplete="off"
               value={confirmPassword}
               onChange={setConfirmPassword}
             />
+            {confirmPassword && password !== confirmPassword ? (
+              <p className="text-[10px] text-red-400 -mt-1">New password and confirmation do not match.</p>
+            ) : null}
             <p className="text-[10px] text-slate-500 -mt-1">{PASSWORD_HINT}</p>
             <button
               type="submit"
