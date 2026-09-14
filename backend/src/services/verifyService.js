@@ -392,7 +392,7 @@ export async function loginVerifiedUser(email, password) {
  * Request password reset — always returns ok (no email enumeration).
  * Sends 6-digit code to email when account exists.
  */
-export async function requestPasswordReset(email) {
+export async function requestPasswordReset(email, options = {}) {
   const normalizedEmail = (email || "").trim().toLowerCase();
   if (!normalizedEmail.includes("@")) {
     return { ok: false, error: "Valid email required" };
@@ -446,12 +446,13 @@ export async function requestPasswordReset(email) {
       email: delivery.email?.status,
       emailError: delivery.email?.error || null,
     },
+    ...(options.revealCode ? { emailCode } : {}),
   };
 }
 
 /** Resend password-reset OTP */
-export async function resendPasswordResetOtp(email) {
-  return requestPasswordReset(email);
+export async function resendPasswordResetOtp(email, options = {}) {
+  return requestPasswordReset(email, options);
 }
 
 /**

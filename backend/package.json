@@ -14,7 +14,8 @@
     "admin:create": "node scripts/admin-cli.js create",
     "admin:list": "node scripts/admin-cli.js list",
     "admin:delete": "node scripts/admin-cli.js delete",
-    "admin:forgot": "node scripts/admin-cli.js forgot"
+    "admin:forgot": "node scripts/admin-cli.js forgot",
+    "user:forgot": "node scripts/user-cli.js forgot"
   },
   "dependencies": {
     "@prisma/client": "^6.1.0",
