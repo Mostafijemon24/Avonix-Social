@@ -12,6 +12,8 @@ const nextConfig = {
       { source: "/sign-in", destination: "/login", permanent: false },
       { source: "/signup", destination: "/register", permanent: false },
       { source: "/sign-up", destination: "/register", permanent: false },
+      { source: "/privacy", destination: "/privacy-policy", permanent: true },
+      { source: "/terms", destination: "/terms-of-service", permanent: true },
     ];
   },
   async rewrites() {
