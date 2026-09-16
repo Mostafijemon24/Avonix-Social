@@ -34,7 +34,7 @@ const PLATFORMS: Array<{
     id: "linkedin",
     title: "LinkedIn",
     selectTitle: "Select LinkedIn Pages",
-    blurb: "Connect LinkedIn Company Pages for B2B posts.",
+    blurb: "Connect your LinkedIn profile to publish posts (Sign In + Share on LinkedIn).",
   },
   {
     id: "google_business",
@@ -295,7 +295,11 @@ function ConnectionsInner() {
                       {countLabel}
                       {group.length > 0 ? ` · ${ready} of ${group.length} publishing ready` : ""}
                     </p>
-                    <p className="text-[11px] text-slate-500 mt-1">{p.blurb}</p>
+                    <p className="text-[11px] text-slate-500 mt-1">
+                      {p.id === "linkedin" && setup?.linkedinMode === "community"
+                        ? "Connect LinkedIn Company Pages. The LinkedIn user must be a Page admin."
+                        : p.blurb}
+                    </p>
                   </div>
                   <button
                     type="button"

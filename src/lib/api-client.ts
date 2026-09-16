@@ -872,6 +872,8 @@ export type ConnectionsSetup = {
   instagram: boolean;
   google_business: boolean;
   linkedin: boolean;
+  linkedinMode?: "community" | "signin";
+  linkedinScopes?: string;
   callbacks?: Record<string, string>;
 };
 

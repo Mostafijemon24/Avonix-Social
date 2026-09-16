@@ -662,20 +662,19 @@ async function handleLinkedInCallback({ code, user, workspaceId }) {
     ? new Date(Date.now() + tokenData.expires_in * 1000)
     : null;
 
-  // Prefer organization (Company Page)
-  let orgRes = await fetch(
-    "https://api.linkedin.com/v2/organizationalEntityAcls?q=roleAssignee&role=ADMINISTRATOR&projection=(elements*(organizationalTarget~(id,localizedName)))",
-    { headers: { Authorization: `Bearer ${accessToken}` } }
-  );
-  let orgData = {};
-  try {
-    orgData = await orgRes.json();
-  } catch {
-    orgData = {};
-  }
+  if (linkedinIsCommunityApp()) {
+    const orgRes = await fetch(
+      "https://api.linkedin.com/v2/organizationalEntityAcls?q=roleAssignee&role=ADMINISTRATOR&projection=(elements*(organizationalTarget~(id,localizedName)))",
+      { headers: { Authorization: `Bearer ${accessToken}` } }
+    );
+    let orgData = {};
+    try {
+      orgData = await orgRes.json();
+    } catch {
+      orgData = {};
+    }
 
-  const orgs = orgData.elements || [];
-  if (orgs.length) {
+    const orgs = orgData.elements || [];
     const eligible = [];
     for (const el of orgs.slice(0, 20)) {
       const target = el["organizationalTarget~"] || {};
@@ -696,9 +695,6 @@ async function handleLinkedInCallback({ code, user, workspaceId }) {
     if (eligible.length) {
       return { eligible, accessToken, refreshToken: null, tokenExpiresAt: expiresAt };
     }
-  }
-
-  if (linkedinIsCommunityApp()) {
     throw new Error(
       "No LinkedIn Company Page found for this account. Community Management API connects Pages only — the person must be an admin of a Company Page."
     );
