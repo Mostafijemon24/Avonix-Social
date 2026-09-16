@@ -93,16 +93,15 @@ async function logNotification(userId, channel, type, title, body, status) {
 }
 
 function buildSmtpTransport({ host, port, user, pass }) {
-  const secure = port === 465;
+  const secure = Number(port) === 465;
   return nodemailer.createTransport({
     host,
     port,
     secure,
-    requireTLS: !secure && port === 587,
-    auth: { user, pass },
-    connectionTimeout: 15000,
-    greetingTimeout: 15000,
-    tls: { minVersion: "TLSv1.2", rejectUnauthorized: true },
+    auth: {
+      user,
+      pass,
+    },
   });
 }
 
@@ -131,6 +130,9 @@ export async function sendEmail(user, { type, title, body, code, codeLabel, ctaU
   let usedHost = "";
   let usedPort = 0;
   let smtpUser = authUser || "";
+  console.log(
+    `[smtp] host=${host || "unset"} port=${port || "unset"} user=${authUser || "unset"} pass=${pass ? "set" : "unset"}`
+  );
 
   const attempts = [];
   if (smtpUrl) {
@@ -141,16 +143,18 @@ export async function sendEmail(user, { type, title, body, code, codeLabel, ctaU
       port,
     });
   } else if (host && authUser && pass) {
-    // Hostinger: try configured port, then 465 / 587 fallback
-    const ports = [...new Set([port, 465, 587].filter(Boolean))];
-    for (const p of ports) {
-      attempts.push({
-        label: `${host}:${p}`,
-        transport: buildSmtpTransport({ host, port: p, user: authUser, pass }),
+    const smtpPort = Number(port) === 587 ? 587 : 465;
+    attempts.push({
+      label: `${host}:${smtpPort}`,
+      transport: buildSmtpTransport({
         host,
-        port: p,
-      });
-    }
+        port: smtpPort,
+        user: authUser,
+        pass,
+      }),
+      host,
+      port: smtpPort,
+    });
   }
 
   const html = buildEmailHtml({ title, body, code, codeLabel, ctaUrl, ctaLabel });
