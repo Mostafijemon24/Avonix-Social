@@ -89,6 +89,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [liveOpen, setLiveOpen] = useState(false);
   const [connStatus, setConnStatus] = useState<ConnState>(emptyConn);
 
   useEffect(() => {
@@ -258,31 +259,40 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
             </select>
           </div>
 
-          <div className="text-[10px] font-extrabold text-dim uppercase tracking-[0.09em]">
-            Live Status
-          </div>
-          {LIVE_STATUS_ROWS.map(({ key, label }) => {
-            const status = connStatus[key];
-            return (
-              <div key={key} className="flex items-center justify-between text-xs">
-                <span className="flex items-center gap-2 text-muted">
-                  <PlatformGlyph platform={key} size={14} />
-                  {label}
-                </span>
-                <span
-                  className={`font-bold ${
-                    status === "Connected"
-                      ? "text-[#16a34a]"
-                      : status === "Linked"
-                        ? "text-[#d97706]"
-                        : "text-dim"
-                  }`}
-                >
-                  {status === "Off" ? "Off" : status}
-                </span>
-              </div>
-            );
-          })}
+          <button
+            type="button"
+            onClick={() => setLiveOpen((v) => !v)}
+            className="w-full flex items-center justify-between text-[10px] font-extrabold text-dim uppercase tracking-[0.09em] hover:text-muted"
+            aria-expanded={liveOpen}
+          >
+            <span>Live Status</span>
+            <ChevronDown
+              className={`w-3.5 h-3.5 transition-transform ${liveOpen ? "rotate-180" : ""}`}
+            />
+          </button>
+          {liveOpen &&
+            LIVE_STATUS_ROWS.map(({ key, label }) => {
+              const status = connStatus[key];
+              return (
+                <div key={key} className="flex items-center justify-between text-xs">
+                  <span className="flex items-center gap-2 text-muted">
+                    <PlatformGlyph platform={key} size={14} />
+                    {label}
+                  </span>
+                  <span
+                    className={`font-bold ${
+                      status === "Connected"
+                        ? "text-[#16a34a]"
+                        : status === "Linked"
+                          ? "text-[#d97706]"
+                          : "text-dim"
+                    }`}
+                  >
+                    {status === "Off" ? "Off" : status}
+                  </span>
+                </div>
+              );
+            })}
 
           <div className="w-full bg-navy-800 rounded-full h-1.5 overflow-hidden mt-1.5">
             <div
