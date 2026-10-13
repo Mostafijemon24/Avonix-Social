@@ -37,34 +37,34 @@ export default function AuditPage() {
       <div
         className={`rounded-2xl border p-5 ${
           ready
-            ? "border-emerald-800/50 bg-emerald-950/20"
-            : "border-red-800/50 bg-red-950/20"
+            ? "border-emerald-800/50 bg-emerald-50/20"
+            : "border-red-800/50 bg-red-50/20"
         }`}
       >
-        <p className="text-[11px] font-extrabold uppercase tracking-wider text-slate-400">
+        <p className="text-[11px] font-extrabold uppercase tracking-wider text-muted">
           Pre-production audit
         </p>
-        <h1 className="text-2xl font-black text-white mt-1">
+        <h1 className="text-2xl font-black text-ink mt-1">
           {ready ? "READY FOR PRODUCTION" : "NOT READY FOR PRODUCTION"}
         </h1>
-        <p className="text-xs text-slate-400 mt-1">P0 {fail} · P1 {warn} · internal gate only</p>
+        <p className="text-xs text-muted mt-1">P0 {fail} · P1 {warn} · internal gate only</p>
       </div>
       {groups.map((g) => (
         <section key={g.title} className="glass-card rounded-2xl border border-navy-800 p-5">
-          <h2 className="text-sm font-bold text-white mb-3">{g.title}</h2>
+          <h2 className="text-sm font-bold text-ink mb-3">{g.title}</h2>
           <ul className="space-y-2">
             {g.items.map((i) => (
               <li key={i.label} className="text-xs flex gap-2">
                 <span
                   className={
-                    i.severity === "pass" ? "text-emerald-400" : i.severity === "warn" ? "text-amber-300" : "text-red-400"
+                    i.severity === "pass" ? "text-[#16a34a]" : i.severity === "warn" ? "text-[#d97706]" : "text-[#dc2626]"
                   }
                 >
                   {i.severity === "pass" ? "✓" : i.severity === "warn" ? "⚠" : "✕"}
                 </span>
                 <span>
-                  <span className="text-white font-semibold">{i.label}</span>
-                  <span className="text-slate-500"> — {i.note}</span>
+                  <span className="text-ink font-semibold">{i.label}</span>
+                  <span className="text-dim"> — {i.note}</span>
                 </span>
               </li>
             ))}

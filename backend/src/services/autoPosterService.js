@@ -119,10 +119,41 @@ export const PLATFORM_CONFIG = {
     allowHashtags: true,
     image: { width: 1200, height: 900, aspect: "4:3" },
   },
+  X: {
+    key: "x",
+    // X (Twitter) is char-capped at 280. Word bounds stay low so output fits;
+    // the X path also hard-caps the final caption to maxChars.
+    minWords: 18,
+    maxWords: 38,
+    minChars: 120,
+    maxChars: 280,
+    allowLinks: true,
+    allowHashtags: true,
+    // 16:9 in-stream image (optional on X)
+    image: { width: 1600, height: 900, aspect: "16:9" },
+  },
+  Pinterest: {
+    key: "pinterest",
+    // Pin description — keyword-rich, image is mandatory (portrait 2:3).
+    minWords: 20,
+    maxWords: 70,
+    maxChars: 500,
+    allowLinks: true,
+    allowHashtags: true,
+    imageRequired: true,
+    image: { width: 1000, height: 1500, aspect: "2:3" },
+  },
 };
 
-/** Part 2 target platforms — 15 URLs × 4 = 60 posts */
-export const STUDIO_POST_PLATFORMS = ["Facebook", "Instagram", "LinkedIn", "GMB"];
+/** Part 2 target platforms — 15 URLs × 6 platforms */
+export const STUDIO_POST_PLATFORMS = [
+  "Facebook",
+  "Instagram",
+  "LinkedIn",
+  "GMB",
+  "X",
+  "Pinterest",
+];
 
 const TONE_OPENER = {
   Professional: "Here is a clear update from our team.",
@@ -1074,6 +1105,34 @@ Leaders evaluating ${promo} should prioritize process transparency, measurable m
       writingIntent,
     });
     html = plainToPreviewHtml(plain);
+  } else if (platform === "X") {
+    // X (Twitter) — one tight, keyword-led line. Capped to 280 chars after range.
+    heading = primaryLocal;
+    plain = `${secondary || primary} in ${place} — ${offering} backed by ${proof}. Built for people searching ${primary}.`;
+    plain = finalizeSocialCaption(plain, {
+      platform: "X",
+      url,
+      primary,
+      secondary,
+      place,
+      writingIntent,
+    });
+    html = plainToPreviewHtml(plain);
+  } else if (platform === "Pinterest") {
+    // Pinterest — keyword-rich pin description (image required, portrait 2:3).
+    heading = primaryLocal;
+    plain = `${secondary || primary} in ${place}.
+
+${offering} backed by ${proof} — a practical look for anyone exploring ${primary} and ${promo}. Save this pin and tap through for the full guide.`;
+    plain = finalizeSocialCaption(plain, {
+      platform: "Pinterest",
+      url,
+      primary,
+      secondary,
+      place,
+      writingIntent,
+    });
+    html = plainToPreviewHtml(plain);
   } else {
     // GMB — master category rules (character-based, hashtags + NAP + CTA required)
     const gmbCategoryId = isGmbCategoryId(options.gmbCategory)
@@ -1095,7 +1154,9 @@ Leaders evaluating ${promo} should prioritize process transparency, measurable m
   }
 
   const applyRange = (body) => {
-    if (platform === "GMB") return body;
+    // GMB is char-based; X is a single tight line already finalized above — neither
+    // gets word-padding (padding + the 280 cap would truncate X mid-sentence).
+    if (platform === "GMB" || platform === "X") return body;
     // Pad body copy only — CTA / hashtags are re-attached after
     let next = stripCtaHashtagsAndUrls(body);
     next = padToMinWords(next, cfg.minWords, padCtx);
@@ -1119,6 +1180,12 @@ Leaders evaluating ${promo} should prioritize process transparency, measurable m
 
   if (platform !== "GMB") {
     plain = applyRange(plain);
+  }
+  if (platform === "X" && countChars(plain) > cfg.maxChars) {
+    // Hard-cap to the X limit at a whitespace boundary (never mid-word).
+    const sliced = plain.slice(0, cfg.maxChars);
+    const cut = sliced.lastIndexOf(" ");
+    plain = (cut > 0 ? sliced.slice(0, cut) : sliced).trim();
   }
   html = plainToPreviewHtml(plain);
 
@@ -1272,6 +1339,12 @@ Write one complete post body that naturally uses the primary keyword and at leas
       place,
       writingIntent: options.writingIntent || "Awareness",
     });
+
+    if (platform === "X" && cfg.maxChars && countChars(content) > cfg.maxChars) {
+      const sliced = content.slice(0, cfg.maxChars);
+      const cut = sliced.lastIndexOf(" ");
+      content = (cut > 0 ? sliced.slice(0, cut) : sliced).trim();
+    }
 
     const socialValidation = validateSocialPost({
       content,

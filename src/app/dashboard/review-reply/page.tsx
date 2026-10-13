@@ -63,15 +63,15 @@ Brand: Avonix Social SEO agency`;
       <div className="glass-card p-6 rounded-2xl border border-navy-800">
         <div className="flex flex-col md:flex-row justify-between items-center mb-6 pb-4 border-b border-navy-800 gap-4">
           <div>
-            <h2 className="text-base font-bold text-white">Google Business Review Reply Hub</h2>
-            <p className="text-xs text-slate-400">AI drafts logged in Usage Logs with token + credit data.</p>
+            <h2 className="text-base font-bold text-ink">Google Business Review Reply Hub</h2>
+            <p className="text-xs text-muted">AI drafts logged in Usage Logs with token + credit data.</p>
           </div>
           <div className="bg-navy-900 p-1 rounded-2xl flex items-center space-x-1 border border-navy-800">
             <button
               type="button"
               onClick={() => setGbpMode("confirm")}
               className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all ${
-                mode === "confirm" ? "bg-orange-500 text-white shadow-md" : "text-slate-400 hover:text-white"
+                mode === "confirm" ? "bg-orange-500 text-white shadow-md" : "text-muted hover:text-white"
               }`}
             >
               Confirm to Reply
@@ -80,7 +80,7 @@ Brand: Avonix Social SEO agency`;
               type="button"
               onClick={() => setGbpMode("auto")}
               className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all ${
-                mode === "auto" ? "bg-emerald-500 text-white shadow-md" : "text-slate-400 hover:text-white"
+                mode === "auto" ? "bg-emerald-500 text-ink shadow-md" : "text-muted hover:text-ink"
               }`}
             >
               Auto Reply Mode
@@ -97,17 +97,17 @@ Brand: Avonix Social SEO agency`;
         <div className="border border-navy-800 rounded-2xl p-4 bg-navy-900/60">
           <div className="flex justify-between items-start mb-2">
             <div>
-              <p className="text-xs font-bold text-white">John Doe</p>
-              <p className="text-[10px] text-amber-400 font-bold">5/5 stars</p>
+              <p className="text-xs font-bold text-ink">John Doe</p>
+              <p className="text-[10px] text-[#d97706] font-bold">5/5 stars</p>
             </div>
             <CreditCostBadge action="review_reply" />
           </div>
-          <p className="text-xs text-slate-300 mb-3">
+          <p className="text-xs text-muted mb-3">
             &quot;Avonix Social SEO automation doubled our local search visibility within 60 days. Excellent service!&quot;
           </p>
 
           {draft && (
-            <div className="bg-navy-950 p-3.5 rounded-xl border border-navy-800 mb-3 text-xs text-slate-300">
+            <div className="bg-navy-950 p-3.5 rounded-xl border border-navy-800 mb-3 text-xs text-muted">
               <strong className="text-orange-500 block mb-1">AI Generated Reply Draft:</strong>
               &quot;{draft}&quot;
             </div>

@@ -26,22 +26,22 @@ export function PricingCards({
             </span>
           )}
           <div>
-            <h3 className="font-bold text-white text-sm">{plan.name}</h3>
+            <h3 className="font-bold text-ink text-sm">{plan.name}</h3>
             <p
               className={`text-3xl font-black my-3 ${
-                plan.recommended ? "text-orange-500" : "text-white"
+                plan.recommended ? "text-orange-500" : "text-ink"
               }`}
             >
               ${plan.price}{" "}
-              <span className="text-xs text-slate-500 font-normal">/ month</span>
+              <span className="text-xs text-dim font-normal">/ month</span>
             </p>
-            <p className="text-xs text-slate-400 mb-4">{plan.description}</p>
+            <p className="text-xs text-muted mb-4">{plan.description}</p>
           </div>
           {activePlan === plan.name ? (
             <button
               type="button"
               disabled
-              className="w-full bg-navy-800 text-slate-500 font-bold text-xs py-2.5 rounded-xl cursor-not-allowed"
+              className="w-full bg-navy-800 text-dim font-bold text-xs py-2.5 rounded-xl cursor-not-allowed"
             >
               Active Plan
             </button>
@@ -52,7 +52,7 @@ export function PricingCards({
               className={`w-full font-bold text-xs py-3 rounded-xl transition-all ${
                 plan.recommended
                   ? "bg-orange-500 hover:bg-orange-600 text-white shadow-lg"
-                  : "bg-navy-800 hover:bg-navy-700 text-white border border-navy-700"
+                  : "bg-navy-800 hover:bg-navy-700 text-ink border border-navy-700"
               }`}
             >
               {plan.cta}

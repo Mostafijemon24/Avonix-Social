@@ -3,6 +3,7 @@
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Check, Link2, ShieldCheck, Star, Unplug } from "lucide-react";
+import PlatformGlyph from "@/components/ui/PlatformGlyph";
 import { useToast } from "@/components/ui/Toast";
 import { useWorkspace } from "@/context/WorkspaceContext";
 import {
@@ -13,7 +14,7 @@ import {
 } from "@/lib/api-client";
 
 const PLATFORMS: Array<{
-  id: "facebook" | "instagram" | "google_business" | "linkedin";
+  id: "facebook" | "instagram" | "google_business" | "linkedin" | "x" | "pinterest";
   title: string;
   selectTitle: string;
   blurb: string;
@@ -41,6 +42,18 @@ const PLATFORMS: Array<{
     title: "Google Business Profile",
     selectTitle: "Select Google Business Locations",
     blurb: "Connect one or more locations. NAP is never mixed across locations.",
+  },
+  {
+    id: "x",
+    title: "X (Twitter)",
+    selectTitle: "Select X Account",
+    blurb: "Connect your X account to publish tweets (link included automatically).",
+  },
+  {
+    id: "pinterest",
+    title: "Pinterest",
+    selectTitle: "Select Pinterest Board",
+    blurb: "Connect a Pinterest board to publish keyword-rich pins (image required).",
   },
 ];
 
@@ -265,7 +278,7 @@ function ConnectionsInner() {
   return (
     <div className="space-y-6 max-w-5xl mx-auto animate-fade-in text-left">
       <div>
-        <h1 className="text-xl font-extrabold tracking-tight text-white mb-1">Connections</h1>
+        <h1 className="text-xl font-extrabold tracking-tight text-ink mb-1">Connections</h1>
         <p className="text-xs text-[color:var(--color-text-muted)]">
           Multiple accounts per platform stay connected at the same time. Use Connect another —
           never disconnect to add a new destination.
@@ -273,7 +286,7 @@ function ConnectionsInner() {
       </div>
 
       {loading ? (
-        <p className="text-sm text-slate-500">Loading connections…</p>
+        <p className="text-sm text-dim">Loading connections…</p>
       ) : (
         <div className="space-y-5">
           {PLATFORMS.map((p) => {
@@ -288,14 +301,15 @@ function ConnectionsInner() {
               <section key={p.id} className="glass-card p-5 rounded-2xl">
                 <div className="flex flex-wrap items-start justify-between gap-3 mb-3">
                   <div>
-                    <h2 className="text-sm font-bold text-white uppercase tracking-wide">
+                    <h2 className="flex items-center gap-2 text-sm font-bold text-ink uppercase tracking-wide">
+                      <PlatformGlyph platform={p.id} size={18} />
                       {p.title}
                     </h2>
-                    <p className="text-[11px] text-slate-400 mt-0.5">
+                    <p className="text-[11px] text-muted mt-0.5">
                       {countLabel}
                       {group.length > 0 ? ` · ${ready} of ${group.length} publishing ready` : ""}
                     </p>
-                    <p className="text-[11px] text-slate-500 mt-1">
+                    <p className="text-[11px] text-dim mt-1">
                       {p.id === "linkedin" && setup?.linkedinMode === "community"
                         ? "Connect LinkedIn Company Pages. The LinkedIn user must be a Page admin."
                         : p.blurb}
@@ -312,12 +326,12 @@ function ConnectionsInner() {
                   </button>
                 </div>
                 {!oauthReady && (
-                  <p className="text-[10px] text-amber-400/90 mb-3 bg-amber-950/20 border border-amber-500/20 rounded-lg px-3 py-2">
+                  <p className="text-[10px] text-[#d97706]/90 mb-3 bg-amber-50/20 border border-amber-500/20 rounded-lg px-3 py-2">
                     Server OAuth keys for {p.title} are not set yet.
                   </p>
                 )}
                 {group.length === 0 ? (
-                  <p className="text-xs text-slate-500">No accounts connected yet.</p>
+                  <p className="text-xs text-dim">No accounts connected yet.</p>
                 ) : (
                   <ul className="space-y-2">
                     {group.map((acc) => {
@@ -326,10 +340,10 @@ function ConnectionsInner() {
                       return (
                         <li
                           key={acc.id}
-                          className="flex flex-wrap items-start justify-between gap-2 rounded-xl border border-white/[0.07] bg-[color:var(--color-card-inner)] px-3 py-3"
+                          className="flex flex-wrap items-start justify-between gap-2 rounded-xl border border-line bg-[color:var(--color-card-inner)] px-3 py-3"
                         >
                           <div className="min-w-0">
-                            <p className="text-sm font-bold text-white">
+                            <p className="text-sm font-bold text-ink">
                               {acc.accountName || acc.provider}
                               {(acc.isDefault ||
                                 (group[0]?.id === acc.id && !group.some((g) => g.isDefault))) && (
@@ -343,10 +357,10 @@ function ConnectionsInner() {
                               {st.label}
                             </p>
                             {typeof meta.address === "string" && meta.address && (
-                              <p className="text-[11px] text-slate-400 mt-1">{meta.address}</p>
+                              <p className="text-[11px] text-muted mt-1">{meta.address}</p>
                             )}
                             {typeof meta.phone === "string" && meta.phone && (
-                              <p className="text-[11px] text-slate-500 font-mono">{meta.phone}</p>
+                              <p className="text-[11px] text-dim font-mono">{meta.phone}</p>
                             )}
                             {acc.accountUrl && (
                               <a
@@ -400,7 +414,7 @@ function ConnectionsInner() {
                               type="button"
                               disabled={!!busy}
                               onClick={() => disconnect(acc.id)}
-                              className="btn-ghost text-[11px] inline-flex items-center gap-1 text-red-300 hover:text-red-200"
+                              className="btn-ghost text-[11px] inline-flex items-center gap-1 text-[#dc2626] hover:text-red-200"
                             >
                               <Unplug className="w-3.5 h-3.5" />
                               Disconnect
@@ -419,15 +433,15 @@ function ConnectionsInner() {
 
       {pickerProvider && (
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 p-0 sm:p-4">
-          <div className="w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-t-2xl sm:rounded-2xl bg-[color:var(--color-card)] border border-white/[0.07] p-5">
-            <h3 className="text-base font-extrabold text-white">
+          <div className="w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-t-2xl sm:rounded-2xl bg-[color:var(--color-card)] border border-line p-5">
+            <h3 className="text-base font-extrabold text-ink">
               {pickerMeta?.selectTitle || "Select accounts"}
             </h3>
-            <p className="text-[11px] text-slate-400 mt-1">
+            <p className="text-[11px] text-muted mt-1">
               Already connected accounts stay untouched. Tokens never leave the server.
             </p>
             {pickerLoading ? (
-              <p className="text-sm text-slate-500 mt-4">Loading eligible accounts…</p>
+              <p className="text-sm text-dim mt-4">Loading eligible accounts…</p>
             ) : (
               <ul className="mt-4 space-y-2">
                 {pendingItems.map((item) => {
@@ -437,8 +451,8 @@ function ConnectionsInner() {
                       <label
                         className={`flex items-start gap-3 rounded-xl border px-3 py-3 ${
                           item.alreadyConnected
-                            ? "border-white/5 bg-navy-950/40 opacity-70"
-                            : "border-white/[0.07] bg-[color:var(--color-card-inner)] cursor-pointer"
+                            ? "border-line bg-navy-950/40 opacity-70"
+                            : "border-line bg-[color:var(--color-card-inner)] cursor-pointer"
                         }`}
                       >
                         <input
@@ -455,16 +469,16 @@ function ConnectionsInner() {
                           }}
                         />
                         <span className="min-w-0">
-                          <span className="block text-sm font-bold text-white">{item.accountName}</span>
+                          <span className="block text-sm font-bold text-ink">{item.accountName}</span>
                           <span className="block text-[11px] font-semibold mt-0.5">
                             {item.alreadyConnected ? (
                               <span className="text-[color:var(--color-ready)]">Already Connected</span>
                             ) : (
-                              <span className="text-slate-400">Available</span>
+                              <span className="text-muted">Available</span>
                             )}
                           </span>
                           {item.metadata?.address && (
-                            <span className="block text-[11px] text-slate-500">{item.metadata.address}</span>
+                            <span className="block text-[11px] text-dim">{item.metadata.address}</span>
                           )}
                         </span>
                       </label>
@@ -488,7 +502,7 @@ function ConnectionsInner() {
               </button>
             </div>
             {availableCount === 0 && !pickerLoading && (
-              <p className="text-[11px] text-slate-500 mt-3">
+              <p className="text-[11px] text-dim mt-3">
                 All returned accounts are already connected. Existing tokens were refreshed.
               </p>
             )}
@@ -501,7 +515,7 @@ function ConnectionsInner() {
 
 export default function ConnectionsPage() {
   return (
-    <Suspense fallback={<p className="text-sm text-slate-500 p-6">Loading connections…</p>}>
+    <Suspense fallback={<p className="text-sm text-dim p-6">Loading connections…</p>}>
       <ConnectionsInner />
     </Suspense>
   );

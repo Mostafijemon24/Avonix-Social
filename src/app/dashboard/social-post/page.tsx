@@ -4,27 +4,24 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import {
   Calendar,
-  CheckCircle2,
+  Check,
   Clock,
   Download,
-  Facebook,
   Globe,
   Image as ImageIcon,
-  Instagram,
-  Linkedin,
   Lock,
   MapPin,
   Play,
   PlusCircle,
   RefreshCw,
   Search,
-  Target,
   Trash2,
   Unlock,
   X,
 } from "lucide-react";
 import { useToast } from "@/components/ui/Toast";
 import { useWorkspace } from "@/context/WorkspaceContext";
+import PlatformGlyph, { PLATFORM_BRAND_COLOR } from "@/components/ui/PlatformGlyph";
 import {
   api,
   isApiError,
@@ -47,16 +44,28 @@ const PLATFORM_MIN_WORDS: Record<string, number> = {
   Instagram: 70,
   LinkedIn: 150,
   GMB: 90,
+  X: 20,
+  Pinterest: 30,
 };
+
+type PlatformLabel =
+  | "Facebook"
+  | "Instagram"
+  | "LinkedIn"
+  | "GMB"
+  | "X"
+  | "Pinterest";
 
 const PLATFORM_RULE_SUMMARY: Record<
   string,
-  { spec: string; img: string; key: "Facebook" | "Instagram" | "LinkedIn" | "GMB" }
+  { spec: string; img: string; key: PlatformLabel }
 > = {
   Facebook: { key: "Facebook", spec: "120+ words · link included", img: "1920×1008" },
   Instagram: { key: "Instagram", spec: "70+ words · bio/link rules", img: "1080×1080" },
   LinkedIn: { key: "LinkedIn", spec: "150+ words · link included", img: "1920×1005" },
   GMB: { key: "GMB", spec: "1,000–1,100 chars (target 1,020–1,050)", img: "1200×900" },
+  X: { key: "X", spec: "280 chars · link included", img: "1600×900" },
+  Pinterest: { key: "Pinterest", spec: "pin description · keyword-rich", img: "1000×1500" },
 };
 
 const GMB_CATEGORY_FALLBACK = [
@@ -102,6 +111,8 @@ const PLATFORM_IMAGE_SIZE: Record<string, { w: number; h: number; label: string 
   LinkedIn: { w: 1920, h: 1005, label: "1920×1005 · 16:9" },
   GMB: { w: 1200, h: 900, label: "1200×900 · 4:3" },
   Instagram: { w: 1080, h: 1080, label: "1080×1080 · 1:1" },
+  X: { w: 1600, h: 900, label: "1600×900 · 16:9" },
+  Pinterest: { w: 1000, h: 1500, label: "1000×1500 · 2:3" },
 };
 
 type ListFilter = "draft" | "published" | "scheduled";
@@ -109,19 +120,8 @@ type ImageSource = "auto" | "ai" | "free";
 type MainTab = "active" | "archive";
 type StudioStep = 1 | 2 | 3 | 4;
 
-function platformIcon(platform: string) {
-  switch (platform) {
-    case "Facebook":
-      return <Facebook className="w-4 h-4 text-blue-400 shrink-0" />;
-    case "Instagram":
-      return <Instagram className="w-4 h-4 text-pink-400 shrink-0" />;
-    case "LinkedIn":
-      return <Linkedin className="w-4 h-4 text-sky-400 shrink-0" />;
-    case "GMB":
-      return <Globe className="w-4 h-4 text-emerald-400 shrink-0" />;
-    default:
-      return <Globe className="w-4 h-4 shrink-0" />;
-  }
+function platformIcon(platform: string, size = 16) {
+  return <PlatformGlyph platform={platform} size={size} className="shrink-0" />;
 }
 
 function countWords(text: string) {
@@ -630,6 +630,8 @@ export default function ContentStudioPage() {
     Instagram: generatedPosts.filter((p) => p.platform === "Instagram").length,
     LinkedIn: generatedPosts.filter((p) => p.platform === "LinkedIn").length,
     GMB: generatedPosts.filter((p) => p.platform === "GMB").length,
+    X: generatedPosts.filter((p) => p.platform === "X").length,
+    Pinterest: generatedPosts.filter((p) => p.platform === "Pinterest").length,
   };
   const postsMissingImages = generatedPosts.filter(
     (p) =>
@@ -693,80 +695,109 @@ export default function ContentStudioPage() {
   };
 
   return (
-    <div className="space-y-5 max-w-3xl mx-auto animate-fade-in text-left">
+    <div className="max-w-[824px] mx-auto flex flex-col gap-11 animate-fade-in text-left">
       {/* Header */}
-      <div className="text-center space-y-1">
-        <h2 className="text-xl font-bold text-white tracking-tight">Content Studio</h2>
-        <p className="text-sm text-slate-400">
-          Four steps: website & location → sources → channels → generate.
+      <div>
+        <h1 className="text-[27px] font-extrabold tracking-[-0.02em] text-ink leading-tight">
+          Content Studio
+        </h1>
+        <p className="mt-2 text-muted text-[14.5px]">
+          Four simple steps — website, sources, channels, then generate.
         </p>
       </div>
 
+      {/* Platform chip row */}
+      <div className="flex flex-wrap gap-2.5">
+        {(
+          [
+            ["Facebook", "Facebook"],
+            ["Instagram", "Instagram"],
+            ["LinkedIn", "LinkedIn"],
+            ["GMB", "Google Business"],
+            ["X", "X (Twitter)"],
+            ["Pinterest", "Pinterest"],
+          ] as const
+        ).map(([key, label]) => (
+          <span
+            key={key}
+            className="inline-flex items-center gap-2 px-3 py-2 rounded-full bg-navy-800 border border-line text-xs font-bold text-ink"
+          >
+            <PlatformGlyph platform={key} size={15} />
+            {label}
+          </span>
+        ))}
+      </div>
+
       {/* Stepper */}
-      <nav className="glass-card border border-navy-800 rounded-2xl p-3 sm:p-4">
-        <ol className="grid grid-cols-4 gap-1 sm:gap-2">
-          {STEPS.map((s) => {
-            const active = step === s.n;
-            const done = step > s.n;
-            return (
-              <li key={s.n}>
-                <button
-                  type="button"
-                  onClick={() => goStep(s.n)}
-                  className={`w-full rounded-xl px-1 py-2 sm:px-2 sm:py-2.5 text-center transition-all ${
+      <div className="flex items-center">
+        {STEPS.map((s, i) => {
+          const active = step === s.n;
+          const done = step > s.n;
+          const short = ["Website", "Sources", "Channels", "Generate"][i];
+          return (
+            <div key={s.n} className="flex items-center flex-1 last:flex-none">
+              <button
+                type="button"
+                onClick={() => goStep(s.n)}
+                className="flex items-center gap-2.5 shrink-0"
+              >
+                <span
+                  className={`w-10 h-10 rounded-full flex items-center justify-center text-[15px] font-extrabold ${
                     active
-                      ? "bg-orange-500 text-white shadow-lg shadow-orange-500/20"
+                      ? "bg-orange-500 text-white shadow-accent"
                       : done
-                        ? "bg-emerald-950/40 text-emerald-300 border border-emerald-800/40"
-                        : "bg-navy-900 text-slate-500 border border-navy-700"
+                        ? "bg-accent-soft border border-accent-border text-accent"
+                        : "bg-navy-800 border border-line text-dim"
                   }`}
                 >
-                  <span className="block text-[10px] sm:text-xs font-bold">
-                    {done && !active ? "✓ " : ""}
-                    {s.n}. {s.label}
-                  </span>
-                  <span
-                    className={`hidden sm:block text-[10px] mt-0.5 ${
-                      active ? "text-orange-100" : "text-slate-500"
-                    }`}
-                  >
-                    {s.hint}
-                  </span>
-                </button>
-              </li>
-            );
-          })}
-        </ol>
-      </nav>
+                  {done ? <Check className="w-4 h-4" /> : s.n}
+                </span>
+                <span
+                  className={`text-[12.5px] ${
+                    active ? "font-extrabold text-ink" : "font-bold text-muted"
+                  }`}
+                >
+                  {short}
+                </span>
+              </button>
+              {i < STEPS.length - 1 && (
+                <span
+                  className={`flex-1 h-0.5 mx-3.5 ${done ? "bg-accent-border" : "bg-line"}`}
+                />
+              )}
+            </div>
+          );
+        })}
+      </div>
 
       {/* —— STEP 1: Website & Location —— */}
       {step === 1 && (
         <div className="glass-card p-5 sm:p-7 rounded-2xl border border-navy-800 space-y-5">
           <div>
-            <h3 className="text-base font-bold text-white">Website &amp; Location</h3>
-            <p className="text-sm text-slate-400 mt-1">
+            <h3 className="text-base font-bold text-ink">Website &amp; Location</h3>
+            <p className="text-sm text-muted mt-1">
               Location drives local keywords, GMB content, and hashtags. Pre-filled from this client when saved.
             </p>
           </div>
 
           <div className="grid grid-cols-1 gap-4">
             <div>
-              <label className="block text-[11px] font-extrabold uppercase tracking-wider text-slate-400 mb-2">
+              <label className="block text-[11px] font-extrabold uppercase tracking-wider text-muted mb-2">
                 Website
               </label>
               <div className="relative">
-                <Globe className="absolute left-4 top-4 w-5 h-5 text-slate-500" />
+                <Globe className="absolute left-4 top-4 w-5 h-5 text-dim" />
                 <input
                   type="url"
                   value={websiteUrl}
                   onChange={(e) => setWebsiteUrl(e.target.value)}
                   placeholder="https://yourbusiness.com"
-                  className="w-full text-base font-semibold border border-navy-700 bg-navy-900 rounded-2xl pl-12 pr-4 py-4 text-white focus:ring-2 focus:ring-orange-500 outline-none min-h-[56px]"
+                  className="w-full text-base font-semibold border border-navy-700 bg-navy-900 rounded-2xl pl-12 pr-4 py-4 text-ink focus:ring-2 focus:ring-orange-500 outline-none min-h-[56px]"
                 />
               </div>
             </div>
             <div>
-              <label className="block text-[11px] font-extrabold uppercase tracking-wider text-slate-400 mb-2">
+              <label className="block text-[11px] font-extrabold uppercase tracking-wider text-muted mb-2">
                 Location
               </label>
               <div className="relative">
@@ -776,7 +807,7 @@ export default function ContentStudioPage() {
                   value={location}
                   onChange={(e) => setLocation(e.target.value)}
                   placeholder="City, neighborhood, or service area"
-                  className="w-full text-base font-semibold border border-navy-700 bg-navy-900 rounded-2xl pl-12 pr-4 py-4 text-white focus:ring-2 focus:ring-orange-500 outline-none min-h-[56px]"
+                  className="w-full text-base font-semibold border border-navy-700 bg-navy-900 rounded-2xl pl-12 pr-4 py-4 text-ink focus:ring-2 focus:ring-orange-500 outline-none min-h-[56px]"
                 />
               </div>
             </div>
@@ -803,42 +834,42 @@ export default function ContentStudioPage() {
             )}
           </button>
           {isAnalyzing && (
-            <p className="text-xs text-slate-400">This can take up to a minute.</p>
+            <p className="text-xs text-muted">This can take up to a minute.</p>
           )}
 
           {analysis && intel && (
             <div className="rounded-2xl border border-navy-700 bg-navy-950/60 p-4 space-y-3">
-              <p className="text-[11px] font-extrabold uppercase tracking-wider text-slate-400">
+              <p className="text-[11px] font-extrabold uppercase tracking-wider text-muted">
                 Website intelligence
               </p>
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs">
                 <div>
-                  <span className="block text-slate-500">Primary keywords</span>
-                  <span className="text-white font-semibold">
+                  <span className="block text-dim">Primary keywords</span>
+                  <span className="text-ink font-semibold">
                     {intel.primaryKeywords.slice(0, 3).join(", ") || "—"}
                   </span>
                 </div>
                 <div>
-                  <span className="block text-slate-500">Secondary keywords</span>
-                  <span className="text-white font-semibold">
+                  <span className="block text-dim">Secondary keywords</span>
+                  <span className="text-ink font-semibold">
                     {intel.secondaryKeywords.slice(0, 3).join(", ") || "—"}
                   </span>
                 </div>
                 <div>
-                  <span className="block text-slate-500">Location</span>
-                  <span className="text-white font-semibold">{intel.location || location || "—"}</span>
+                  <span className="block text-dim">Location</span>
+                  <span className="text-ink font-semibold">{intel.location || location || "—"}</span>
                 </div>
                 <div>
-                  <span className="block text-slate-500">Pages analyzed</span>
-                  <span className="text-white font-semibold">{intel.pagesAnalyzed}</span>
+                  <span className="block text-dim">Pages analyzed</span>
+                  <span className="text-ink font-semibold">{intel.pagesAnalyzed}</span>
                 </div>
                 <div>
-                  <span className="block text-slate-500">Services found</span>
-                  <span className="text-white font-semibold">{intel.servicesFound}</span>
+                  <span className="block text-dim">Services found</span>
+                  <span className="text-ink font-semibold">{intel.servicesFound}</span>
                 </div>
                 <div>
-                  <span className="block text-slate-500">Links found</span>
-                  <span className="text-white font-semibold">{intel.linksFound}</span>
+                  <span className="block text-dim">Links found</span>
+                  <span className="text-ink font-semibold">{intel.linksFound}</span>
                 </div>
               </div>
               <button
@@ -849,7 +880,7 @@ export default function ContentStudioPage() {
                 {seoOpen ? "Hide SEO intelligence" : "Show SEO intelligence"}
               </button>
               {seoOpen && (
-                <div className="text-[11px] text-slate-400 space-y-1 font-mono">
+                <div className="text-[11px] text-muted space-y-1 font-mono">
                   <p>Primary: {intel.primaryKeywords.join(" · ") || "—"}</p>
                   <p>Secondary: {intel.secondaryKeywords.join(" · ") || "—"}</p>
                   <p>Intent: {analysis.dominantIntent}</p>
@@ -882,10 +913,10 @@ export default function ContentStudioPage() {
         <div className="glass-card p-5 sm:p-7 rounded-2xl border border-navy-800 space-y-5">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
-              <h3 className="text-base font-bold text-white">Content sources</h3>
-              <p className="text-sm text-slate-400 mt-1">
+              <h3 className="text-base font-bold text-ink">Content sources</h3>
+              <p className="text-sm text-muted mt-1">
                 Only selected links are used as content sources.{" "}
-                <span className="text-white font-bold">
+                <span className="text-ink font-bold">
                   {selectedPages.length} of {(analysis.pages || []).length} selected
                 </span>
               </p>
@@ -893,7 +924,7 @@ export default function ContentStudioPage() {
             <button
               type="button"
               onClick={() => setStep(1)}
-              className="text-xs font-bold text-slate-400 hover:text-white"
+              className="text-xs font-bold text-muted hover:text-ink"
             >
               ← Website
             </button>
@@ -903,14 +934,14 @@ export default function ContentStudioPage() {
             <button
               type="button"
               onClick={() => setSelectedPages(analysis.pages.slice(0, 15))}
-              className="text-[11px] font-bold border border-navy-700 px-3 py-1.5 rounded-lg text-slate-300"
+              className="text-[11px] font-bold border border-navy-700 px-3 py-1.5 rounded-lg text-muted"
             >
               Select all
             </button>
             <button
               type="button"
               onClick={() => setSelectedPages([])}
-              className="text-[11px] font-bold border border-navy-700 px-3 py-1.5 rounded-lg text-slate-300"
+              className="text-[11px] font-bold border border-navy-700 px-3 py-1.5 rounded-lg text-muted"
             >
               Clear
             </button>
@@ -918,7 +949,7 @@ export default function ContentStudioPage() {
               value={sourceSearch}
               onChange={(e) => setSourceSearch(e.target.value)}
               placeholder="Search pages…"
-              className="flex-1 min-w-[140px] text-xs border border-navy-700 bg-navy-900 rounded-lg px-3 py-1.5 text-white"
+              className="flex-1 min-w-[140px] text-xs border border-navy-700 bg-navy-900 rounded-lg px-3 py-1.5 text-ink"
             />
           </div>
           <div className="flex flex-wrap gap-1.5">
@@ -930,7 +961,7 @@ export default function ContentStudioPage() {
                 className={`text-[10px] font-bold px-2.5 py-1 rounded-full ${
                   sourceFilter === f
                     ? "bg-orange-500 text-white"
-                    : "bg-navy-900 text-slate-400 border border-navy-700"
+                    : "bg-navy-900 text-muted border border-navy-700"
                 }`}
               >
                 {f}
@@ -939,7 +970,7 @@ export default function ContentStudioPage() {
           </div>
 
           {!selectedPages.length && (
-            <p className="text-xs text-amber-300 bg-amber-950/30 border border-amber-500/20 rounded-xl px-3 py-2">
+            <p className="text-xs text-[#d97706] bg-amber-50/30 border border-amber-500/20 rounded-xl px-3 py-2">
               Select at least one website page to generate content.
             </p>
           )}
@@ -963,14 +994,14 @@ export default function ContentStudioPage() {
                       className="mt-1 rounded border-navy-600 bg-navy-900 text-orange-500 focus:ring-orange-500 w-4 h-4"
                     />
                     <span className="min-w-0 flex-1">
-                      <span className="block text-sm font-bold text-white truncate">
+                      <span className="block text-sm font-bold text-ink truncate">
                         {page.title || page.url.replace(/^https?:\/\//, "")}
                       </span>
-                      <span className="block text-[11px] text-slate-500 truncate mt-0.5 font-mono">
+                      <span className="block text-[11px] text-dim truncate mt-0.5 font-mono">
                         {page.url.replace(/^https?:\/\//, "")}
                       </span>
                       <span className="mt-1.5 flex flex-wrap gap-1.5 text-[10px]">
-                        <span className="bg-navy-950 border border-navy-700 text-slate-300 px-1.5 py-0.5 rounded font-semibold">
+                        <span className="bg-navy-950 border border-navy-700 text-muted px-1.5 py-0.5 rounded font-semibold">
                           {page.pageType || page.writingIntent}
                         </span>
                         {page.keywords.primary && (
@@ -1002,21 +1033,21 @@ export default function ContentStudioPage() {
         <div className="glass-card p-5 sm:p-7 rounded-2xl border border-navy-800 space-y-6">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
-              <h3 className="text-base font-bold text-white">Channels &amp; content</h3>
-              <p className="text-sm text-slate-400 mt-1">
+              <h3 className="text-base font-bold text-ink">Channels &amp; content</h3>
+              <p className="text-sm text-muted mt-1">
                 Platform rules apply automatically. CTA is chosen by the system.
               </p>
             </div>
             <button
               type="button"
               onClick={() => setStep(2)}
-              className="text-xs font-bold text-slate-400 hover:text-white"
+              className="text-xs font-bold text-muted hover:text-ink"
             >
               ← Sources
             </button>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {Object.values(PLATFORM_RULE_SUMMARY).map((ch) => {
               const on = channels.includes(ch.key);
               return (
@@ -1028,15 +1059,18 @@ export default function ContentStudioPage() {
                       prev.includes(ch.key) ? prev.filter((x) => x !== ch.key) : [...prev, ch.key]
                     )
                   }
-                  className={`text-left rounded-2xl border px-4 py-4 min-h-[44px] ${
-                    on ? "border-orange-500 bg-orange-950/30" : "border-navy-700 bg-navy-900/50"
+                  className={`text-left rounded-2xl border px-[18px] py-[18px] min-h-[44px] transition-colors ${
+                    on
+                      ? "border-accent-border bg-accent-soft"
+                      : "border-line bg-navy-800 hover:border-accent-border"
                   }`}
                 >
-                  <span className="flex items-center gap-2 text-sm font-bold text-white">
-                    {platformIcon(ch.key)} {ch.key === "GMB" ? "Google Business" : ch.key}
+                  <span className="flex items-center gap-2 text-sm font-bold text-ink">
+                    <PlatformGlyph platform={ch.key} size={17} />
+                    {ch.key === "GMB" ? "Google Business" : ch.key === "X" ? "X (Twitter)" : ch.key}
                   </span>
-                  <span className="block text-[11px] text-slate-400 mt-2">{ch.spec}</span>
-                  <span className="block text-[10px] text-slate-500 font-mono mt-1">{ch.img}</span>
+                  <span className="block text-[11px] text-muted mt-2">{ch.spec}</span>
+                  <span className="block text-[10px] text-dim font-mono mt-1">{ch.img}</span>
                 </button>
               );
             })}
@@ -1044,7 +1078,7 @@ export default function ContentStudioPage() {
 
           {gmbOn && (
             <div className="space-y-3">
-              <p className="text-[11px] font-extrabold uppercase tracking-wider text-slate-400">
+              <p className="text-[11px] font-extrabold uppercase tracking-wider text-muted">
                 GMB content type
               </p>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -1061,13 +1095,13 @@ export default function ContentStudioPage() {
                       }`}
                       style={{ borderColor: selected ? cat.accent : undefined }}
                     >
-                      <span className="block text-sm font-bold text-white">{cat.label}</span>
-                      <span className="block text-[11px] text-slate-400 mt-1">{cat.short}</span>
+                      <span className="block text-sm font-bold text-ink">{cat.label}</span>
+                      <span className="block text-[11px] text-muted mt-1">{cat.short}</span>
                       <span className="block text-[11px] mt-2" style={{ color: cat.accent }}>
                         {cat.recommendedUse}
                       </span>
                       {blocked && (
-                        <span className="block text-[11px] text-amber-300 mt-2">
+                        <span className="block text-[11px] text-[#d97706] mt-2">
                           No verified offer or event found for this content type.
                         </span>
                       )}
@@ -1095,8 +1129,8 @@ export default function ContentStudioPage() {
           <div className="glass-card p-5 sm:p-6 rounded-2xl border border-navy-800 space-y-4">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
-                <h3 className="text-base font-bold text-white">Generate &amp; review</h3>
-                <p className="text-sm text-slate-400 mt-1">
+                <h3 className="text-base font-bold text-ink">Generate &amp; review</h3>
+                <p className="text-sm text-muted mt-1">
                   Image is optional. Generate, then edit, rewrite, schedule, or publish.
                 </p>
               </div>
@@ -1113,7 +1147,7 @@ export default function ContentStudioPage() {
             </div>
 
             <div className="space-y-3">
-              <p className="text-[11px] font-extrabold uppercase tracking-wider text-slate-400">Image</p>
+              <p className="text-[11px] font-extrabold uppercase tracking-wider text-muted">Image</p>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                 {(
                   [
@@ -1141,8 +1175,8 @@ export default function ContentStudioPage() {
                         active ? "border-orange-500 bg-orange-950/30" : "border-navy-700 bg-navy-900/50"
                       }`}
                     >
-                      <span className="block text-sm font-bold text-white">{opt.title}</span>
-                      <span className="block text-[11px] text-slate-400 mt-0.5">{opt.desc}</span>
+                      <span className="block text-sm font-bold text-ink">{opt.title}</span>
+                      <span className="block text-[11px] text-muted mt-0.5">{opt.desc}</span>
                     </button>
                   );
                 })}
@@ -1150,7 +1184,7 @@ export default function ContentStudioPage() {
             </div>
 
             <div className="rounded-2xl border border-navy-700 bg-navy-950/50 p-4 space-y-2">
-              <p className="text-[11px] font-extrabold uppercase tracking-wider text-slate-400">
+              <p className="text-[11px] font-extrabold uppercase tracking-wider text-muted">
                 Ready to generate
               </p>
               {[
@@ -1160,7 +1194,7 @@ export default function ContentStudioPage() {
                 [channels.length > 0, `Channels: ${channels.join(", ") || "none"}`],
                 [!gmbOn || !!gmbCategory, gmbOn ? `GMB type selected` : "GMB not selected"],
               ].map(([ok, label]) => (
-                <p key={String(label)} className={`text-xs ${ok ? "text-emerald-400" : "text-amber-300"}`}>
+                <p key={String(label)} className={`text-xs ${ok ? "text-[#16a34a]" : "text-[#d97706]"}`}>
                   {ok ? "✓" : "⚠"} {label}
                 </p>
               ))}
@@ -1184,29 +1218,34 @@ export default function ContentStudioPage() {
               </button>
             </div>
 
-            <div className="flex flex-wrap gap-2 text-[11px] text-slate-400">
-              <span className="inline-flex items-center gap-1 font-bold text-slate-300 bg-navy-900 border border-navy-700 px-2 py-1 rounded-lg">
-                <Lock className="w-3.5 h-3.5 text-emerald-400" />
+            <div className="flex flex-wrap gap-2 text-[11px] text-muted">
+              <span className="inline-flex items-center gap-1 font-bold text-muted bg-navy-900 border border-navy-700 px-2 py-1 rounded-lg">
+                <Lock className="w-3.5 h-3.5 text-[#16a34a]" />
                 {lockedCount} locked
               </span>
               {lastPostedAt && (
                 <span className="inline-flex items-center gap-1 font-semibold bg-navy-900 border border-navy-700 px-2 py-1 rounded-lg">
-                  <Clock className="w-3.5 h-3.5 text-sky-400" />
+                  <Clock className="w-3.5 h-3.5 text-[#0a66c2]" />
                   Last: {new Date(lastPostedAt).toLocaleString()}
                 </span>
               )}
-              <span className="inline-flex items-center gap-1 bg-navy-900 border border-navy-700 px-2 py-1 rounded-lg">
-                <Facebook className="w-3 h-3 text-blue-400" /> {platformCounts.Facebook}
-              </span>
-              <span className="inline-flex items-center gap-1 bg-navy-900 border border-navy-700 px-2 py-1 rounded-lg">
-                <Instagram className="w-3 h-3 text-pink-400" /> {platformCounts.Instagram}
-              </span>
-              <span className="inline-flex items-center gap-1 bg-navy-900 border border-navy-700 px-2 py-1 rounded-lg">
-                <Linkedin className="w-3 h-3 text-sky-400" /> {platformCounts.LinkedIn}
-              </span>
-              <span className="inline-flex items-center gap-1 bg-navy-900 border border-navy-700 px-2 py-1 rounded-lg">
-                <Globe className="w-3 h-3 text-emerald-400" /> {platformCounts.GMB}
-              </span>
+              {(
+                [
+                  ["Facebook", platformCounts.Facebook],
+                  ["Instagram", platformCounts.Instagram],
+                  ["LinkedIn", platformCounts.LinkedIn],
+                  ["GMB", platformCounts.GMB],
+                  ["X", platformCounts.X],
+                  ["Pinterest", platformCounts.Pinterest],
+                ] as const
+              ).map(([key, count]) => (
+                <span
+                  key={key}
+                  className="inline-flex items-center gap-1 bg-navy-900 border border-navy-700 px-2 py-1 rounded-lg"
+                >
+                  <PlatformGlyph platform={key} size={12} /> {count}
+                </span>
+              ))}
             </div>
 
             <div className="flex flex-wrap gap-2">
@@ -1221,7 +1260,7 @@ export default function ContentStudioPage() {
                   className={`px-3 py-1.5 rounded-full text-[11px] font-bold capitalize ${
                     mainTab === "active" && listFilter === f
                       ? "bg-orange-500 text-white"
-                      : "bg-navy-900 text-slate-400 border border-navy-700"
+                      : "bg-navy-900 text-muted border border-navy-700"
                   }`}
                 >
                   {f} ({generatedPosts.filter((p) => p.status === f).length})
@@ -1236,7 +1275,7 @@ export default function ContentStudioPage() {
                 className={`px-3 py-1.5 rounded-full text-[11px] font-bold ${
                   mainTab === "archive"
                     ? "bg-orange-500 text-white"
-                    : "bg-navy-900 text-slate-400 border border-navy-700"
+                    : "bg-navy-900 text-muted border border-navy-700"
                 }`}
               >
                 Archive ({archiveTotal})
@@ -1249,7 +1288,7 @@ export default function ContentStudioPage() {
                   type="button"
                   disabled={isAttachingImages || !postsMissingImages}
                   onClick={() => handleAttachAllImages(true)}
-                  className="inline-flex items-center gap-1.5 text-xs font-bold border border-violet-800/50 text-violet-300 bg-violet-950/30 px-3 py-2 rounded-xl disabled:opacity-50"
+                  className="inline-flex items-center gap-1.5 text-xs font-bold border border-accent-border text-accent bg-accent-soft px-3 py-2 rounded-xl disabled:opacity-50"
                 >
                   {isAttachingImages ? (
                     <RefreshCw className="w-3.5 h-3.5 animate-spin" />
@@ -1265,7 +1304,7 @@ export default function ContentStudioPage() {
           {mainTab === "active" && (
             <>
               {filtered.length === 0 ? (
-                <div className="glass-card p-8 rounded-2xl border border-navy-800 text-center text-slate-500 text-sm">
+                <div className="glass-card p-8 rounded-2xl border border-navy-800 text-center text-dim text-sm">
                   No {listFilter} posts yet.{" "}
                   <button
                     type="button"
@@ -1304,9 +1343,9 @@ export default function ContentStudioPage() {
           {mainTab === "archive" && (
             <div className="space-y-3">
               {isLoadingArchive ? (
-                <p className="text-sm text-slate-400 text-center py-6">Loading archive…</p>
+                <p className="text-sm text-muted text-center py-6">Loading archive…</p>
               ) : archiveTables.length === 0 ? (
-                <div className="glass-card p-8 rounded-2xl border border-navy-800 text-center text-slate-500 text-sm">
+                <div className="glass-card p-8 rounded-2xl border border-navy-800 text-center text-dim text-sm">
                   Archive is empty.
                 </div>
               ) : (
@@ -1317,15 +1356,15 @@ export default function ContentStudioPage() {
                   >
                     <div className="px-4 py-3 border-b border-navy-800 flex flex-wrap justify-between gap-2">
                       <div>
-                        <p className="text-sm font-bold text-white">{table.websiteOrigin}</p>
-                        <p className="text-[11px] text-slate-500">
+                        <p className="text-sm font-bold text-ink">{table.websiteOrigin}</p>
+                        <p className="text-[11px] text-dim">
                           {table.count} posts · {table.lockedCount} locked
                         </p>
                       </div>
                       <button
                         type="button"
                         onClick={() => setClearConfirmOrigin(table.websiteOrigin)}
-                        className="text-[11px] font-bold text-red-300 border border-red-900/40 px-2 py-1 rounded-lg"
+                        className="text-[11px] font-bold text-[#dc2626] border border-red-900/40 px-2 py-1 rounded-lg"
                       >
                         Clear
                       </button>
@@ -1341,11 +1380,11 @@ export default function ContentStudioPage() {
                             key={post.id}
                             className="px-4 py-2.5 flex items-center justify-between gap-2 text-xs"
                           >
-                            <span className="min-w-0 truncate text-slate-300">
+                            <span className="min-w-0 truncate text-muted">
                               {platformIcon(post.platform)}{" "}
-                              <span className="font-semibold text-white">{post.heading}</span>
+                              <span className="font-semibold text-ink">{post.heading}</span>
                               {locked && (
-                                <Lock className="inline w-3 h-3 text-emerald-400 ml-1" />
+                                <Lock className="inline w-3 h-3 text-[#16a34a] ml-1" />
                               )}
                             </span>
                             <button
@@ -1365,21 +1404,21 @@ export default function ContentStudioPage() {
               )}
 
               {clearConfirmOrigin && (
-                <div className="glass-card p-5 rounded-2xl border border-red-900/40 bg-red-950/20 text-center space-y-3">
-                  <p className="text-sm font-bold text-white">Clear archive for this site?</p>
+                <div className="glass-card p-5 rounded-2xl border border-red-900/40 bg-red-50/20 text-center space-y-3">
+                  <p className="text-sm font-bold text-ink">Clear archive for this site?</p>
                   <div className="flex justify-center gap-2">
                     <button
                       type="button"
                       disabled={isClearingArchive}
                       onClick={() => handleClearArchive(clearConfirmOrigin)}
-                      className="bg-red-600 text-white text-xs font-bold px-4 py-2 rounded-xl"
+                      className="bg-red-600 text-ink text-xs font-bold px-4 py-2 rounded-xl"
                     >
                       Yes, clear
                     </button>
                     <button
                       type="button"
                       onClick={() => setClearConfirmOrigin(null)}
-                      className="border border-navy-600 text-slate-300 text-xs font-bold px-4 py-2 rounded-xl"
+                      className="border border-navy-600 text-muted text-xs font-bold px-4 py-2 rounded-xl"
                     >
                       Cancel
                     </button>
@@ -1389,7 +1428,7 @@ export default function ContentStudioPage() {
             </div>
           )}
 
-          <p className="text-[11px] text-slate-500 text-center">
+          <p className="text-[11px] text-dim text-center">
             Need accounts connected?{" "}
             <Link href="/dashboard/connections" className="text-orange-400 font-bold hover:underline">
               Connect Facebook / Instagram / LinkedIn / Google →
@@ -1450,7 +1489,7 @@ function PostListRow({
             type="button"
             disabled={busy}
             onClick={() => onGenerateImage(post.id)}
-            className="inline-flex items-center justify-center gap-1.5 border border-violet-800/50 text-violet-300 text-[11px] font-bold px-2.5 py-1.5 rounded-lg bg-violet-950/30 disabled:opacity-50"
+            className="inline-flex items-center justify-center gap-1.5 border border-accent-border text-accent text-[11px] font-bold px-2.5 py-1.5 rounded-lg bg-accent-soft disabled:opacity-50"
           >
             {imageBusy ? (
               <RefreshCw className="w-3.5 h-3.5 animate-spin" />
@@ -1469,7 +1508,7 @@ function PostListRow({
                     `avonix-${post.platform}-${post.id.slice(0, 8)}.jpg`
                   )
                 }
-                className="inline-flex items-center justify-center gap-1.5 border border-navy-600 text-slate-200 text-[11px] font-bold px-2.5 py-1.5 rounded-lg hover:bg-navy-900"
+                className="inline-flex items-center justify-center gap-1.5 border border-navy-600 text-ink text-[11px] font-bold px-2.5 py-1.5 rounded-lg hover:bg-navy-900"
               >
                 <Download className="w-3.5 h-3.5" />
                 Download
@@ -1478,7 +1517,7 @@ function PostListRow({
                 type="button"
                 disabled={busy}
                 onClick={() => onClearImage(post.id)}
-                className="inline-flex items-center justify-center gap-1.5 border border-navy-600 text-slate-400 text-[11px] font-bold px-2.5 py-1.5 rounded-lg hover:bg-navy-900 disabled:opacity-50"
+                className="inline-flex items-center justify-center gap-1.5 border border-navy-600 text-muted text-[11px] font-bold px-2.5 py-1.5 rounded-lg hover:bg-navy-900 disabled:opacity-50"
               >
                 <Trash2 className="w-3.5 h-3.5" />
                 Detach
@@ -1508,7 +1547,7 @@ function PostListRow({
             type="button"
             disabled={busy}
             onClick={() => onUnschedule(post.id)}
-            className="inline-flex items-center justify-center gap-1.5 border border-navy-600 text-slate-300 text-[11px] font-bold px-2.5 py-1.5 rounded-lg hover:bg-navy-900 disabled:opacity-50"
+            className="inline-flex items-center justify-center gap-1.5 border border-navy-600 text-muted text-[11px] font-bold px-2.5 py-1.5 rounded-lg hover:bg-navy-900 disabled:opacity-50"
           >
             <X className="w-3.5 h-3.5" />
             Cancel schedule
@@ -1528,12 +1567,12 @@ function PostListRow({
           <div className="relative">
             {showPicker && (
               <div className="absolute bottom-full left-0 mb-2 bg-navy-900 border border-navy-600 rounded-xl p-3 z-20 w-[260px] shadow-xl">
-                <p className="text-[10px] text-slate-400 font-bold mb-2">Auto-post at</p>
+                <p className="text-[10px] text-muted font-bold mb-2">Auto-post at</p>
                 <input
                   type="datetime-local"
                   value={scheduleDate}
                   onChange={(e) => setScheduleDate(e.target.value)}
-                  className="w-full text-xs border border-navy-600 bg-navy-950 rounded-lg px-2 py-2 text-slate-200 mb-2"
+                  className="w-full text-xs border border-navy-600 bg-navy-950 rounded-lg px-2 py-2 text-ink mb-2"
                 />
                 <div className="flex gap-2">
                   <button
@@ -1543,14 +1582,14 @@ function PostListRow({
                       onSchedule(post.id, scheduleDate);
                       setShowPicker(false);
                     }}
-                    className="flex-1 bg-sky-600 text-white text-xs font-bold py-2 rounded-lg disabled:opacity-50"
+                    className="flex-1 bg-sky-600 text-ink text-xs font-bold py-2 rounded-lg disabled:opacity-50"
                   >
                     Confirm
                   </button>
                   <button
                     type="button"
                     onClick={() => setShowPicker(false)}
-                    className="flex-1 bg-navy-800 text-slate-300 text-xs font-bold py-2 rounded-lg"
+                    className="flex-1 bg-navy-800 text-muted text-xs font-bold py-2 rounded-lg"
                   >
                     Cancel
                   </button>
@@ -1561,7 +1600,7 @@ function PostListRow({
               type="button"
               disabled={busy}
               onClick={() => setShowPicker(!showPicker)}
-              className="inline-flex items-center justify-center gap-1.5 border border-sky-800/50 text-sky-300 text-[11px] font-bold px-2.5 py-1.5 rounded-lg bg-sky-950/30 disabled:opacity-50"
+              className="inline-flex items-center justify-center gap-1.5 border border-sky-800/50 text-[#0a66c2] text-[11px] font-bold px-2.5 py-1.5 rounded-lg bg-sky-950/30 disabled:opacity-50"
             >
               <Calendar className="w-3.5 h-3.5" />
               Schedule auto-post
@@ -1595,22 +1634,26 @@ function PostListRow({
       <button
         type="button"
         onClick={onToggle}
-        className="inline-flex items-center justify-center gap-1 border border-navy-600 text-slate-400 text-[11px] font-bold px-2.5 py-1.5 rounded-lg hover:bg-navy-900 ml-auto"
+        className="inline-flex items-center justify-center gap-1 border border-navy-600 text-muted text-[11px] font-bold px-2.5 py-1.5 rounded-lg hover:bg-navy-900 ml-auto"
       >
         {expanded ? "Hide text" : "View text"}
       </button>
     </div>
   );
 
+  const brandColor =
+    PLATFORM_BRAND_COLOR[post.platform as keyof typeof PLATFORM_BRAND_COLOR] || "#6d4dff";
+
   return (
     <div
-      className={`glass-card rounded-xl border overflow-visible ${
-        locked ? "border-emerald-900/60" : "border-navy-800"
+      className={`glass-card rounded-[18px] overflow-visible border ${
+        locked ? "border-emerald-200" : "border-line"
       }`}
+      style={{ borderTop: `3px solid ${brandColor}` }}
     >
       {/* Collapsed header — always visible */}
       <div className="flex items-start gap-3 px-3 pt-2.5 pb-2">
-        <div className="relative w-12 h-12 rounded-lg overflow-hidden bg-navy-900 shrink-0 border border-navy-700">
+        <div className="relative w-12 h-12 rounded-lg overflow-hidden bg-navy-800 shrink-0 border border-line">
           {post.image ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img
@@ -1626,26 +1669,26 @@ function PostListRow({
             />
           ) : null}
           <div
-            className={`w-full h-full flex flex-col items-center justify-center text-slate-600 ${
+            className={`w-full h-full flex flex-col items-center justify-center text-dim ${
               post.image ? "hidden" : ""
             }`}
             style={post.image ? { display: "none" } : undefined}
           >
             <ImageIcon className="w-4 h-4" />
-            <span className="text-[7px] font-bold text-slate-500 mt-0.5 leading-none px-0.5 text-center">
+            <span className="text-[7px] font-bold text-dim mt-0.5 leading-none px-0.5 text-center">
               {sizeLabel.split(" · ")[0]}
             </span>
           </div>
           {locked ? (
             <span className="absolute inset-0 bg-navy-950/55 flex items-center justify-center">
-              <Lock className="w-4 h-4 text-emerald-400" />
+              <Lock className="w-4 h-4 text-[#16a34a]" />
             </span>
           ) : (
             <span
               className="absolute bottom-0.5 right-0.5 bg-navy-950/80 rounded p-0.5 border border-navy-600"
               title="Unlocked draft"
             >
-              <Unlock className="w-3 h-3 text-slate-400" />
+              <Unlock className="w-3 h-3 text-muted" />
             </span>
           )}
         </div>
@@ -1653,16 +1696,16 @@ function PostListRow({
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2 mb-0.5">
             {platformIcon(post.platform)}
-            <span className="text-sm font-bold text-white">{post.platform}</span>
-            <span className="text-[10px] uppercase font-bold text-slate-500 border border-navy-600 px-1.5 py-0.5 rounded">
+            <span className="text-sm font-bold text-ink">{post.platform}</span>
+            <span className="text-[10px] uppercase font-bold text-dim border border-navy-600 px-1.5 py-0.5 rounded">
               {post.gmbCategory || post.tone}
             </span>
             {post.platform === "GMB" ? (
               <span
                 className={`text-[10px] font-bold px-1.5 py-0.5 rounded font-mono ${
                   (post.charCount || 0) >= 1000 && (post.charCount || 0) <= 1100
-                    ? "text-emerald-400 bg-emerald-950/30"
-                    : "text-amber-300 bg-amber-950/30"
+                    ? "text-[#16a34a] bg-emerald-50/30"
+                    : "text-[#d97706] bg-amber-50/30"
                 }`}
               >
                 {post.charCount ?? countWords(post.content)} chars
@@ -1671,8 +1714,8 @@ function PostListRow({
               <span
                 className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
                   words >= minWords
-                    ? "text-emerald-400 bg-emerald-950/30"
-                    : "text-red-400 bg-red-950/30"
+                    ? "text-[#16a34a] bg-emerald-50/30"
+                    : "text-[#dc2626] bg-red-50/30"
                 }`}
               >
                 {words} words · min {minWords}
@@ -1682,8 +1725,8 @@ function PostListRow({
               <span
                 className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
                   post.validation.ready || post.validation.status === "READY"
-                    ? "text-emerald-400 bg-emerald-950/30"
-                    : "text-amber-300 bg-amber-950/30"
+                    ? "text-[#16a34a] bg-emerald-50/30"
+                    : "text-[#d97706] bg-amber-50/30"
                 }`}
               >
                 {post.validation.ready || post.validation.status === "READY"
@@ -1697,33 +1740,33 @@ function PostListRow({
               </span>
             )}
             {post.image ? (
-              <span className="text-[10px] font-bold text-violet-300 bg-violet-950/30 px-1.5 py-0.5 rounded">
+              <span className="text-[10px] font-bold text-accent bg-accent-soft px-1.5 py-0.5 rounded">
                 Image on · {sizeLabel}
               </span>
             ) : (
-              <span className="text-[10px] font-bold text-slate-500 bg-navy-900 px-1.5 py-0.5 rounded">
+              <span className="text-[10px] font-bold text-dim bg-navy-900 px-1.5 py-0.5 rounded">
                 No image · need {sizeLabel}
               </span>
             )}
             {locked ? (
-              <span className="text-[10px] font-bold text-emerald-400 inline-flex items-center gap-1 bg-emerald-950/40 border border-emerald-800/50 px-1.5 py-0.5 rounded">
+              <span className="text-[10px] font-bold text-[#16a34a] inline-flex items-center gap-1 bg-emerald-50 border border-emerald-800/50 px-1.5 py-0.5 rounded">
                 <Lock className="w-3 h-3" /> Locked
               </span>
             ) : (
-              <span className="text-[10px] font-bold text-slate-400 inline-flex items-center gap-1 bg-navy-900 border border-navy-600 px-1.5 py-0.5 rounded">
+              <span className="text-[10px] font-bold text-muted inline-flex items-center gap-1 bg-navy-900 border border-navy-600 px-1.5 py-0.5 rounded">
                 <Unlock className="w-3 h-3" /> Unlocked
               </span>
             )}
             {post.status === "scheduled" && post.scheduledDate && (
-              <span className="text-[10px] font-bold text-sky-300 inline-flex items-center gap-1">
+              <span className="text-[10px] font-bold text-[#0a66c2] inline-flex items-center gap-1">
                 <Clock className="w-3 h-3" />
                 {new Date(post.scheduledDate).toLocaleString()}
               </span>
             )}
           </div>
-          <p className="text-xs font-semibold text-slate-200 truncate">{post.heading}</p>
+          <p className="text-xs font-semibold text-ink truncate">{post.heading}</p>
           {!expanded && (
-            <p className="text-[11px] text-slate-500 truncate mt-0.5">{snippet}…</p>
+            <p className="text-[11px] text-dim truncate mt-0.5">{snippet}…</p>
           )}
         </div>
       </div>
@@ -1735,10 +1778,10 @@ function PostListRow({
       {expanded && (
         <div className="px-3 pb-4 border-t border-navy-800 space-y-3">
           {post.publishedAt && (
-            <p className="text-[11px] text-slate-400 font-semibold inline-flex items-center gap-1.5 pt-3">
-              <Clock className="w-3.5 h-3.5 text-sky-400" />
+            <p className="text-[11px] text-muted font-semibold inline-flex items-center gap-1.5 pt-3">
+              <Clock className="w-3.5 h-3.5 text-[#0a66c2]" />
               Last posted:{" "}
-              <span className="text-white">{new Date(post.publishedAt).toLocaleString()}</span>
+              <span className="text-ink">{new Date(post.publishedAt).toLocaleString()}</span>
             </p>
           )}
 
@@ -1750,13 +1793,13 @@ function PostListRow({
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={post.image} alt="" className="w-full h-auto object-cover" />
-              <span className="absolute bottom-2 left-2 inline-flex items-center gap-1 text-[10px] font-bold bg-navy-950/85 text-slate-200 px-2 py-1 rounded-lg border border-navy-600 backdrop-blur-sm">
+              <span className="absolute bottom-2 left-2 inline-flex items-center gap-1 text-[10px] font-bold bg-navy-950/85 text-ink px-2 py-1 rounded-lg border border-navy-600 backdrop-blur-sm">
                 Perfect size: {sizeLabel}
               </span>
             </div>
           )}
 
-          <div className="text-xs text-slate-300 whitespace-pre-wrap leading-relaxed text-left">
+          <div className="text-xs text-muted whitespace-pre-wrap leading-relaxed text-left">
             {String(post.content || post.contentHtml || "")
               .replace(/<a\b[^>]*>([\s\S]*?)<\/a>/gi, "$1")
               .replace(/<br\s*\/?>/gi, "\n")
@@ -1781,7 +1824,7 @@ function PostListRow({
               .map((kw, i) => (
                 <span
                   key={i}
-                  className="text-[10px] font-semibold text-sky-300 bg-sky-950/40 border border-sky-800/40 px-2 py-1 rounded"
+                  className="text-[10px] font-semibold text-[#0a66c2] bg-sky-950/40 border border-sky-800/40 px-2 py-1 rounded"
                 >
                   S{i + 1}: {kw}
                 </span>
@@ -1791,14 +1834,14 @@ function PostListRow({
                 href={post.url}
                 target="_blank"
                 rel="noreferrer"
-                className="text-[10px] font-semibold text-slate-300 bg-navy-900 border border-navy-700 px-2 py-1 rounded font-mono truncate max-w-full"
+                className="text-[10px] font-semibold text-muted bg-navy-900 border border-navy-700 px-2 py-1 rounded font-mono truncate max-w-full"
               >
                 Based on: {post.sourceTitle || "Source"} · {post.url.replace(/^https?:\/\//, "")}
               </a>
             )}
           </div>
           {post.validation?.issues && post.validation.issues.length > 0 && (
-            <div className="text-[11px] text-amber-200 bg-amber-950/30 border border-amber-500/20 rounded-xl px-3 py-2 space-y-1">
+            <div className="text-[11px] text-amber-200 bg-amber-50/30 border border-amber-500/20 rounded-xl px-3 py-2 space-y-1">
               {post.validation.issues.map((issue, i) => (
                 <p key={i}>{issue}</p>
               ))}

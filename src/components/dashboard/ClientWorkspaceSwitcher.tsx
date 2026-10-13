@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Plus, Trash2 } from "lucide-react";
+import { Plus, Trash2, Building2 } from "lucide-react";
 import { useWorkspace } from "@/context/WorkspaceContext";
 import { useToast } from "@/components/ui/Toast";
 import { isApiError } from "@/lib/api-client";
@@ -76,34 +76,32 @@ export function ClientWorkspaceSwitcher() {
   };
 
   return (
-    <div className="hidden md:flex items-center gap-2 pl-4 md:pl-6 border-l border-navy-800 relative">
-      <label htmlFor="workspaceSelect" className="text-xs text-slate-400 font-semibold shrink-0">
-        Client Workspace:
-      </label>
-      <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-400">
-        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" /> Active
-      </span>
-      <select
-        id="workspaceSelect"
-        value={activeId}
-        onChange={(e) => onSwitch(e.target.value)}
-        className="bg-navy-800 text-slate-200 text-xs font-bold rounded-xl px-3 py-1.5 focus:outline-none border border-navy-700 cursor-pointer max-w-[220px]"
-      >
-        {workspaces.length === 0 && <option value="">Loading…</option>}
-        {workspaces.map((w) => (
-          <option key={w.id} value={w.id}>
-            {w.name}
-            {w.domain ? ` · ${w.domain}` : ""}
-          </option>
-        ))}
-      </select>
+    <div className="hidden md:flex items-center gap-2 relative">
+      <div className="flex items-center gap-2 bg-navy-800 border border-line rounded-[11px] pl-3 pr-2 py-1.5">
+        <Building2 className="w-[15px] h-[15px] text-accent shrink-0" />
+        <select
+          id="workspaceSelect"
+          aria-label="Client workspace"
+          value={activeId}
+          onChange={(e) => onSwitch(e.target.value)}
+          className="bg-transparent text-ink text-[13px] font-bold focus:outline-none cursor-pointer max-w-[200px]"
+        >
+          {workspaces.length === 0 && <option value="">Loading…</option>}
+          {workspaces.map((w) => (
+            <option key={w.id} value={w.id}>
+              {w.name}
+              {w.domain ? ` · ${w.domain}` : ""}
+            </option>
+          ))}
+        </select>
+      </div>
 
       <button
         type="button"
         title="Add client"
         disabled={busy || workspaces.length >= limit}
         onClick={() => setAdding((v) => !v)}
-        className="p-1.5 rounded-lg text-orange-400 hover:bg-navy-800 disabled:opacity-40"
+        className="p-1.5 rounded-lg text-accent hover:bg-navy-800 disabled:opacity-40"
       >
         <Plus className="w-4 h-4" />
       </button>
@@ -112,34 +110,34 @@ export function ClientWorkspaceSwitcher() {
         title="Delete active client"
         disabled={busy || workspaces.length <= 1}
         onClick={onDelete}
-        className="p-1.5 rounded-lg text-slate-500 hover:text-red-400 hover:bg-navy-800 disabled:opacity-40"
+        className="p-1.5 rounded-lg text-dim hover:text-red-500 hover:bg-navy-800 disabled:opacity-40"
       >
         <Trash2 className="w-3.5 h-3.5" />
       </button>
-      <span className="text-[10px] text-slate-600 font-bold">
+      <span className="text-[10px] text-dim font-bold">
         {workspaces.length}/{limit}
       </span>
 
       {adding && (
-        <div className="absolute top-16 left-1/2 -translate-x-1/2 z-40 w-[360px] max-w-[90vw] glass-card border border-navy-700 rounded-2xl p-4 shadow-xl bg-navy-900">
-          <p className="text-xs font-bold text-white mb-3">Add client workspace</p>
+        <div className="absolute top-14 left-0 z-40 w-[360px] max-w-[90vw] bg-white border border-line rounded-2xl p-4 shadow-[0_14px_34px_rgba(18,26,48,0.18)]">
+          <p className="text-xs font-bold text-ink mb-3">Add client workspace</p>
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="Client / brand name"
-            className="w-full mb-2 bg-navy-950 border border-navy-700 rounded-xl px-3 py-2 text-xs text-white"
+            className="w-full mb-2 bg-navy-800 border border-line rounded-xl px-3 py-2 text-xs text-ink placeholder:text-dim"
           />
           <input
             value={websiteUrl}
             onChange={(e) => setWebsiteUrl(e.target.value)}
             placeholder="Website (optional) e.g. client.com"
-            className="w-full mb-3 bg-navy-950 border border-navy-700 rounded-xl px-3 py-2 text-xs text-white"
+            className="w-full mb-3 bg-navy-800 border border-line rounded-xl px-3 py-2 text-xs text-ink placeholder:text-dim"
           />
           <div className="flex gap-2 justify-end">
             <button
               type="button"
               onClick={() => setAdding(false)}
-              className="text-[11px] font-bold text-slate-400 px-3 py-2"
+              className="text-[11px] font-bold text-muted px-3 py-2"
             >
               Cancel
             </button>

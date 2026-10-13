@@ -10,8 +10,8 @@ export default function ReportPage() {
       <div className="glass-card p-6 rounded-2xl border border-navy-800">
         <div className="flex flex-col sm:flex-row justify-between items-center mb-6 pb-4 border-b border-navy-800 gap-3">
           <div>
-            <h2 className="text-base font-bold text-white">Performance Reports</h2>
-            <p className="text-xs text-slate-400">
+            <h2 className="text-base font-bold text-ink">Performance Reports</h2>
+            <p className="text-xs text-muted">
               Download White-label PDF reports for your clients.
             </p>
           </div>
@@ -24,7 +24,7 @@ export default function ReportPage() {
           </button>
         </div>
 
-        <div className="bg-navy-900 p-4 rounded-xl border border-navy-800 text-xs font-mono text-slate-300">
+        <div className="bg-navy-900 p-4 rounded-xl border border-navy-800 text-xs font-mono text-muted">
           Client Report Logs: Nexa_Digital_SEO_Performance_July2026.pdf
         </div>
       </div>

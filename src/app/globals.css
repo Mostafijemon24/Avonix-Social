@@ -3,27 +3,38 @@
 @tailwind utilities;
 
 :root {
-  --color-orange: #ff6600;
-  --color-orange-hover: #ff8a3d;
-  --color-orange-text: #ff9145;
-  --color-navy-950: #070d1d;
-  --color-navy-900: #0a1124;
-  --color-navy-800: #0b1327;
-  --color-card: #0e1730;
-  --color-card-inner: #111a35;
-  --color-border: rgba(255, 255, 255, 0.07);
-  --color-text: #e8edf7;
-  --color-text-muted: #c3cde0;
-  --color-text-dim: #8794b0;
-  --color-ready: #54c98a;
-  --color-warn: #f5a524;
+  /* Primary accent — violet (was orange). Names kept for compatibility. */
+  --color-orange: #6d4dff;
+  --color-orange-hover: #5a3de0;
+  --color-orange-text: #6d4dff;
+  --accent: #6d4dff;
+  --accent-soft: rgba(109, 77, 255, 0.1);
+  --accent-border: rgba(109, 77, 255, 0.32);
+  /* Surfaces — light (names kept for compatibility with existing CSS vars). */
+  --color-navy-950: #f6f7fb; /* page background */
+  --color-navy-900: #ffffff; /* panels / header / sidebar */
+  --color-navy-800: #f3f5fb; /* inset surfaces */
+  --bg: #f6f7fb;
+  --panel: #ffffff;
+  --color-card: #ffffff;
+  --color-card-inner: #f3f5fb;
+  --color-border: rgba(18, 26, 48, 0.09);
+  --line: rgba(18, 26, 48, 0.09);
+  /* Text */
+  --color-text: #161d33;
+  --color-text-muted: #58627e;
+  --color-text-dim: #8f98b2;
+  /* Status (unchanged — already legible on light) */
+  --color-ready: #16a34a;
+  --color-warn: #d97706;
   --color-error: #f87171;
   --color-info: #56b6f2;
   --radius-sm: 8px;
   --radius-md: 10px;
   --radius-lg: 13px;
   --radius-xl: 16px;
-  --shadow-primary: 0 8px 24px rgba(255, 102, 0, 0.22);
+  --shadow-primary: 0 8px 20px rgba(109, 77, 255, 0.35);
+  --shadow-card: 0 1px 3px rgba(18, 26, 48, 0.05), 0 10px 30px rgba(18, 26, 48, 0.05);
 }
 
 html {
@@ -33,7 +44,7 @@ html {
 body {
   font-family: var(--font-plus-jakarta), "Plus Jakarta Sans", sans-serif;
   color: var(--color-text);
-  background: var(--color-navy-950);
+  background: var(--bg);
 }
 
 @layer components {
@@ -107,26 +118,27 @@ body {
     height: 6px;
   }
   .custom-scrollbar::-webkit-scrollbar-track {
-    background: #070d1d;
+    background: transparent;
   }
   .custom-scrollbar::-webkit-scrollbar-thumb {
-    background: #2a3759;
+    background: #cfd4e6;
     border-radius: 4px;
   }
 
   .glass-panel {
-    background: rgba(11, 19, 43, 0.85);
+    background: rgba(255, 255, 255, 0.85);
     backdrop-filter: blur(12px);
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    border: 1px solid var(--line);
   }
 
   .glass-card {
-    background: #0e1730;
-    border: 1px solid rgba(255, 255, 255, 0.07);
+    background: #ffffff;
+    border: 1px solid var(--line);
+    box-shadow: var(--shadow-card);
     transition: border-color 0.2s ease;
   }
 
   .glass-card:hover {
-    border-color: rgba(255, 102, 0, 0.4);
+    border-color: var(--accent-border);
   }
 }

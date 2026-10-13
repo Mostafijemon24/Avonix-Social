@@ -12,7 +12,7 @@ export default function LoginPage() {
         <BrandLogo />
         <Link
           href="/"
-          className="text-xs font-bold text-slate-400 hover:text-orange-400 transition-colors"
+          className="text-xs font-bold text-muted hover:text-orange-400 transition-colors"
         >
           Home
         </Link>
@@ -20,7 +20,7 @@ export default function LoginPage() {
 
       <main className="flex-1 px-4 py-12 flex items-start justify-center">
         <Suspense
-          fallback={<div className="text-slate-400 text-sm pt-20">Loading sign in...</div>}
+          fallback={<div className="text-muted text-sm pt-20">Loading sign in...</div>}
         >
           <RegisterFlow />
         </Suspense>

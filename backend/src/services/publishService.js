@@ -6,7 +6,7 @@ import { isFullyVerified } from "./verifyService.js";
 import { stampActivity } from "./reminderService.js";
 import { resolveActiveWorkspace } from "./workspaceService.js";
 
-const SOCIAL_PROVIDERS = ["facebook", "instagram", "linkedin"];
+const SOCIAL_PROVIDERS = ["facebook", "instagram", "linkedin", "x", "pinterest"];
 const GBP_PROVIDERS = ["google_business"];
 
 function parseMeta(row) {
@@ -201,6 +201,168 @@ async function publishLinkedIn(account, message) {
     provider: "linkedin",
     externalId: data.id || null,
     url: account.accountUrl,
+  };
+}
+
+/**
+ * Best-effort OAuth2 refresh for X / Pinterest (both use Basic-auth refresh_token grant).
+ * Returns a valid access token, refreshing + persisting only when near expiry.
+ */
+async function refreshOAuth2Token(account, { tokenUrl, clientId, clientSecret }) {
+  if (!account.refreshToken || !clientId || !clientSecret) return account.accessToken;
+  const expired =
+    account.tokenExpiresAt && new Date(account.tokenExpiresAt).getTime() < Date.now() + 60_000;
+  if (!expired) return account.accessToken;
+
+  const basic = Buffer.from(`${clientId}:${clientSecret}`).toString("base64");
+  const res = await fetch(tokenUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+      Authorization: `Basic ${basic}`,
+    },
+    body: new URLSearchParams({
+      grant_type: "refresh_token",
+      refresh_token: account.refreshToken,
+      client_id: clientId,
+    }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.access_token) return account.accessToken; // fall back; publish may still fail clearly
+
+  const tokenExpiresAt = data.expires_in
+    ? new Date(Date.now() + data.expires_in * 1000)
+    : null;
+  await prisma.connectedAccount.update({
+    where: { id: account.id },
+    data: {
+      accessToken: data.access_token,
+      refreshToken: data.refresh_token || account.refreshToken,
+      tokenExpiresAt,
+      status: "connected",
+    },
+  });
+  return data.access_token;
+}
+
+/**
+ * Upload an image to X and return its media_id.
+ * Uses the chunked-friendly v1.1 simple-upload endpoint, which accepts the
+ * OAuth 2.0 user-context bearer token when the app has the media.write scope.
+ * Throws on failure — callers treat image attachment as best-effort.
+ */
+async function uploadXMedia(accessToken, imageUrl) {
+  const imgRes = await fetch(imageUrl);
+  if (!imgRes.ok) throw new Error(`image fetch failed (${imgRes.status})`);
+  const contentType = imgRes.headers.get("content-type") || "image/jpeg";
+  const bytes = Buffer.from(await imgRes.arrayBuffer());
+  if (bytes.length > 5 * 1024 * 1024) {
+    throw new Error("image larger than X's 5MB simple-upload limit");
+  }
+
+  const form = new FormData();
+  form.append("media", new Blob([bytes], { type: contentType }), "image");
+
+  const upRes = await fetch("https://upload.twitter.com/1.1/media/upload.json", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${accessToken}` },
+    body: form,
+  });
+  const upData = await upRes.json().catch(() => ({}));
+  const mediaId = upData.media_id_string || (upData.media_id && String(upData.media_id));
+  if (!upRes.ok || !mediaId) {
+    throw new Error(
+      upData.errors?.[0]?.message || upData.error || `X media upload failed (${upRes.status})`
+    );
+  }
+  return mediaId;
+}
+
+async function publishX(account, message, imageUrl) {
+  const accessToken = await refreshOAuth2Token(account, {
+    tokenUrl: "https://api.twitter.com/2/oauth2/token",
+    clientId: process.env.X_CLIENT_ID,
+    clientSecret: process.env.X_CLIENT_SECRET,
+  });
+  if (!accessToken) throw new Error("X token missing — reconnect in Connections");
+
+  // Enforce the 280-char limit defensively (generation already caps, but edits may not).
+  const text = String(message || "").slice(0, 280);
+
+  // Attach an image when present — best-effort so a media hiccup never blocks the tweet.
+  let mediaIds = null;
+  if (imageUrl) {
+    try {
+      mediaIds = [await uploadXMedia(accessToken, imageUrl)];
+    } catch (err) {
+      console.warn(`[publishX] media upload skipped (posting text-only): ${err.message}`);
+    }
+  }
+
+  const body = mediaIds ? { text, media: { media_ids: mediaIds } } : { text };
+  const res = await fetch("https://api.twitter.com/2/tweets", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.data?.id) {
+    throw new Error(
+      data.detail || data.title || data.errors?.[0]?.message || `X publish failed (${res.status})`
+    );
+  }
+  const meta = parseMeta(account);
+  return {
+    provider: "x",
+    externalId: data.data.id,
+    withImage: !!mediaIds,
+    url: meta.username
+      ? `https://x.com/${meta.username}/status/${data.data.id}`
+      : `https://x.com/i/web/status/${data.data.id}`,
+  };
+}
+
+async function publishPinterest(account, message, imageUrl) {
+  if (!imageUrl) {
+    throw new Error("Pinterest requires an image. Attach an image to this post, then publish.");
+  }
+  const accessToken = await refreshOAuth2Token(account, {
+    tokenUrl: "https://api.pinterest.com/v5/oauth/token",
+    clientId: process.env.PINTEREST_CLIENT_ID,
+    clientSecret: process.env.PINTEREST_CLIENT_SECRET,
+  });
+  if (!accessToken) throw new Error("Pinterest token missing — reconnect in Connections");
+
+  const meta = parseMeta(account);
+  const boardId = meta.boardId || account.accountId;
+  if (!boardId) throw new Error("No Pinterest board selected — reconnect and pick a board");
+
+  const text = String(message || "");
+  const title = text.split("\n")[0].slice(0, 100) || "New pin";
+  const res = await fetch("https://api.pinterest.com/v5/pins", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      board_id: boardId,
+      title,
+      description: text.slice(0, 500),
+      media_source: { source_type: "image_url", url: imageUrl },
+    }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.id) {
+    throw new Error(data.message || `Pinterest publish failed (${res.status})`);
+  }
+  return {
+    provider: "pinterest",
+    externalId: data.id,
+    url: `https://www.pinterest.com/pin/${data.id}/`,
   };
 }
 
@@ -415,6 +577,10 @@ export async function publishContent(opts) {
         result = await publishInstagram(account, message, imageUrl);
       } else if (account.provider === "linkedin") {
         result = await publishLinkedIn(account, message);
+      } else if (account.provider === "x") {
+        result = await publishX(account, message, imageUrl);
+      } else if (account.provider === "pinterest") {
+        result = await publishPinterest(account, message, imageUrl);
       } else if (account.provider === "google_business") {
         if (publishAction === "review_reply") {
           result = await publishGbpReviewReply(account, message, reviewName);

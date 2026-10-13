@@ -33,9 +33,9 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className="h-full bg-navy-950 text-slate-100">
+    <html lang="en" className="h-full bg-navy-950 text-ink">
       <body
-        className={`${plusJakarta.variable} ${jetbrainsMono.variable} h-full bg-navy-950 text-slate-200 antialiased font-sans selection:bg-orange-500 selection:text-white`}
+        className={`${plusJakarta.variable} ${jetbrainsMono.variable} h-full bg-navy-950 text-ink antialiased font-sans selection:bg-orange-500 selection:text-white`}
       >
         <ToastProvider>
           <WorkspaceProvider>{children}</WorkspaceProvider>

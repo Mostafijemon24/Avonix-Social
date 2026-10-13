@@ -19,11 +19,11 @@ export function HomeContent() {
         <span className="text-[11px] font-black uppercase tracking-widest text-orange-500 bg-orange-500/10 border border-orange-500/20 px-4 py-1.5 rounded-full mb-6 inline-block">
           Enterprise SEO & Automated Social Publishing Engine
         </span>
-        <h1 className="text-3xl sm:text-5xl lg:text-6xl font-black text-white tracking-tight leading-tight mb-6">
+        <h1 className="text-3xl sm:text-5xl lg:text-6xl font-black text-ink tracking-tight leading-tight mb-6">
           Automate Your Sitemaps, Keyword Mapping &{" "}
           <span className="text-orange-500">Social Dispatches</span>
         </h1>
-        <p className="text-slate-400 text-xs sm:text-base max-w-3xl mx-auto mb-8 leading-relaxed">
+        <p className="text-muted text-xs sm:text-base max-w-3xl mx-auto mb-8 leading-relaxed">
           Avonix Social scans XML website sitemaps, extracts homepage focus keywords,
           auto-detects business physical locations, generates 100% unique zero-emoji
           social content with primary keyword overlay graphics, and automates Google
@@ -38,17 +38,17 @@ export function HomeContent() {
           </Link>
           <Link
             href="/how-it-works"
-            className="bg-navy-800 hover:bg-navy-700 text-slate-200 font-bold text-xs sm:text-sm px-8 py-4 rounded-xl border border-navy-700 transition-all"
+            className="bg-navy-800 hover:bg-navy-700 text-ink font-bold text-xs sm:text-sm px-8 py-4 rounded-xl border border-navy-700 transition-all"
           >
             Explore Automation Workflow
           </Link>
         </div>
 
         <div className="mt-16 w-full glass-panel rounded-3xl p-6 sm:p-10 border border-navy-800 shadow-2xl text-center sm:text-left">
-          <h3 className="text-lg font-black text-white mb-2">
+          <h3 className="text-lg font-black text-ink mb-2">
             Test Live Sitemap Scraper & Keyword Engine
           </h3>
-          <p className="text-xs text-slate-400 mb-6">
+          <p className="text-xs text-muted mb-6">
             Enter any website XML sitemap to test live homepage keyword extraction and
             location detection.
           </p>
@@ -56,7 +56,7 @@ export function HomeContent() {
             <input
               type="url"
               defaultValue="https://nexadigital.com/sitemap.xml"
-              className="sm:col-span-3 text-xs bg-navy-950 border border-navy-700 text-white rounded-xl px-4 py-3 font-semibold focus:ring-2 focus:ring-orange-500 outline-none"
+              className="sm:col-span-3 text-xs bg-navy-950 border border-navy-700 text-ink rounded-xl px-4 py-3 font-semibold focus:ring-2 focus:ring-orange-500 outline-none"
             />
             <button
               type="button"
@@ -67,8 +67,8 @@ export function HomeContent() {
             </button>
           </div>
           {sitemapResult && (
-            <div className="mt-6 p-4 bg-navy-900 rounded-2xl border border-navy-800 text-xs text-slate-300">
-              <p className="text-emerald-400 font-bold mb-1">Sitemap Parsed Successfully!</p>
+            <div className="mt-6 p-4 bg-navy-900 rounded-2xl border border-navy-800 text-xs text-muted">
+              <p className="text-[#16a34a] font-bold mb-1">Sitemap Parsed Successfully!</p>
               <p>
                 <strong>Homepage Focus Primary Keyword:</strong> Enterprise Local SEO
                 Services
@@ -86,9 +86,9 @@ export function HomeContent() {
       </section>
 
       <section className="px-4 py-16 bg-navy-900/60 border-t border-navy-800 text-center sm:text-left">
-        <div className="max-w-5xl mx-auto space-y-12 text-xs sm:text-sm text-slate-300 leading-relaxed">
+        <div className="max-w-5xl mx-auto space-y-12 text-xs sm:text-sm text-muted leading-relaxed">
           <div>
-            <h2 className="text-2xl font-black text-white mb-4">
+            <h2 className="text-2xl font-black text-ink mb-4">
               1. The Evolution of Sitemap-Driven Social Media Publishing
             </h2>
             <p className="mb-4">
@@ -108,7 +108,7 @@ export function HomeContent() {
           </div>
 
           <div>
-            <h2 className="text-2xl font-black text-white mb-4">
+            <h2 className="text-2xl font-black text-ink mb-4">
               2. Why Zero-Emoji Corporate Formatting Matters for SEO Brands
             </h2>
             <p className="mb-4">
@@ -124,7 +124,7 @@ export function HomeContent() {
           </div>
 
           <div>
-            <h2 className="text-2xl font-black text-white mb-4">
+            <h2 className="text-2xl font-black text-ink mb-4">
               3. Custom AI Visual Graphics with Primary Keyword Tags
             </h2>
             <p>
@@ -135,7 +135,7 @@ export function HomeContent() {
           </div>
 
           <div>
-            <h2 className="text-2xl font-black text-white mb-4">
+            <h2 className="text-2xl font-black text-ink mb-4">
               4. Hands-Free Google Business Profile Review Response Automation
             </h2>
             <p>

@@ -8,7 +8,7 @@ import { isFullyVerified } from "./verifyService.js";
 import { resolveActiveWorkspace } from "./workspaceService.js";
 import { sanitizeEligibleForClient } from "./oauthPicker.js";
 
-const PROVIDERS = ["facebook", "instagram", "google_business", "linkedin"];
+const PROVIDERS = ["facebook", "instagram", "google_business", "linkedin", "x", "pinterest"];
 const STATE_SECRET = () =>
   process.env.CONNECTIONS_STATE_SECRET ||
   process.env.ADMIN_JWT_SECRET ||
@@ -66,6 +66,26 @@ function providerConfig(provider) {
         "Set LINKEDIN_CLIENT_ID/SECRET. Enable Sign In (OpenID) + Share on LinkedIn. Scopes must match Auth tab (default: openid profile email w_member_social).",
     };
   }
+  if (provider === "x") {
+    return {
+      configured: !!(process.env.X_CLIENT_ID && process.env.X_CLIENT_SECRET),
+      clientId: process.env.X_CLIENT_ID,
+      clientSecret: process.env.X_CLIENT_SECRET,
+      label: "X (Twitter)",
+      setupHint:
+        "Set X_CLIENT_ID and X_CLIENT_SECRET (X Developer Portal, OAuth 2.0 with PKCE; scopes tweet.read tweet.write users.read offline.access media.write).",
+    };
+  }
+  if (provider === "pinterest") {
+    return {
+      configured: !!(process.env.PINTEREST_CLIENT_ID && process.env.PINTEREST_CLIENT_SECRET),
+      clientId: process.env.PINTEREST_CLIENT_ID,
+      clientSecret: process.env.PINTEREST_CLIENT_SECRET,
+      label: "Pinterest",
+      setupHint:
+        "Set PINTEREST_CLIENT_ID and PINTEREST_CLIENT_SECRET (Pinterest Developer Portal; scopes boards:read pins:read pins:write user_accounts:read).",
+    };
+  }
   return { configured: false, label: provider, setupHint: "Unknown provider" };
 }
 
@@ -75,6 +95,8 @@ export function getConnectionsSetupStatus() {
     instagram: providerConfig("instagram").configured,
     google_business: providerConfig("google_business").configured,
     linkedin: providerConfig("linkedin").configured,
+    x: providerConfig("x").configured,
+    pinterest: providerConfig("pinterest").configured,
     linkedinMode: linkedinIsCommunityApp() ? "community" : "signin",
     linkedinScopes: linkedinOAuthScopes(),
     callbacks: {
@@ -82,6 +104,8 @@ export function getConnectionsSetupStatus() {
       instagram: callbackUrl("instagram"),
       google_business: callbackUrl("google_business"),
       linkedin: callbackUrl("linkedin"),
+      x: callbackUrl("x"),
+      pinterest: callbackUrl("pinterest"),
     },
   };
 }
@@ -256,6 +280,13 @@ function verifyState(state) {
   }
 }
 
+/** PKCE pair for OAuth 2.0 providers that require it (X / Twitter). */
+function makePkce() {
+  const verifier = crypto.randomBytes(32).toString("base64url");
+  const challenge = crypto.createHash("sha256").update(verifier).digest("base64url");
+  return { verifier, challenge };
+}
+
 function metaOAuthScopes(provider) {
   const fbDefault = "pages_show_list,pages_read_engagement,business_management";
   const igDefault =
@@ -354,11 +385,13 @@ export async function startOAuth({ email, provider, workspaceId }) {
     };
   }
 
+  const pkce = provider === "x" ? makePkce() : null;
   const state = signState({
     email: gate.user.email,
     provider,
     workspaceId: wid,
     n: crypto.randomBytes(8).toString("hex"),
+    ...(pkce ? { cv: pkce.verifier } : {}),
   });
   const redirectUri = callbackUrl(provider);
 
@@ -394,6 +427,30 @@ export async function startOAuth({ email, provider, workspaceId }) {
     // LinkedIn rejects "+" encoded scopes. Force a new consent screen.
     authUrl = `https://www.linkedin.com/oauth/v2/authorization?${params.toString()}&scope=${encodeURIComponent(linkedinOAuthScopes())}&prompt=consent`;
     console.log(`[linkedin oauth] scopes="${linkedinOAuthScopes()}" redirect=${redirectUri}`);
+  } else if (provider === "x") {
+    const params = new URLSearchParams({
+      response_type: "code",
+      client_id: cfg.clientId,
+      redirect_uri: redirectUri,
+      scope:
+        process.env.X_OAUTH_SCOPES ||
+        "tweet.read tweet.write users.read offline.access media.write",
+      state,
+      code_challenge: pkce.challenge,
+      code_challenge_method: "S256",
+    });
+    authUrl = `https://twitter.com/i/oauth2/authorize?${params.toString()}`;
+  } else if (provider === "pinterest") {
+    const params = new URLSearchParams({
+      response_type: "code",
+      client_id: cfg.clientId,
+      redirect_uri: redirectUri,
+      scope:
+        process.env.PINTEREST_OAUTH_SCOPES ||
+        "boards:read pins:read pins:write user_accounts:read",
+      state,
+    });
+    authUrl = `https://www.pinterest.com/oauth/?${params.toString()}`;
   }
 
   return { ok: true, authUrl, redirectUri };
@@ -721,6 +778,132 @@ async function handleLinkedInCallback({ code, user, workspaceId }) {
   };
 }
 
+async function handleXCallback({ code, codeVerifier }) {
+  const cfg = providerConfig("x");
+  const redirectUri = callbackUrl("x");
+
+  const basic = Buffer.from(`${cfg.clientId}:${cfg.clientSecret}`).toString("base64");
+  const tokenRes = await fetch("https://api.twitter.com/2/oauth2/token", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+      Authorization: `Basic ${basic}`,
+    },
+    body: new URLSearchParams({
+      grant_type: "authorization_code",
+      code,
+      redirect_uri: redirectUri,
+      client_id: cfg.clientId,
+      code_verifier: codeVerifier || "",
+    }),
+  });
+  const tokenData = await tokenRes.json().catch(() => ({}));
+  if (!tokenRes.ok || !tokenData.access_token) {
+    throw new Error(
+      tokenData.error_description || tokenData.error || "X token exchange failed"
+    );
+  }
+
+  const accessToken = tokenData.access_token;
+  const refreshToken = tokenData.refresh_token || null;
+  const expiresAt = tokenData.expires_in
+    ? new Date(Date.now() + tokenData.expires_in * 1000)
+    : null;
+
+  const meRes = await fetch("https://api.twitter.com/2/users/me", {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  const me = await meRes.json().catch(() => ({}));
+  const u = me.data || {};
+  if (!u.id) {
+    throw new Error("Could not load your X account (users.read scope may be missing).");
+  }
+
+  return {
+    eligible: [
+      {
+        accountId: u.id,
+        accountName: u.username ? `@${u.username}` : u.name || `X ${u.id}`,
+        accountUrl: u.username ? `https://x.com/${u.username}` : null,
+        accessToken,
+        refreshToken,
+        tokenExpiresAt: expiresAt,
+        metadata: { xUserId: u.id, username: u.username || null },
+      },
+    ],
+    accessToken,
+    refreshToken,
+    tokenExpiresAt: expiresAt,
+  };
+}
+
+async function handlePinterestCallback({ code }) {
+  const cfg = providerConfig("pinterest");
+  const redirectUri = callbackUrl("pinterest");
+
+  const basic = Buffer.from(`${cfg.clientId}:${cfg.clientSecret}`).toString("base64");
+  const tokenRes = await fetch("https://api.pinterest.com/v5/oauth/token", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+      Authorization: `Basic ${basic}`,
+    },
+    body: new URLSearchParams({
+      grant_type: "authorization_code",
+      code,
+      redirect_uri: redirectUri,
+    }),
+  });
+  const tokenData = await tokenRes.json().catch(() => ({}));
+  if (!tokenRes.ok || !tokenData.access_token) {
+    throw new Error(
+      tokenData.message || tokenData.error_description || tokenData.error || "Pinterest token exchange failed"
+    );
+  }
+
+  const accessToken = tokenData.access_token;
+  const refreshToken = tokenData.refresh_token || null;
+  const expiresAt = tokenData.expires_in
+    ? new Date(Date.now() + tokenData.expires_in * 1000)
+    : null;
+
+  let username = "pinterest";
+  try {
+    const acctRes = await fetch("https://api.pinterest.com/v5/user_account", {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    const acct = await acctRes.json();
+    if (acct?.username) username = acct.username;
+  } catch {
+    /* non-fatal */
+  }
+
+  const boardsRes = await fetch("https://api.pinterest.com/v5/boards?page_size=50", {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  const boardsData = await boardsRes.json().catch(() => ({}));
+  const boards = Array.isArray(boardsData.items) ? boardsData.items : [];
+  if (!boards.length) {
+    throw new Error(
+      "No Pinterest boards found. Create a board at pinterest.com, then reconnect — pins must be published to a board."
+    );
+  }
+
+  const eligible = boards.slice(0, 50).map((b) => ({
+    accountId: b.id,
+    accountName: `${username} · ${b.name || `Board ${b.id}`}`,
+    accountUrl: b.name
+      ? `https://www.pinterest.com/${username}/${String(b.name).toLowerCase().replace(/\s+/g, "-")}/`
+      : null,
+    accessToken,
+    refreshToken,
+    tokenExpiresAt: expiresAt,
+    metadata: { boardId: b.id, boardName: b.name || null, username },
+  }));
+
+  return { eligible, accessToken, refreshToken, tokenExpiresAt: expiresAt };
+}
+
 export async function handleOAuthCallback({ provider, code, state, error, errorDescription }) {
   const frontend = `${appUrl()}/dashboard/connections`;
 
@@ -754,6 +937,10 @@ export async function handleOAuthCallback({ provider, code, state, error, errorD
       bundle = await handleGoogleCallback({ code, user: gate.user, workspaceId });
     } else if (provider === "linkedin") {
       bundle = await handleLinkedInCallback({ code, user: gate.user, workspaceId });
+    } else if (provider === "x") {
+      bundle = await handleXCallback({ code, codeVerifier: payload.cv });
+    } else if (provider === "pinterest") {
+      bundle = await handlePinterestCallback({ code });
     } else {
       return { redirect: `${frontend}?error=${encodeURIComponent("Unknown provider")}` };
     }

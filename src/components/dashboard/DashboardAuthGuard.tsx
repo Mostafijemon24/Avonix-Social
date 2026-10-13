@@ -72,7 +72,7 @@ export function DashboardAuthGuard({ children }: { children: React.ReactNode }) 
 
   if (!ready) {
     return (
-      <div className="min-h-screen bg-navy-950 flex items-center justify-center text-slate-400 text-sm">
+      <div className="min-h-screen bg-navy-950 flex items-center justify-center text-muted text-sm">
         Verifying account access...
       </div>
     );

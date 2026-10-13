@@ -18,7 +18,7 @@ export function PublicHeader() {
       <nav className="h-20 border-b border-navy-800 bg-navy-900/90 backdrop-blur-md sticky top-0 z-40 px-4 lg:px-12 flex items-center justify-between">
         <BrandLogo />
 
-        <div className="hidden xl:flex items-center space-x-6 text-xs font-bold text-slate-300">
+        <div className="hidden xl:flex items-center space-x-6 text-xs font-bold text-muted">
           {PUBLIC_NAV.map((item) => (
             <Link
               key={item.href}
@@ -35,7 +35,7 @@ export function PublicHeader() {
         <div className="flex items-center space-x-3">
           <Link
             href="/login"
-            className="text-xs font-bold text-slate-300 hover:text-white px-4 py-2.5 rounded-xl border border-navy-700 bg-navy-800/60 transition-all"
+            className="text-xs font-bold text-muted hover:text-ink px-4 py-2.5 rounded-xl border border-navy-700 bg-navy-800/60 transition-all"
           >
             Sign In
           </Link>
@@ -48,7 +48,7 @@ export function PublicHeader() {
         </div>
       </nav>
 
-      <div className="xl:hidden bg-navy-900 border-b border-navy-800 px-4 py-2 flex flex-wrap justify-around gap-2 text-[11px] font-bold text-slate-300">
+      <div className="xl:hidden bg-navy-900 border-b border-navy-800 px-4 py-2 flex flex-wrap justify-around gap-2 text-[11px] font-bold text-muted">
         {PUBLIC_NAV.map((item) => (
           <Link key={item.href} href={item.href} className="hover:text-orange-500">
             {item.label === "Pricing & Plans"

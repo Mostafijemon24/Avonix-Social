@@ -13,6 +13,8 @@ const LABELS: Record<string, string> = {
   instagram: "Instagram",
   linkedin: "LinkedIn",
   google_business: "Google Business",
+  x: "X (Twitter)",
+  pinterest: "Pinterest",
 };
 
 export function PublishBar({
@@ -40,7 +42,7 @@ export function PublishBar({
     if (!email) return;
     const allowedProviders =
       action === "social_post"
-        ? ["facebook", "instagram", "linkedin"]
+        ? ["facebook", "instagram", "linkedin", "x", "pinterest"]
         : ["google_business"];
     api
       .getConnections(email, workspaceId)
@@ -107,7 +109,7 @@ export function PublishBar({
 
   if (!loaded) {
     return (
-      <div className="glass-card p-4 rounded-2xl border border-navy-800 text-[11px] text-slate-500">
+      <div className="glass-card p-4 rounded-2xl border border-navy-800 text-[11px] text-dim">
         Checking connections…
       </div>
     );
@@ -115,8 +117,8 @@ export function PublishBar({
 
   if (!targets.length) {
     return (
-      <div className="glass-card p-4 rounded-2xl border border-amber-500/30 bg-amber-950/10 text-left">
-        <p className="text-xs text-amber-300 mb-2">
+      <div className="glass-card p-4 rounded-2xl border border-amber-200 bg-amber-50/10 text-left">
+        <p className="text-xs text-[#d97706] mb-2">
           No publish-ready {action === "social_post" ? "social" : "Google Business"} connection.
           Complete OAuth in Connections first (URL-only links cannot publish).
         </p>
@@ -132,10 +134,10 @@ export function PublishBar({
 
   return (
     <div className="glass-card p-4 rounded-2xl border border-navy-800 text-left space-y-3">
-      <p className="text-xs font-bold text-white">Publish to connected accounts</p>
+      <p className="text-xs font-bold text-ink">Publish to connected accounts</p>
       <div className="flex flex-wrap gap-3">
         {targets.map((t) => (
-          <label key={t.id} className="inline-flex items-center gap-2 text-[11px] text-slate-300 cursor-pointer">
+          <label key={t.id} className="inline-flex items-center gap-2 text-[11px] text-muted cursor-pointer">
             <input
               type="checkbox"
               className="accent-orange-500"
@@ -152,12 +154,12 @@ export function PublishBar({
         ))}
       </div>
       {action === "social_post" && selected.instagram && !imageUrl && (
-        <p className="text-[10px] text-amber-400">
+        <p className="text-[10px] text-[#d97706]">
           Instagram needs a public image URL. Facebook / LinkedIn can publish text-only.
         </p>
       )}
       {action === "review_reply" && !reviewName && (
-        <p className="text-[10px] text-amber-400">
+        <p className="text-[10px] text-[#d97706]">
           Demo review has no live Google review ID — reply publish will be blocked until reviews sync.
         </p>
       )}
@@ -165,7 +167,7 @@ export function PublishBar({
         type="button"
         disabled={publishing || !chosen.length}
         onClick={publish}
-        className="inline-flex items-center gap-2 bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-white text-xs font-bold px-4 py-2.5 rounded-xl"
+        className="inline-flex items-center gap-2 bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-ink text-xs font-bold px-4 py-2.5 rounded-xl"
       >
         <Send className="w-3.5 h-3.5" />
         {publishing ? "Publishing…" : `Publish (${chosen.length})`}

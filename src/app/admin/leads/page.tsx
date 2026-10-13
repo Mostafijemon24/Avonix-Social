@@ -30,21 +30,21 @@ export default function AdminLeadsPage() {
     load();
   };
 
-  if (loading) return <p className="text-slate-400 text-sm">Loading leads...</p>;
+  if (loading) return <p className="text-muted text-sm">Loading leads...</p>;
 
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-black text-white">Leads ({leads.length})</h1>
-          <p className="text-xs text-slate-400 mt-1">
+          <h1 className="text-2xl font-black text-ink">Leads ({leads.length})</h1>
+          <p className="text-xs text-muted mt-1">
             Contact form submissions and manually added leads.
           </p>
         </div>
         <select
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
-          className="border border-navy-700 bg-navy-950 text-white text-xs rounded-xl px-3 py-2"
+          className="border border-navy-700 bg-navy-950 text-ink text-xs rounded-xl px-3 py-2"
         >
           <option value="">All statuses</option>
           {STATUSES.map((s) => (
@@ -56,14 +56,14 @@ export default function AdminLeadsPage() {
       </div>
 
       {msg && (
-        <div className="bg-emerald-950/40 border border-emerald-500/40 text-emerald-300 text-xs p-3 rounded-xl">
+        <div className="bg-emerald-50 border border-emerald-200 text-[#16a34a] text-xs p-3 rounded-xl">
           {msg}
         </div>
       )}
 
       <div className="space-y-3">
         {leads.length === 0 ? (
-          <div className="glass-card p-8 rounded-2xl border border-navy-800 text-center text-slate-500 text-sm">
+          <div className="glass-card p-8 rounded-2xl border border-navy-800 text-center text-dim text-sm">
             No leads yet. They appear when someone submits the contact form.
           </div>
         ) : (
@@ -74,20 +74,20 @@ export default function AdminLeadsPage() {
             >
               <div className="flex flex-wrap justify-between gap-2">
                 <div>
-                  <p className="text-white font-bold text-sm">{lead.name}</p>
+                  <p className="text-ink font-bold text-sm">{lead.name}</p>
                   <p className="text-orange-400">{lead.email}</p>
                 </div>
-                <span className="bg-navy-800 text-slate-300 px-2 py-1 rounded-lg capitalize h-fit">
+                <span className="bg-navy-800 text-muted px-2 py-1 rounded-lg capitalize h-fit">
                   {lead.status}
                 </span>
               </div>
-              <p className="text-slate-400">
+              <p className="text-muted">
                 {lead.company || "—"} · {lead.phone || "no phone"} · source: {lead.source}
               </p>
               {lead.message && (
-                <p className="text-slate-300 bg-navy-950/60 p-3 rounded-xl">{lead.message}</p>
+                <p className="text-muted bg-navy-950/60 p-3 rounded-xl">{lead.message}</p>
               )}
-              <p className="text-slate-600">{new Date(lead.createdAt).toLocaleString()}</p>
+              <p className="text-dim">{new Date(lead.createdAt).toLocaleString()}</p>
               <div className="flex flex-wrap gap-2 pt-1">
                 {STATUSES.map((s) => (
                   <button
@@ -97,7 +97,7 @@ export default function AdminLeadsPage() {
                     className={`px-2.5 py-1 rounded-lg font-bold capitalize ${
                       lead.status === s
                         ? "bg-orange-500 text-white"
-                        : "bg-navy-800 text-slate-400 hover:text-white"
+                        : "bg-navy-800 text-muted hover:text-ink"
                     }`}
                   >
                     {s}
@@ -106,7 +106,7 @@ export default function AdminLeadsPage() {
                 <button
                   type="button"
                   onClick={() => remove(lead.id)}
-                  className="px-2.5 py-1 rounded-lg font-bold text-red-400 hover:bg-red-950/40"
+                  className="px-2.5 py-1 rounded-lg font-bold text-[#dc2626] hover:bg-red-50"
                 >
                   Delete
                 </button>

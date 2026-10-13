@@ -80,32 +80,32 @@ export default function AdminSettingsPage() {
     }
   };
 
-  if (loading) return <p className="text-slate-400 text-sm">Loading settings...</p>;
+  if (loading) return <p className="text-muted text-sm">Loading settings...</p>;
 
   return (
     <div className="space-y-8">
       <div>
-        <h1 className="text-2xl font-black text-white">Settings & API Config</h1>
-        <p className="text-xs text-slate-400 mt-1">
+        <h1 className="text-2xl font-black text-ink">Settings & API Config</h1>
+        <p className="text-xs text-muted mt-1">
           Security, plan pricing, and payment/AI API keys.
         </p>
       </div>
 
       {msg && (
-        <div className="bg-emerald-950/40 border border-emerald-500/40 text-emerald-300 text-xs p-3 rounded-xl">
+        <div className="bg-emerald-50 border border-emerald-200 text-[#16a34a] text-xs p-3 rounded-xl">
           {msg}
         </div>
       )}
       {err && (
-        <div className="bg-red-950/40 border border-red-500/40 text-red-300 text-xs p-3 rounded-xl">
+        <div className="bg-red-50 border border-red-200 text-[#dc2626] text-xs p-3 rounded-xl">
           {err}
         </div>
       )}
 
       <div className="glass-card p-6 rounded-2xl border border-navy-800 space-y-4">
         <div>
-          <h2 className="text-sm font-bold text-white">Admin Security</h2>
-          <p className="text-[10px] text-slate-500 mt-1">
+          <h2 className="text-sm font-bold text-ink">Admin Security</h2>
+          <p className="text-[10px] text-dim mt-1">
             Logged in as <span className="text-orange-400 font-bold">{adminEmail}</span>
             {" · "}2FA mandatory · Max 2 Super Admins · VPS CLI registration only
           </p>
@@ -128,7 +128,7 @@ export default function AdminSettingsPage() {
       </div>
 
       <div className="glass-card p-6 rounded-2xl border border-navy-800">
-        <h2 className="text-sm font-bold text-white mb-4">Subscription Plans</h2>
+        <h2 className="text-sm font-bold text-ink mb-4">Subscription Plans</h2>
         <div className="space-y-4">
           {plans.map((plan) => (
             <PlanEditor
@@ -166,23 +166,23 @@ export default function AdminSettingsPage() {
       </div>
 
       <div className="glass-card p-6 rounded-2xl border border-navy-800">
-        <h2 className="text-sm font-bold text-white mb-1">API Keys, Payments & Email (SMTP)</h2>
-        <p className="text-[10px] text-slate-500 mb-4">
+        <h2 className="text-sm font-bold text-ink mb-1">API Keys, Payments & Email (SMTP)</h2>
+        <p className="text-[10px] text-dim mb-4">
           Verification, password-reset, and welcome emails need SMTP Host / User / Pass.
           Prefer Hostinger mailbox credentials in VPS <code className="text-orange-400">backend/.env</code> or save here.
         </p>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
           {CONFIG_FIELDS.map(({ key, label, hint }) => (
             <div key={key}>
-              <label className="block font-bold text-slate-400 mb-1">{label}</label>
+              <label className="block font-bold text-muted mb-1">{label}</label>
               <input
                 type="password"
                 placeholder={savedConfig[key] ? `${savedConfig[key]} (saved)` : hint || "Enter value..."}
                 value={draftConfig[key] ?? ""}
                 onChange={(e) => setDraftConfig((c) => ({ ...c, [key]: e.target.value }))}
-                className="w-full border border-navy-700 bg-navy-950 rounded-xl p-3 text-white"
+                className="w-full border border-navy-700 bg-navy-950 rounded-xl p-3 text-ink"
               />
-              {hint && <p className="text-[10px] text-slate-600 mt-1">{hint}</p>}
+              {hint && <p className="text-[10px] text-dim mt-1">{hint}</p>}
             </div>
           ))}
         </div>
@@ -232,7 +232,7 @@ function PasswordPanel({
 
   return (
     <div className="space-y-3 text-xs max-w-md">
-      <p className="font-bold text-slate-300">Change Password (requires 2FA code)</p>
+      <p className="font-bold text-muted">Change Password (requires 2FA code)</p>
       <PasswordField
         label="Current password"
         name="currentPassword"
@@ -263,7 +263,7 @@ function PasswordPanel({
         placeholder="Authenticator code"
         value={form.totpCode}
         onChange={(e) => setForm((f) => ({ ...f, totpCode: e.target.value }))}
-        className="w-full border border-navy-700 bg-navy-950 rounded-xl p-3 text-white tracking-widest"
+        className="w-full border border-navy-700 bg-navy-950 rounded-xl p-3 text-ink tracking-widest"
       />
       <button
         type="button"
@@ -272,7 +272,7 @@ function PasswordPanel({
       >
         Update Password
       </button>
-      <p className="text-[10px] text-slate-600">
+      <p className="text-[10px] text-dim">
         Email / new admin creation: VPS only — `npm run admin:create` (max 2).
       </p>
     </div>
@@ -298,29 +298,29 @@ function PlanEditor({
         <input
           value={name}
           onChange={(e) => setName(e.target.value)}
-          className="w-full bg-transparent text-white font-bold border-b border-navy-700 pb-1"
+          className="w-full bg-transparent text-ink font-bold border-b border-navy-700 pb-1"
         />
-        <p className="text-[10px] text-slate-500 mt-1">
+        <p className="text-[10px] text-dim mt-1">
           {plan.slug}
-          {!plan.isActive && <span className="text-red-400"> · inactive</span>}
+          {!plan.isActive && <span className="text-[#dc2626]"> · inactive</span>}
         </p>
       </div>
       <div>
-        <label className="text-[10px] text-slate-500 block mb-1">Price (USD)</label>
+        <label className="text-[10px] text-dim block mb-1">Price (USD)</label>
         <input
           type="number"
           value={price}
           onChange={(e) => setPrice(e.target.value)}
-          className="w-24 border border-navy-700 bg-navy-950 rounded-lg p-2 text-white text-xs"
+          className="w-24 border border-navy-700 bg-navy-950 rounded-lg p-2 text-ink text-xs"
         />
       </div>
       <div>
-        <label className="text-[10px] text-slate-500 block mb-1">Credits</label>
+        <label className="text-[10px] text-dim block mb-1">Credits</label>
         <input
           type="number"
           value={credits}
           onChange={(e) => setCredits(e.target.value)}
-          className="w-24 border border-navy-700 bg-navy-950 rounded-lg p-2 text-white text-xs"
+          className="w-24 border border-navy-700 bg-navy-950 rounded-lg p-2 text-ink text-xs"
         />
       </div>
       <button
@@ -333,7 +333,7 @@ function PlanEditor({
           });
           onSave(plan.slug, Number(price), Number(credits));
         }}
-        className="bg-navy-800 hover:bg-navy-700 text-white font-bold px-4 py-2 rounded-lg text-xs"
+        className="bg-navy-800 hover:bg-navy-700 text-ink font-bold px-4 py-2 rounded-lg text-xs"
       >
         Save
       </button>
@@ -342,7 +342,7 @@ function PlanEditor({
         onClick={() => {
           if (confirm(`Delete/deactivate plan "${plan.slug}"?`)) onDelete(plan.slug);
         }}
-        className="bg-red-950/50 hover:bg-red-900/50 text-red-300 font-bold px-3 py-2 rounded-lg text-xs"
+        className="bg-red-50 hover:bg-red-900/50 text-[#dc2626] font-bold px-3 py-2 rounded-lg text-xs"
       >
         Delete
       </button>
@@ -385,33 +385,33 @@ function CreatePlanForm({
 
   return (
     <div className="mt-6 pt-6 border-t border-navy-800">
-      <p className="text-xs font-bold text-slate-300 mb-3">Create New Plan</p>
+      <p className="text-xs font-bold text-muted mb-3">Create New Plan</p>
       <div className="flex flex-wrap gap-3 text-xs">
         <input
           placeholder="Name"
           value={form.name}
           onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-          className="border border-navy-700 bg-navy-950 rounded-lg p-2 text-white w-36"
+          className="border border-navy-700 bg-navy-950 rounded-lg p-2 text-ink w-36"
         />
         <input
           placeholder="slug (optional)"
           value={form.slug}
           onChange={(e) => setForm((f) => ({ ...f, slug: e.target.value }))}
-          className="border border-navy-700 bg-navy-950 rounded-lg p-2 text-white w-32"
+          className="border border-navy-700 bg-navy-950 rounded-lg p-2 text-ink w-32"
         />
         <input
           type="number"
           placeholder="Price"
           value={form.priceUsd}
           onChange={(e) => setForm((f) => ({ ...f, priceUsd: e.target.value }))}
-          className="border border-navy-700 bg-navy-950 rounded-lg p-2 text-white w-24"
+          className="border border-navy-700 bg-navy-950 rounded-lg p-2 text-ink w-24"
         />
         <input
           type="number"
           placeholder="Credits"
           value={form.monthlyCredits}
           onChange={(e) => setForm((f) => ({ ...f, monthlyCredits: e.target.value }))}
-          className="border border-navy-700 bg-navy-950 rounded-lg p-2 text-white w-24"
+          className="border border-navy-700 bg-navy-950 rounded-lg p-2 text-ink w-24"
         />
         <button
           type="button"

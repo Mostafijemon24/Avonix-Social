@@ -29,19 +29,19 @@ export default function HowItWorksPage() {
   return (
     <PublicLayout>
       <div className="flex-1 px-4 py-16 max-w-5xl mx-auto text-center sm:text-left animate-fade-in">
-        <h1 className="text-3xl font-black text-white mb-2">
+        <h1 className="text-3xl font-black text-ink mb-2">
           How Avonix Social Automates Your Content Pipeline
         </h1>
-        <p className="text-slate-400 text-xs sm:text-sm mb-12">
+        <p className="text-muted text-xs sm:text-sm mb-12">
           Step-by-step breakdown of sitemap submission, keyword confirmation, post
           generation, and calendar scheduling.
         </p>
 
-        <div className="space-y-8 text-xs sm:text-sm text-slate-300 leading-relaxed">
+        <div className="space-y-8 text-xs sm:text-sm text-muted leading-relaxed">
           {phases.map((item) => (
             <div key={item.phase} className="glass-card p-6 rounded-2xl border border-navy-800">
               <span className="text-orange-500 font-black text-xl">{item.phase}</span>
-              <h3 className="text-lg font-bold text-white my-2">{item.title}</h3>
+              <h3 className="text-lg font-bold text-ink my-2">{item.title}</h3>
               <p>{item.desc}</p>
             </div>
           ))}

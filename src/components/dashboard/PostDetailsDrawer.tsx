@@ -36,13 +36,13 @@ export default function PostDetailsDrawer({ post, email, onClose, onChanged, sho
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-black/50" onClick={onClose}>
       <aside
-        className="h-full w-full max-w-md overflow-y-auto bg-[color:var(--color-navy-900)] border-l border-white/[0.07] p-5"
+        className="h-full w-full max-w-md overflow-y-auto bg-[color:var(--color-navy-900)] border-l border-line p-5"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-start justify-between gap-3">
           <div>
-            <p className="label-caps text-slate-500">Post details</p>
-            <h3 className="text-base font-extrabold text-white mt-1">{post.heading}</h3>
+            <p className="label-caps text-dim">Post details</p>
+            <h3 className="text-base font-extrabold text-ink mt-1">{post.heading}</h3>
           </div>
           <button type="button" className="btn-ghost p-2" onClick={onClose} aria-label="Close">
             <X className="w-4 h-4" />
@@ -51,32 +51,32 @@ export default function PostDetailsDrawer({ post, email, onClose, onChanged, sho
 
         <div className="mt-4 space-y-3 text-[12px]">
           <p>
-            <span className="text-slate-500">Platform</span>{" "}
-            <span className="font-bold text-white">{post.platform}</span>
+            <span className="text-dim">Platform</span>{" "}
+            <span className="font-bold text-ink">{post.platform}</span>
           </p>
           <p>
-            <span className="text-slate-500">Status</span>{" "}
+            <span className="text-dim">Status</span>{" "}
             <span className="status-pill status-pill-muted capitalize">{post.archived ? "archived" : post.status}</span>
           </p>
           {post.gmbCategory && (
             <p>
-              <span className="text-slate-500">Content type</span>{" "}
-              <span className="text-white">{post.gmbCategory}</span>
+              <span className="text-dim">Content type</span>{" "}
+              <span className="text-ink">{post.gmbCategory}</span>
             </p>
           )}
           {post.cta && (
             <p>
-              <span className="text-slate-500">CTA</span>{" "}
+              <span className="text-dim">CTA</span>{" "}
               <span className="font-bold text-orange-400">CTA · {post.cta}</span>
             </p>
           )}
           <p>
-            <span className="text-slate-500">Source page</span>{" "}
-            <span className="text-white">{post.sourceTitle || post.heading}</span>
+            <span className="text-dim">Source page</span>{" "}
+            <span className="text-ink">{post.sourceTitle || post.heading}</span>
           </p>
           {post.url && (
             <p className="break-all">
-              <span className="text-slate-500">Source URL</span>{" "}
+              <span className="text-dim">Source URL</span>{" "}
               <a href={post.url} target="_blank" rel="noreferrer" className="font-mono text-orange-400">
                 {post.url}
               </a>
@@ -84,36 +84,36 @@ export default function PostDetailsDrawer({ post, email, onClose, onChanged, sho
           )}
           {post.scheduledDate && (
             <p>
-              <span className="text-slate-500">Scheduled</span>{" "}
-              <span className="text-white">{new Date(post.scheduledDate).toLocaleString()}</span>
+              <span className="text-dim">Scheduled</span>{" "}
+              <span className="text-ink">{new Date(post.scheduledDate).toLocaleString()}</span>
             </p>
           )}
           {post.publishedAt && (
             <p>
-              <span className="text-slate-500">Published</span>{" "}
-              <span className="text-white">{new Date(post.publishedAt).toLocaleString()}</span>
+              <span className="text-dim">Published</span>{" "}
+              <span className="text-ink">{new Date(post.publishedAt).toLocaleString()}</span>
             </p>
           )}
           {post.ruleset && (
             <p>
-              <span className="text-slate-500">Ruleset</span>{" "}
-              <span className="font-mono text-slate-400">{post.ruleset}</span>
+              <span className="text-dim">Ruleset</span>{" "}
+              <span className="font-mono text-muted">{post.ruleset}</span>
             </p>
           )}
-          <p className="text-slate-300 whitespace-pre-wrap leading-relaxed border border-white/[0.07] rounded-xl p-3 bg-[color:var(--color-card)]">
+          <p className="text-muted whitespace-pre-wrap leading-relaxed border border-line rounded-xl p-3 bg-[color:var(--color-card)]">
             {post.content}
           </p>
         </div>
 
         <div className="mt-5 space-y-2">
-          <label className="label-caps text-slate-500">Reschedule</label>
+          <label className="label-caps text-dim">Reschedule</label>
           <input
             type="datetime-local"
             className="input-field w-full"
             value={when}
             onChange={(e) => setWhen(e.target.value)}
           />
-          <p className="text-[10px] text-slate-500">Timezone: {Intl.DateTimeFormat().resolvedOptions().timeZone}</p>
+          <p className="text-[10px] text-dim">Timezone: {Intl.DateTimeFormat().resolvedOptions().timeZone}</p>
           <div className="flex flex-wrap gap-2">
             <button
               type="button"

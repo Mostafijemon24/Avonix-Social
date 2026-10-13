@@ -258,26 +258,26 @@ function AdminLoginForm() {
           <div className="w-14 h-14 rounded-2xl bg-orange-500 flex items-center justify-center mx-auto mb-4 font-black text-white text-xl">
             AX
           </div>
-          <h1 className="text-xl font-black text-white">
+          <h1 className="text-xl font-black text-ink">
             {step === "forgot" || step === "reset" ? "Forgot Password" : "Super Admin Login"}
           </h1>
-          <p className="text-xs text-slate-400 mt-1">{subtitle}</p>
+          <p className="text-xs text-muted mt-1">{subtitle}</p>
         </div>
 
         {idleReason && step === "password" && (
-          <div className="bg-amber-950/40 border border-amber-500/40 text-amber-200 text-xs p-3 rounded-xl mb-4">
+          <div className="bg-amber-50 border border-amber-200 text-amber-200 text-xs p-3 rounded-xl mb-4">
             Session ended after 30 minutes of inactivity. Login data cleared.
           </div>
         )}
 
         {error && (
-          <div className="bg-red-950/40 border border-red-500/40 text-red-300 text-xs p-3 rounded-xl mb-4">
+          <div className="bg-red-50 border border-red-200 text-[#dc2626] text-xs p-3 rounded-xl mb-4">
             {error}
           </div>
         )}
 
         {info && (
-          <div className="bg-emerald-950/40 border border-emerald-500/40 text-emerald-200 text-xs p-3 rounded-xl mb-4">
+          <div className="bg-emerald-50 border border-emerald-200 text-emerald-200 text-xs p-3 rounded-xl mb-4">
             {info}
           </div>
         )}
@@ -285,7 +285,7 @@ function AdminLoginForm() {
         {step === "password" && (
           <form onSubmit={handlePassword} className="space-y-4 text-xs" autoComplete="off">
             <div>
-              <label className="block font-bold text-slate-300 mb-1">Admin Email</label>
+              <label className="block font-bold text-muted mb-1">Admin Email</label>
               <input
                 type="email"
                 name="email"
@@ -293,7 +293,7 @@ function AdminLoginForm() {
                 autoComplete="off"
                 defaultValue={emailHint}
                 placeholder="admin@yourdomain.com"
-                className="w-full border border-navy-700 rounded-xl p-3 bg-navy-950 text-white"
+                className="w-full border border-navy-700 rounded-xl p-3 bg-navy-950 text-ink"
               />
             </div>
             <PasswordField
@@ -327,7 +327,7 @@ function AdminLoginForm() {
         {step === "2fa" && (
           <form onSubmit={handle2fa} className="space-y-4 text-xs" autoComplete="off">
             <div>
-              <label className="block font-bold text-slate-300 mb-1">
+              <label className="block font-bold text-muted mb-1">
                 6-digit Authenticator Code
               </label>
               <input
@@ -348,7 +348,7 @@ function AdminLoginForm() {
                 data-lpignore="true"
                 data-1p-ignore
                 placeholder=""
-                className="w-full border border-navy-700 rounded-xl p-3 bg-navy-950 text-white text-center text-lg tracking-[0.4em] font-mono placeholder:text-slate-600"
+                className="w-full border border-navy-700 rounded-xl p-3 bg-navy-950 text-ink text-center text-lg tracking-[0.4em] font-mono placeholder:text-dim"
               />
             </div>
             <button
@@ -366,7 +366,7 @@ function AdminLoginForm() {
                 setStep("password");
                 setError("");
               }}
-              className="w-full text-slate-500 hover:text-white font-bold py-2"
+              className="w-full text-dim hover:text-ink font-bold py-2"
             >
               ← Back
             </button>
@@ -376,7 +376,7 @@ function AdminLoginForm() {
         {step === "forgot" && (
           <form onSubmit={handleForgot} className="space-y-4 text-xs" autoComplete="off">
             <div>
-              <label className="block font-bold text-slate-300 mb-1">Admin Email</label>
+              <label className="block font-bold text-muted mb-1">Admin Email</label>
               <input
                 type="email"
                 name="email"
@@ -384,7 +384,7 @@ function AdminLoginForm() {
                 autoComplete="off"
                 defaultValue={emailHint}
                 placeholder="admin@yourdomain.com"
-                className="w-full border border-navy-700 rounded-xl p-3 bg-navy-950 text-white"
+                className="w-full border border-navy-700 rounded-xl p-3 bg-navy-950 text-ink"
               />
             </div>
             <button
@@ -401,7 +401,7 @@ function AdminLoginForm() {
                 setInfo("");
                 setStep("password");
               }}
-              className="w-full text-slate-500 hover:text-white font-bold py-2"
+              className="w-full text-dim hover:text-ink font-bold py-2"
             >
               ← Back to sign in
             </button>
@@ -410,9 +410,9 @@ function AdminLoginForm() {
 
         {step === "reset" && (
           <form onSubmit={handleResetPassword} className="space-y-3 text-xs" autoComplete="off">
-            <p className="text-[10px] text-slate-500">Account: {emailHint}</p>
+            <p className="text-[10px] text-dim">Account: {emailHint}</p>
             <div>
-              <label className="block font-bold text-slate-300 mb-1">Email Reset Code</label>
+              <label className="block font-bold text-muted mb-1">Email Reset Code</label>
               <input
                 type="text"
                 name="admin-reset-code"
@@ -423,11 +423,11 @@ function AdminLoginForm() {
                 value={resetCode}
                 onChange={(e) => setResetCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
                 autoComplete="off"
-                className="w-full border border-navy-700 rounded-xl p-3 bg-navy-950 font-bold text-white text-center text-lg tracking-[0.4em] font-mono"
+                className="w-full border border-navy-700 rounded-xl p-3 bg-navy-950 font-bold text-ink text-center text-lg tracking-[0.4em] font-mono"
               />
             </div>
             <div>
-              <label className="block font-bold text-slate-300 mb-1">Authenticator Code</label>
+              <label className="block font-bold text-muted mb-1">Authenticator Code</label>
               <input
                 type="text"
                 name="admin-reset-totp"
@@ -438,7 +438,7 @@ function AdminLoginForm() {
                 value={resetTotp}
                 onChange={(e) => setResetTotp(e.target.value.replace(/\D/g, "").slice(0, 6))}
                 autoComplete="off"
-                className="w-full border border-navy-700 rounded-xl p-3 bg-navy-950 font-bold text-white text-center text-lg tracking-[0.4em] font-mono"
+                className="w-full border border-navy-700 rounded-xl p-3 bg-navy-950 font-bold text-ink text-center text-lg tracking-[0.4em] font-mono"
               />
             </div>
             <PasswordField
@@ -463,7 +463,7 @@ function AdminLoginForm() {
               value={confirmPassword}
               onChange={setConfirmPassword}
             />
-            <p className="text-[10px] text-slate-500 -mt-1">{PASSWORD_HINT}</p>
+            <p className="text-[10px] text-dim -mt-1">{PASSWORD_HINT}</p>
             <button
               type="submit"
               disabled={loading || resetCode.length !== 6 || resetTotp.length !== 6}
@@ -475,7 +475,7 @@ function AdminLoginForm() {
               type="button"
               disabled={loading}
               onClick={handleResendReset}
-              className="w-full text-slate-400 hover:text-white font-bold py-2"
+              className="w-full text-muted hover:text-ink font-bold py-2"
             >
               Resend reset code
             </button>
@@ -486,14 +486,14 @@ function AdminLoginForm() {
                 setInfo("");
                 setStep("password");
               }}
-              className="w-full text-slate-500 hover:text-white font-bold py-2"
+              className="w-full text-dim hover:text-ink font-bold py-2"
             >
               ← Back to sign in
             </button>
           </form>
         )}
 
-        <p className="text-[10px] text-slate-600 text-center mt-4 leading-relaxed">
+        <p className="text-[10px] text-dim text-center mt-4 leading-relaxed">
           Admins are created only via VPS terminal (`npm run admin:create`).
           <br />
           Lost authenticator? Recreate the admin from the VPS CLI.
