@@ -733,7 +733,7 @@ export default function ContentStudioPage() {
   return (
     <div className="max-w-[824px] mx-auto flex flex-col gap-11 animate-fade-in text-left">
       {/* Header */}
-      <div>
+      <div className="text-center">
         <h1 className="text-[27px] font-extrabold tracking-[-0.02em] text-ink leading-tight">
           Content Studio
         </h1>
@@ -743,7 +743,7 @@ export default function ContentStudioPage() {
       </div>
 
       {/* Platform chip row */}
-      <div className="flex flex-wrap gap-2.5">
+      <div className="flex flex-wrap justify-center gap-2.5">
         {(
           [
             ["Facebook", "Facebook"],
