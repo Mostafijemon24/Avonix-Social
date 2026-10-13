@@ -276,148 +276,149 @@ function ConnectionsInner() {
   const availableCount = pendingItems.filter((i) => !i.alreadyConnected).length;
 
   return (
-    <div className="space-y-6 max-w-5xl mx-auto animate-fade-in text-left">
+    <div className="space-y-11 max-w-[900px] mx-auto animate-fade-in text-left">
       <div>
-        <h1 className="text-xl font-extrabold tracking-tight text-ink mb-1">Connections</h1>
-        <p className="text-xs text-[color:var(--color-text-muted)]">
-          Multiple accounts per platform stay connected at the same time. Use Connect another —
-          never disconnect to add a new destination.
+        <h1 className="text-[27px] font-extrabold tracking-[-0.02em] text-ink leading-tight">
+          Connections
+        </h1>
+        <p className="mt-2 text-muted text-[14.5px]">
+          Link the accounts Content Studio can publish to. Multiple accounts per
+          platform stay connected — use Connect another to add a destination.
         </p>
       </div>
 
       {loading ? (
         <p className="text-sm text-dim">Loading connections…</p>
       ) : (
-        <div className="space-y-5">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-start">
           {PLATFORMS.map((p) => {
             const group = accounts.filter((a) => a.provider === p.id);
             const ready = group.filter((a) => a.publishReady).length;
             const oauthReady = !!setup?.[p.id];
+            const status =
+              ready > 0
+                ? { label: "Connected", color: "#16a34a", bg: "rgba(22,163,74,0.12)" }
+                : group.length > 0
+                  ? { label: "Linked", color: "#d97706", bg: "rgba(217,119,6,0.12)" }
+                  : { label: "Not connected", color: "#8f98b2", bg: "rgba(143,152,178,0.12)" };
             const countLabel =
               p.id === "google_business"
-                ? `${group.length} Location${group.length === 1 ? "" : "s"} Connected`
-                : `${group.length} Connected`;
+                ? `${group.length} location${group.length === 1 ? "" : "s"} connected`
+                : `${group.length} connected`;
+            const description =
+              group.length > 0
+                ? `${countLabel} · ${ready} of ${group.length} publishing ready`
+                : p.id === "linkedin" && setup?.linkedinMode === "community"
+                  ? "Connect LinkedIn Company Pages. The LinkedIn user must be a Page admin."
+                  : p.blurb;
+            const primaryAction =
+              group.length === 0
+                ? { label: "Connect", primary: true }
+                : ready === 0
+                  ? { label: "Finish setup", primary: true }
+                  : { label: "Connect another", primary: false };
             return (
-              <section key={p.id} className="glass-card p-5 rounded-2xl">
-                <div className="flex flex-wrap items-start justify-between gap-3 mb-3">
-                  <div>
-                    <h2 className="flex items-center gap-2 text-sm font-bold text-ink uppercase tracking-wide">
-                      <PlatformGlyph platform={p.id} size={18} />
-                      {p.title}
-                    </h2>
-                    <p className="text-[11px] text-muted mt-0.5">
-                      {countLabel}
-                      {group.length > 0 ? ` · ${ready} of ${group.length} publishing ready` : ""}
-                    </p>
-                    <p className="text-[11px] text-dim mt-1">
-                      {p.id === "linkedin" && setup?.linkedinMode === "community"
-                        ? "Connect LinkedIn Company Pages. The LinkedIn user must be a Page admin."
-                        : p.blurb}
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    disabled={!!busy}
-                    onClick={() => connectOAuth(p.id)}
-                    className="btn-primary inline-flex items-center gap-1.5 text-[11px] min-h-[44px]"
+              <section
+                key={p.id}
+                className="bg-white rounded-2xl border border-line shadow-card p-[22px] flex flex-col gap-3.5"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="flex items-center gap-2.5 text-sm font-bold text-ink">
+                    <PlatformGlyph platform={p.id} size={18} />
+                    {p.title}
+                  </span>
+                  <span
+                    className="text-[10px] font-bold px-2.5 py-[3px] rounded-full border border-line shrink-0"
+                    style={{ color: status.color, background: status.bg }}
                   >
-                    <Link2 className="w-3.5 h-3.5" />
-                    {busy === p.id ? "Redirecting…" : "Connect Another"}
-                  </button>
+                    {status.label}
+                  </span>
                 </div>
+
+                <p className="text-[12.5px] text-muted m-0">{description}</p>
+
                 {!oauthReady && (
-                  <p className="text-[10px] text-[#d97706]/90 mb-3 bg-amber-50/20 border border-amber-500/20 rounded-lg px-3 py-2">
+                  <p className="text-[11px] text-[#d97706] bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
                     Server OAuth keys for {p.title} are not set yet.
                   </p>
                 )}
-                {group.length === 0 ? (
-                  <p className="text-xs text-dim">No accounts connected yet.</p>
-                ) : (
-                  <ul className="space-y-2">
+
+                {group.length > 0 && (
+                  <ul className="flex flex-col gap-2">
                     {group.map((acc) => {
                       const st = health(acc);
                       const meta = acc.metadata || {};
+                      const isDefault =
+                        acc.isDefault ||
+                        (group[0]?.id === acc.id && !group.some((g) => g.isDefault));
                       return (
                         <li
                           key={acc.id}
-                          className="flex flex-wrap items-start justify-between gap-2 rounded-xl border border-line bg-[color:var(--color-card-inner)] px-3 py-3"
+                          className="rounded-xl border border-line bg-[color:var(--color-card-inner)] px-3 py-2.5 flex flex-col gap-1.5"
                         >
-                          <div className="min-w-0">
-                            <p className="text-sm font-bold text-ink">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-[13px] font-bold text-ink truncate">
                               {acc.accountName || acc.provider}
-                              {(acc.isDefault ||
-                                (group[0]?.id === acc.id && !group.some((g) => g.isDefault))) && (
-                                <span className="ml-2 text-[10px] uppercase tracking-wide text-orange-300 border border-orange-800/50 px-1.5 py-0.5 rounded">
+                              {isDefault && (
+                                <span className="ml-2 text-[9px] uppercase tracking-wide text-accent border border-accent-border px-1.5 py-0.5 rounded">
                                   Default
                                 </span>
                               )}
-                            </p>
-                            <p className={`mt-1 ${st.className}`}>
-                              {st.label === "Publishing Ready" ? "✓ " : st.label.startsWith("Needs") ? "⚠ " : ""}
+                            </span>
+                            <span className={`${st.className} shrink-0`}>
+                              {st.label === "Publishing Ready"
+                                ? "✓ "
+                                : st.label.startsWith("Needs")
+                                  ? "⚠ "
+                                  : ""}
                               {st.label}
-                            </p>
-                            {typeof meta.address === "string" && meta.address && (
-                              <p className="text-[11px] text-muted mt-1">{meta.address}</p>
-                            )}
-                            {typeof meta.phone === "string" && meta.phone && (
-                              <p className="text-[11px] text-dim font-mono">{meta.phone}</p>
-                            )}
-                            {acc.accountUrl && (
-                              <a
-                                href={acc.accountUrl}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="text-[11px] text-orange-400 font-mono break-all"
-                              >
-                                {acc.accountUrl.replace(/^https?:\/\//, "")}
-                              </a>
-                            )}
+                            </span>
                           </div>
-                          <div className="flex flex-wrap gap-1.5">
-                            {acc.accountUrl && (
-                              <a
-                                href={acc.accountUrl}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="btn-ghost text-[11px]"
-                              >
-                                View
-                              </a>
-                            )}
+                          {typeof meta.address === "string" && meta.address && (
+                            <p className="text-[11px] text-muted">{meta.address}</p>
+                          )}
+                          {acc.accountUrl && (
+                            <a
+                              href={acc.accountUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="text-[11px] text-accent font-mono break-all"
+                            >
+                              {acc.accountUrl.replace(/^https?:\/\//, "")}
+                            </a>
+                          )}
+                          <div className="flex flex-wrap gap-1.5 pt-0.5">
                             <button
                               type="button"
                               disabled={!!busy}
                               onClick={() => verify(acc.id)}
-                              className="btn-ghost text-[11px] inline-flex items-center gap-1"
+                              className="inline-flex items-center gap-1 text-[10px] font-bold text-muted border border-line px-2 py-1 rounded-lg hover:bg-white disabled:opacity-50"
                             >
-                              <ShieldCheck className="w-3.5 h-3.5" />
-                              Verify
+                              <ShieldCheck className="w-3 h-3" /> Verify
                             </button>
                             <button
                               type="button"
                               disabled={!!busy}
                               onClick={() => connectOAuth(acc.provider)}
-                              className="btn-ghost text-[11px]"
+                              className="text-[10px] font-bold text-muted border border-line px-2 py-1 rounded-lg hover:bg-white disabled:opacity-50"
                             >
                               Reauthorize
                             </button>
                             <button
                               type="button"
-                              disabled={!!busy || acc.isDefault}
+                              disabled={!!busy || isDefault}
                               onClick={() => setDefault(acc.id)}
-                              className="btn-ghost text-[11px] inline-flex items-center gap-1"
+                              className="inline-flex items-center gap-1 text-[10px] font-bold text-muted border border-line px-2 py-1 rounded-lg hover:bg-white disabled:opacity-50"
                             >
-                              <Star className="w-3.5 h-3.5" />
-                              Default
+                              <Star className="w-3 h-3" /> Default
                             </button>
                             <button
                               type="button"
                               disabled={!!busy}
                               onClick={() => disconnect(acc.id)}
-                              className="btn-ghost text-[11px] inline-flex items-center gap-1 text-[#dc2626] hover:text-red-200"
+                              className="inline-flex items-center gap-1 text-[10px] font-bold text-[#dc2626] border border-red-200 px-2 py-1 rounded-lg hover:bg-red-50 disabled:opacity-50"
                             >
-                              <Unplug className="w-3.5 h-3.5" />
-                              Disconnect
+                              <Unplug className="w-3 h-3" /> Disconnect
                             </button>
                           </div>
                         </li>
@@ -425,6 +426,20 @@ function ConnectionsInner() {
                     })}
                   </ul>
                 )}
+
+                <button
+                  type="button"
+                  disabled={!!busy}
+                  onClick={() => connectOAuth(p.id)}
+                  className={
+                    primaryAction.primary
+                      ? "self-start inline-flex items-center gap-1.5 bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold px-4 py-2.5 rounded-[10px] shadow-accent disabled:opacity-50"
+                      : "self-start inline-flex items-center gap-1.5 bg-navy-800 border border-line text-muted text-xs font-bold px-4 py-2.5 rounded-[10px] hover:text-ink disabled:opacity-50"
+                  }
+                >
+                  <Link2 className="w-3.5 h-3.5" />
+                  {busy === p.id ? "Redirecting…" : primaryAction.label}
+                </button>
               </section>
             );
           })}

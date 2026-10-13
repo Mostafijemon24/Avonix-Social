@@ -5,18 +5,17 @@ import Link from "next/link";
 import {
   Calendar,
   Check,
-  Clock,
   Download,
   Globe,
   Image as ImageIcon,
   Lock,
   MapPin,
+  Pencil,
   Play,
-  PlusCircle,
   RefreshCw,
   Search,
+  Send,
   Trash2,
-  Unlock,
   X,
 } from "lucide-react";
 import { useToast } from "@/components/ui/Toast";
@@ -625,28 +624,9 @@ export default function ContentStudioPage() {
   };
 
   const filtered = generatedPosts.filter((p) => p.status === listFilter);
-  const platformCounts = {
-    Facebook: generatedPosts.filter((p) => p.platform === "Facebook").length,
-    Instagram: generatedPosts.filter((p) => p.platform === "Instagram").length,
-    LinkedIn: generatedPosts.filter((p) => p.platform === "LinkedIn").length,
-    GMB: generatedPosts.filter((p) => p.platform === "GMB").length,
-    X: generatedPosts.filter((p) => p.platform === "X").length,
-    Pinterest: generatedPosts.filter((p) => p.platform === "Pinterest").length,
-  };
   const postsMissingImages = generatedPosts.filter(
-    (p) =>
-      !p.image &&
-      p.status !== "published" &&
-      !p.locked
+    (p) => !p.image && p.status !== "published" && !p.locked
   ).length;
-  const lockedCount = generatedPosts.filter(
-    (p) => p.publishLocked || (p.status === "published" && p.locked)
-  ).length;
-  const lastPostedAt = generatedPosts
-    .map((p) => p.publishedAt)
-    .filter(Boolean)
-    .sort()
-    .reverse()[0] as string | undefined;
 
   const intel = analysis?.intelligence;
   const visiblePages = (analysis?.pages || []).filter((p) => {
@@ -817,7 +797,7 @@ export default function ContentStudioPage() {
             type="button"
             onClick={handleAnalyzeWebsite}
             disabled={isAnalyzing}
-            className="w-full sm:w-auto bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white font-bold py-3 px-8 rounded-xl text-sm inline-flex items-center justify-center gap-2 shadow-lg shadow-orange-500/20"
+            className="w-full sm:w-auto bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white font-bold py-3.5 px-7 rounded-xl text-sm inline-flex items-center justify-center gap-2 shadow-accent"
           >
             {isAnalyzing ? (
               <>
@@ -1021,7 +1001,7 @@ export default function ContentStudioPage() {
             type="button"
             disabled={!selectedPages.length}
             onClick={() => setStep(3)}
-            className="bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white font-bold py-3 px-6 rounded-xl text-sm"
+            className="self-start bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white font-bold py-3.5 px-6 rounded-xl text-sm shadow-accent"
           >
             Continue
           </button>
@@ -1116,7 +1096,7 @@ export default function ContentStudioPage() {
             type="button"
             disabled={!canContinue3}
             onClick={() => setStep(4)}
-            className="bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white font-bold py-3 px-6 rounded-xl text-sm"
+            className="self-start bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white font-bold py-3.5 px-6 rounded-xl text-sm shadow-accent"
           >
             Continue
           </button>
@@ -1202,7 +1182,11 @@ export default function ContentStudioPage() {
                 type="button"
                 onClick={handleScanAndGenerate}
                 disabled={!canGenerate}
-                className="mt-2 w-full sm:w-auto bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white font-bold py-3 px-8 rounded-xl text-sm inline-flex items-center justify-center gap-2 shadow-lg shadow-orange-500/20"
+                className={`mt-3 self-start w-full sm:w-auto text-white font-bold py-3.5 px-7 rounded-xl text-sm inline-flex items-center justify-center gap-2 ${
+                  canGenerate
+                    ? "bg-orange-500 hover:bg-orange-600 shadow-accent"
+                    : "bg-[#b9bcd0] cursor-not-allowed"
+                }`}
               >
                 {isScanning ? (
                   <>
@@ -1218,69 +1202,44 @@ export default function ContentStudioPage() {
               </button>
             </div>
 
-            <div className="flex flex-wrap gap-2 text-[11px] text-muted">
-              <span className="inline-flex items-center gap-1 font-bold text-muted bg-navy-900 border border-navy-700 px-2 py-1 rounded-lg">
-                <Lock className="w-3.5 h-3.5 text-[#16a34a]" />
-                {lockedCount} locked
-              </span>
-              {lastPostedAt && (
-                <span className="inline-flex items-center gap-1 font-semibold bg-navy-900 border border-navy-700 px-2 py-1 rounded-lg">
-                  <Clock className="w-3.5 h-3.5 text-[#0a66c2]" />
-                  Last: {new Date(lastPostedAt).toLocaleString()}
-                </span>
-              )}
-              {(
-                [
-                  ["Facebook", platformCounts.Facebook],
-                  ["Instagram", platformCounts.Instagram],
-                  ["LinkedIn", platformCounts.LinkedIn],
-                  ["GMB", platformCounts.GMB],
-                  ["X", platformCounts.X],
-                  ["Pinterest", platformCounts.Pinterest],
-                ] as const
-              ).map(([key, count]) => (
-                <span
-                  key={key}
-                  className="inline-flex items-center gap-1 bg-navy-900 border border-navy-700 px-2 py-1 rounded-lg"
-                >
-                  <PlatformGlyph platform={key} size={12} /> {count}
-                </span>
-              ))}
-            </div>
-
-            <div className="flex flex-wrap gap-2">
-              {(["draft", "scheduled", "published"] as ListFilter[]).map((f) => (
+            {generateDone && (
+              <div className="flex flex-wrap gap-2.5">
+                {(["draft", "scheduled", "published"] as ListFilter[]).map((f) => {
+                  const on = mainTab === "active" && listFilter === f;
+                  return (
+                    <button
+                      key={f}
+                      type="button"
+                      onClick={() => {
+                        setMainTab("active");
+                        setListFilter(f);
+                      }}
+                      className={`px-[17px] py-2 rounded-full text-xs font-bold capitalize ${
+                        on
+                          ? "bg-orange-500 text-white"
+                          : "bg-transparent text-muted border border-line hover:text-ink"
+                      }`}
+                    >
+                      {f} ({generatedPosts.filter((p) => p.status === f).length})
+                    </button>
+                  );
+                })}
                 <button
-                  key={f}
                   type="button"
                   onClick={() => {
-                    setMainTab("active");
-                    setListFilter(f);
+                    setMainTab("archive");
+                    loadArchive();
                   }}
-                  className={`px-3 py-1.5 rounded-full text-[11px] font-bold capitalize ${
-                    mainTab === "active" && listFilter === f
+                  className={`px-[17px] py-2 rounded-full text-xs font-bold ${
+                    mainTab === "archive"
                       ? "bg-orange-500 text-white"
-                      : "bg-navy-900 text-muted border border-navy-700"
+                      : "bg-transparent text-muted border border-line hover:text-ink"
                   }`}
                 >
-                  {f} ({generatedPosts.filter((p) => p.status === f).length})
+                  Archive ({archiveTotal})
                 </button>
-              ))}
-              <button
-                type="button"
-                onClick={() => {
-                  setMainTab("archive");
-                  loadArchive();
-                }}
-                className={`px-3 py-1.5 rounded-full text-[11px] font-bold ${
-                  mainTab === "archive"
-                    ? "bg-orange-500 text-white"
-                    : "bg-navy-900 text-muted border border-navy-700"
-                }`}
-              >
-                Archive ({archiveTotal})
-              </button>
-            </div>
+              </div>
+            )}
 
             {mainTab === "active" && includeImages && (
               <div className="flex flex-wrap gap-2">
@@ -1304,18 +1263,19 @@ export default function ContentStudioPage() {
           {mainTab === "active" && (
             <>
               {filtered.length === 0 ? (
-                <div className="glass-card p-8 rounded-2xl border border-navy-800 text-center text-dim text-sm">
-                  No {listFilter} posts yet.{" "}
-                  <button
-                    type="button"
-                    className="text-orange-400 font-bold hover:underline"
-                    onClick={() => setStep(1)}
-                  >
-                    Start from step 1
-                  </button>
+                <div className="bg-white border border-dashed border-line rounded-[18px] p-10 text-center text-muted text-[13.5px]">
+                  {generateDone ? (
+                    <>Nothing in this tab yet.</>
+                  ) : (
+                    <>
+                      No posts yet — press{" "}
+                      <span className="text-accent font-bold">Generate posts</span> to
+                      create drafts across your selected channels.
+                    </>
+                  )}
                 </div>
               ) : (
-                <div className="space-y-2">
+                <div className="flex flex-col gap-4">
                   {filtered.map((post) => (
                     <PostListRow
                       key={post.id}
@@ -1473,187 +1433,130 @@ function PostListRow({
   const words =
     post.wordCount || countWords(post.contentHtml || post.content);
   const minWords = PLATFORM_MIN_WORDS[post.platform] || 80;
-  const snippet = String(post.content || "")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, 140);
   const busy = !!(imageBusy || actionBusy);
   const sizeLabel = PLATFORM_IMAGE_SIZE[post.platform]?.label || "HD";
-
-  const actionButtons = (
-    <div className="flex flex-wrap gap-2 px-3 pb-3">
-      {!locked && (
-        <>
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => onGenerateImage(post.id)}
-            className="inline-flex items-center justify-center gap-1.5 border border-accent-border text-accent text-[11px] font-bold px-2.5 py-1.5 rounded-lg bg-accent-soft disabled:opacity-50"
-          >
-            {imageBusy ? (
-              <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-            ) : (
-              <ImageIcon className="w-3.5 h-3.5" />
-            )}
-            {post.image ? "Regenerate image" : "Attach image"}
-          </button>
-          {post.image && (
-            <>
-              <button
-                type="button"
-                onClick={() =>
-                  onDownloadImage(
-                    post.image!,
-                    `avonix-${post.platform}-${post.id.slice(0, 8)}.jpg`
-                  )
-                }
-                className="inline-flex items-center justify-center gap-1.5 border border-navy-600 text-ink text-[11px] font-bold px-2.5 py-1.5 rounded-lg hover:bg-navy-900"
-              >
-                <Download className="w-3.5 h-3.5" />
-                Download
-              </button>
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => onClearImage(post.id)}
-                className="inline-flex items-center justify-center gap-1.5 border border-navy-600 text-muted text-[11px] font-bold px-2.5 py-1.5 rounded-lg hover:bg-navy-900 disabled:opacity-50"
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-                Detach
-              </button>
-            </>
-          )}
-        </>
-      )}
-
-      {locked ? (
-        <button
-          type="button"
-          disabled={busy}
-          onClick={() => onRewrite(post.id)}
-          className="inline-flex items-center justify-center gap-1.5 border border-orange-800/50 text-orange-300 text-[11px] font-bold px-2.5 py-1.5 rounded-lg bg-orange-950/30 hover:bg-orange-950/50 disabled:opacity-50"
-        >
-          {actionBusy ? (
-            <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-          ) : (
-            <Unlock className="w-3.5 h-3.5" />
-          )}
-          Re-generate & unlock
-        </button>
-      ) : post.status === "scheduled" ? (
-        <>
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => onUnschedule(post.id)}
-            className="inline-flex items-center justify-center gap-1.5 border border-navy-600 text-muted text-[11px] font-bold px-2.5 py-1.5 rounded-lg hover:bg-navy-900 disabled:opacity-50"
-          >
-            <X className="w-3.5 h-3.5" />
-            Cancel schedule
-          </button>
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => onPublish(post.id)}
-            className="inline-flex items-center justify-center gap-1.5 bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white text-[11px] font-bold px-2.5 py-1.5 rounded-lg"
-          >
-            <PlusCircle className="w-3.5 h-3.5" />
-            Publish now
-          </button>
-        </>
-      ) : (
-        <>
-          <div className="relative">
-            {showPicker && (
-              <div className="absolute bottom-full left-0 mb-2 bg-navy-900 border border-navy-600 rounded-xl p-3 z-20 w-[260px] shadow-xl">
-                <p className="text-[10px] text-muted font-bold mb-2">Auto-post at</p>
-                <input
-                  type="datetime-local"
-                  value={scheduleDate}
-                  onChange={(e) => setScheduleDate(e.target.value)}
-                  className="w-full text-xs border border-navy-600 bg-navy-950 rounded-lg px-2 py-2 text-ink mb-2"
-                />
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={() => {
-                      onSchedule(post.id, scheduleDate);
-                      setShowPicker(false);
-                    }}
-                    className="flex-1 bg-sky-600 text-ink text-xs font-bold py-2 rounded-lg disabled:opacity-50"
-                  >
-                    Confirm
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setShowPicker(false)}
-                    className="flex-1 bg-navy-800 text-muted text-xs font-bold py-2 rounded-lg"
-                  >
-                    Cancel
-                  </button>
-                </div>
-              </div>
-            )}
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => setShowPicker(!showPicker)}
-              className="inline-flex items-center justify-center gap-1.5 border border-sky-800/50 text-[#0a66c2] text-[11px] font-bold px-2.5 py-1.5 rounded-lg bg-sky-950/30 disabled:opacity-50"
-            >
-              <Calendar className="w-3.5 h-3.5" />
-              Schedule auto-post
-            </button>
-          </div>
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => onPublish(post.id)}
-            className="inline-flex items-center justify-center gap-1.5 bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white text-[11px] font-bold px-2.5 py-1.5 rounded-lg"
-          >
-            {actionBusy ? (
-              <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-            ) : (
-              <PlusCircle className="w-3.5 h-3.5" />
-            )}
-            Publish live
-          </button>
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => onRewrite(post.id)}
-            className="inline-flex items-center justify-center gap-1.5 border border-orange-800/50 text-orange-300 text-[11px] font-bold px-2.5 py-1.5 rounded-lg bg-orange-950/30 disabled:opacity-50"
-          >
-            <RefreshCw className="w-3.5 h-3.5" />
-            Rewrite
-          </button>
-        </>
-      )}
-
-      <button
-        type="button"
-        onClick={onToggle}
-        className="inline-flex items-center justify-center gap-1 border border-navy-600 text-muted text-[11px] font-bold px-2.5 py-1.5 rounded-lg hover:bg-navy-900 ml-auto"
-      >
-        {expanded ? "Hide text" : "View text"}
-      </button>
-    </div>
-  );
 
   const brandColor =
     PLATFORM_BRAND_COLOR[post.platform as keyof typeof PLATFORM_BRAND_COLOR] || "#6d4dff";
 
+  const isGMB = post.platform === "GMB";
+  const charCount = post.charCount ?? countWords(post.content);
+  const countOk = isGMB
+    ? charCount >= 1000 && charCount <= 1100
+    : words >= minWords;
+  const countLabel = isGMB
+    ? `${charCount} / 1,000–1,100 chars`
+    : `${words} / ${minWords}+ words`;
+
+  const statusMeta =
+    post.status === "published"
+      ? { label: "Published", color: "#16a34a", bg: "rgba(22,163,74,0.12)" }
+      : post.status === "scheduled"
+        ? { label: "Scheduled", color: "#0a66c2", bg: "rgba(10,102,194,0.12)" }
+        : { label: "Draft", color: "#d97706", bg: "rgba(217,119,6,0.12)" };
+
+  let pathPart = "";
+  try {
+    pathPart = post.url ? new URL(post.url).pathname : "";
+  } catch {
+    pathPart = "";
+  }
+  const monoLine = [pathPart, post.keywords?.primary]
+    .filter(Boolean)
+    .join(" · ");
+
+  const bodyText = String(post.content || post.contentHtml || "")
+    .replace(/<a\b[^>]*>([\s\S]*?)<\/a>/gi, "$1")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/p>/gi, "\n\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .trim();
+
+  const square = post.platform === "Instagram";
+  const tall = post.platform === "Pinterest";
+  const boxW = square ? 112 : tall ? 120 : 172;
+  const boxH = square ? 112 : tall ? 168 : 112;
+  const stripe =
+    "repeating-linear-gradient(135deg,#eef1f8,#eef1f8 8px,#e3e8f4 8px,#e3e8f4 16px)";
+
+  const ghostBtn =
+    "inline-flex items-center gap-1.5 px-3.5 py-2 rounded-[10px] bg-transparent border border-line text-muted text-xs font-bold hover:bg-navy-800 disabled:opacity-50";
+
   return (
     <div
-      className={`glass-card rounded-[18px] overflow-visible border ${
-        locked ? "border-emerald-200" : "border-line"
-      }`}
+      className="bg-white rounded-[18px] border border-line shadow-card p-[22px] flex flex-col gap-4"
       style={{ borderTop: `3px solid ${brandColor}` }}
     >
-      {/* Collapsed header — always visible */}
-      <div className="flex items-start gap-3 px-3 pt-2.5 pb-2">
-        <div className="relative w-12 h-12 rounded-lg overflow-hidden bg-navy-800 shrink-0 border border-line">
+      {/* Header */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <PlatformGlyph platform={post.platform} size={18} />
+          <span className="text-sm font-bold text-ink">
+            {post.platform === "GMB"
+              ? "Google Business"
+              : post.platform === "X"
+                ? "X (Twitter)"
+                : post.platform}
+          </span>
+          <span className="text-[10px] font-bold px-2.5 py-[3px] rounded-full bg-navy-800 border border-line text-muted">
+            {post.gmbCategory || post.tone}
+          </span>
+          <span
+            className="text-[10px] font-bold px-2.5 py-[3px] rounded-full"
+            style={{ color: statusMeta.color, background: statusMeta.bg }}
+          >
+            {statusMeta.label}
+          </span>
+          {post.validation && (
+            <span
+              className="text-[10px] font-bold px-2.5 py-[3px] rounded-full"
+              style={
+                post.validation.ready || post.validation.status === "READY"
+                  ? { color: "#16a34a", background: "rgba(22,163,74,0.12)" }
+                  : { color: "#d97706", background: "rgba(217,119,6,0.12)" }
+              }
+            >
+              {post.validation.ready || post.validation.status === "READY"
+                ? "✓ Ready"
+                : "⚠ Needs Review"}
+            </span>
+          )}
+        </div>
+        <span
+          className="text-xs font-bold shrink-0"
+          style={{ color: countOk ? "#16a34a" : "#d97706" }}
+        >
+          {post.status === "published" && post.publishedAt
+            ? `Posted ${new Date(post.publishedAt).toLocaleDateString()}`
+            : countLabel}
+        </span>
+      </div>
+
+      {/* Body */}
+      <div className="flex gap-[18px]">
+        <div className="flex-1 min-w-0">
+          {monoLine && (
+            <div className="font-mono text-[11px] text-dim mb-2.5 truncate">
+              {monoLine}
+            </div>
+          )}
+          <p className="m-0 text-[13.5px] leading-[1.65] text-muted whitespace-pre-wrap">
+            {bodyText}
+          </p>
+        </div>
+        <div
+          className="shrink-0 rounded-xl border border-line overflow-hidden flex items-center justify-center"
+          style={{
+            width: boxW,
+            height: boxH,
+            background: post.image ? undefined : stripe,
+          }}
+        >
           {post.image ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img
@@ -1661,170 +1564,190 @@ function PostListRow({
               alt=""
               className="w-full h-full object-cover"
               onError={(e) => {
-                const el = e.currentTarget;
-                el.style.display = "none";
-                const fallback = el.nextElementSibling;
-                if (fallback instanceof HTMLElement) fallback.style.display = "flex";
+                e.currentTarget.style.display = "none";
               }}
             />
-          ) : null}
-          <div
-            className={`w-full h-full flex flex-col items-center justify-center text-dim ${
-              post.image ? "hidden" : ""
-            }`}
-            style={post.image ? { display: "none" } : undefined}
-          >
-            <ImageIcon className="w-4 h-4" />
-            <span className="text-[7px] font-bold text-dim mt-0.5 leading-none px-0.5 text-center">
+          ) : (
+            <span className="font-mono text-[10px] text-dim">
               {sizeLabel.split(" · ")[0]}
             </span>
-          </div>
-          {locked ? (
-            <span className="absolute inset-0 bg-navy-950/55 flex items-center justify-center">
-              <Lock className="w-4 h-4 text-[#16a34a]" />
-            </span>
-          ) : (
-            <span
-              className="absolute bottom-0.5 right-0.5 bg-navy-950/80 rounded p-0.5 border border-navy-600"
-              title="Unlocked draft"
-            >
-              <Unlock className="w-3 h-3 text-muted" />
-            </span>
-          )}
-        </div>
-
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2 mb-0.5">
-            {platformIcon(post.platform)}
-            <span className="text-sm font-bold text-ink">{post.platform}</span>
-            <span className="text-[10px] uppercase font-bold text-dim border border-navy-600 px-1.5 py-0.5 rounded">
-              {post.gmbCategory || post.tone}
-            </span>
-            {post.platform === "GMB" ? (
-              <span
-                className={`text-[10px] font-bold px-1.5 py-0.5 rounded font-mono ${
-                  (post.charCount || 0) >= 1000 && (post.charCount || 0) <= 1100
-                    ? "text-[#16a34a] bg-emerald-50/30"
-                    : "text-[#d97706] bg-amber-50/30"
-                }`}
-              >
-                {post.charCount ?? countWords(post.content)} chars
-              </span>
-            ) : (
-              <span
-                className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
-                  words >= minWords
-                    ? "text-[#16a34a] bg-emerald-50/30"
-                    : "text-[#dc2626] bg-red-50/30"
-                }`}
-              >
-                {words} words · min {minWords}
-              </span>
-            )}
-            {post.validation && (
-              <span
-                className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
-                  post.validation.ready || post.validation.status === "READY"
-                    ? "text-[#16a34a] bg-emerald-50/30"
-                    : "text-[#d97706] bg-amber-50/30"
-                }`}
-              >
-                {post.validation.ready || post.validation.status === "READY"
-                  ? "✓ Ready"
-                  : "⚠ Needs Review"}
-              </span>
-            )}
-            {post.cta && (
-              <span className="text-[10px] font-bold text-orange-300 bg-orange-950/30 px-1.5 py-0.5 rounded">
-                CTA · {post.cta}
-              </span>
-            )}
-            {post.image ? (
-              <span className="text-[10px] font-bold text-accent bg-accent-soft px-1.5 py-0.5 rounded">
-                Image on · {sizeLabel}
-              </span>
-            ) : (
-              <span className="text-[10px] font-bold text-dim bg-navy-900 px-1.5 py-0.5 rounded">
-                No image · need {sizeLabel}
-              </span>
-            )}
-            {locked ? (
-              <span className="text-[10px] font-bold text-[#16a34a] inline-flex items-center gap-1 bg-emerald-50 border border-emerald-800/50 px-1.5 py-0.5 rounded">
-                <Lock className="w-3 h-3" /> Locked
-              </span>
-            ) : (
-              <span className="text-[10px] font-bold text-muted inline-flex items-center gap-1 bg-navy-900 border border-navy-600 px-1.5 py-0.5 rounded">
-                <Unlock className="w-3 h-3" /> Unlocked
-              </span>
-            )}
-            {post.status === "scheduled" && post.scheduledDate && (
-              <span className="text-[10px] font-bold text-[#0a66c2] inline-flex items-center gap-1">
-                <Clock className="w-3 h-3" />
-                {new Date(post.scheduledDate).toLocaleString()}
-              </span>
-            )}
-          </div>
-          <p className="text-xs font-semibold text-ink truncate">{post.heading}</p>
-          {!expanded && (
-            <p className="text-[11px] text-dim truncate mt-0.5">{snippet}…</p>
           )}
         </div>
       </div>
 
-      {/* Actions always visible when collapsed — no need to Open */}
-      <div className="border-t border-navy-800/80 pt-2">{actionButtons}</div>
-
-      {/* Expanded: full image + full text only */}
-      {expanded && (
-        <div className="px-3 pb-4 border-t border-navy-800 space-y-3">
-          {post.publishedAt && (
-            <p className="text-[11px] text-muted font-semibold inline-flex items-center gap-1.5 pt-3">
-              <Clock className="w-3.5 h-3.5 text-[#0a66c2]" />
-              Last posted:{" "}
-              <span className="text-ink">{new Date(post.publishedAt).toLocaleString()}</span>
-            </p>
-          )}
-
-          {post.image && (
-            <div
-              className={`rounded-xl overflow-hidden border border-navy-700 max-w-md relative ${
-                locked ? "opacity-80" : ""
-              }`}
+      {/* Actions */}
+      <div className="flex flex-wrap items-center gap-2.5">
+        {locked ? (
+          <>
+            <span className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-[10px] bg-navy-800 border border-line text-muted text-xs font-bold">
+              <Lock className="w-3.5 h-3.5 text-[#16a34a]" />
+              Published &amp; locked
+            </span>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => onRewrite(post.id)}
+              className={ghostBtn}
             >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={post.image} alt="" className="w-full h-auto object-cover" />
-              <span className="absolute bottom-2 left-2 inline-flex items-center gap-1 text-[10px] font-bold bg-navy-950/85 text-ink px-2 py-1 rounded-lg border border-navy-600 backdrop-blur-sm">
-                Perfect size: {sizeLabel}
-              </span>
-            </div>
-          )}
+              {actionBusy ? (
+                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <RefreshCw className="w-3.5 h-3.5" />
+              )}
+              Rewrite
+            </button>
+          </>
+        ) : (
+          <>
+            <button type="button" onClick={onToggle} className={ghostBtn}>
+              <Pencil className="w-3.5 h-3.5" />
+              {expanded ? "Done" : "Edit"}
+            </button>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => onRewrite(post.id)}
+              className={ghostBtn}
+            >
+              {actionBusy ? (
+                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <RefreshCw className="w-3.5 h-3.5" />
+              )}
+              Rewrite
+            </button>
+            {post.status === "scheduled" ? (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => onUnschedule(post.id)}
+                className={ghostBtn}
+              >
+                <X className="w-3.5 h-3.5" />
+                Cancel schedule
+              </button>
+            ) : (
+              <div className="relative">
+                {showPicker && (
+                  <div className="absolute bottom-full left-0 mb-2 bg-white border border-line rounded-xl p-3 z-20 w-[260px] shadow-[0_14px_34px_rgba(18,26,48,0.18)]">
+                    <p className="text-[10px] text-muted font-bold mb-2">
+                      Auto-post at
+                    </p>
+                    <input
+                      type="datetime-local"
+                      value={scheduleDate}
+                      onChange={(e) => setScheduleDate(e.target.value)}
+                      className="w-full text-xs border border-line bg-navy-800 rounded-lg px-2 py-2 text-ink mb-2"
+                    />
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => {
+                          onSchedule(post.id, scheduleDate);
+                          setShowPicker(false);
+                        }}
+                        className="flex-1 bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold py-2 rounded-lg disabled:opacity-50"
+                      >
+                        Confirm
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setShowPicker(false)}
+                        className="flex-1 bg-navy-800 border border-line text-muted text-xs font-bold py-2 rounded-lg"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                )}
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => setShowPicker(!showPicker)}
+                  className={ghostBtn}
+                >
+                  <Calendar className="w-3.5 h-3.5" />
+                  Schedule
+                </button>
+              </div>
+            )}
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => onPublish(post.id)}
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-[10px] bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold shadow-accent disabled:opacity-50"
+            >
+              {actionBusy ? (
+                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <Send className="w-3.5 h-3.5" />
+              )}
+              {post.status === "scheduled" ? "Publish now" : "Publish"}
+            </button>
+          </>
+        )}
+      </div>
 
-          <div className="text-xs text-muted whitespace-pre-wrap leading-relaxed text-left">
-            {String(post.content || post.contentHtml || "")
-              .replace(/<a\b[^>]*>([\s\S]*?)<\/a>/gi, "$1")
-              .replace(/<br\s*\/?>/gi, "\n")
-              .replace(/<\/p>/gi, "\n\n")
-              .replace(/<[^>]+>/g, "")
-              .replace(/&nbsp;/g, " ")
-              .replace(/&amp;/g, "&")
-              .replace(/&lt;/g, "<")
-              .replace(/&gt;/g, ">")
-              .replace(/&quot;/g, '"')
-              .trim()}
+      {/* Expanded tools: image, keywords, validation */}
+      {expanded && !locked && (
+        <div className="border-t border-line pt-4 flex flex-col gap-3">
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => onGenerateImage(post.id)}
+              className="inline-flex items-center gap-1.5 border border-accent-border text-accent bg-accent-soft text-[11px] font-bold px-2.5 py-1.5 rounded-lg disabled:opacity-50"
+            >
+              {imageBusy ? (
+                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <ImageIcon className="w-3.5 h-3.5" />
+              )}
+              {post.image ? "Regenerate image" : "Attach image"}
+            </button>
+            {post.image && (
+              <>
+                <button
+                  type="button"
+                  onClick={() =>
+                    onDownloadImage(
+                      post.image!,
+                      `avonix-${post.platform}-${post.id.slice(0, 8)}.jpg`
+                    )
+                  }
+                  className="inline-flex items-center gap-1.5 border border-line text-ink text-[11px] font-bold px-2.5 py-1.5 rounded-lg hover:bg-navy-800"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  Download
+                </button>
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => onClearImage(post.id)}
+                  className="inline-flex items-center gap-1.5 border border-line text-muted text-[11px] font-bold px-2.5 py-1.5 rounded-lg hover:bg-navy-800 disabled:opacity-50"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  Detach
+                </button>
+              </>
+            )}
           </div>
           <div className="flex flex-wrap gap-2">
-            <span className="text-[10px] font-semibold text-orange-400 bg-orange-950/40 border border-orange-800/40 px-2 py-1 rounded">
-              P: {post.keywords.primary}
-            </span>
-            {(post.keywords.general?.length
+            {post.keywords?.primary && (
+              <span className="text-[10px] font-semibold text-accent bg-accent-soft border border-accent-border px-2 py-1 rounded">
+                P: {post.keywords.primary}
+              </span>
+            )}
+            {(post.keywords?.general?.length
               ? post.keywords.general
-              : [post.keywords.secondary].filter(Boolean)
+              : [post.keywords?.secondary].filter(Boolean)
             )
               .slice(0, 4)
               .map((kw, i) => (
                 <span
                   key={i}
-                  className="text-[10px] font-semibold text-[#0a66c2] bg-sky-950/40 border border-sky-800/40 px-2 py-1 rounded"
+                  className="text-[10px] font-semibold text-[#0a66c2] bg-navy-800 border border-line px-2 py-1 rounded"
                 >
                   S{i + 1}: {kw}
                 </span>
@@ -1834,14 +1757,15 @@ function PostListRow({
                 href={post.url}
                 target="_blank"
                 rel="noreferrer"
-                className="text-[10px] font-semibold text-muted bg-navy-900 border border-navy-700 px-2 py-1 rounded font-mono truncate max-w-full"
+                className="text-[10px] font-semibold text-muted bg-navy-800 border border-line px-2 py-1 rounded font-mono truncate max-w-full"
               >
-                Based on: {post.sourceTitle || "Source"} · {post.url.replace(/^https?:\/\//, "")}
+                Based on: {post.sourceTitle || "Source"} ·{" "}
+                {post.url.replace(/^https?:\/\//, "")}
               </a>
             )}
           </div>
           {post.validation?.issues && post.validation.issues.length > 0 && (
-            <div className="text-[11px] text-amber-200 bg-amber-50/30 border border-amber-500/20 rounded-xl px-3 py-2 space-y-1">
+            <div className="text-[11px] text-[#d97706] bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 space-y-1">
               {post.validation.issues.map((issue, i) => (
                 <p key={i}>{issue}</p>
               ))}
