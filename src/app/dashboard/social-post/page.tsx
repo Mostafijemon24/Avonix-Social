@@ -123,6 +123,43 @@ function platformIcon(platform: string, size = 16) {
   return <PlatformGlyph platform={platform} size={size} className="shrink-0" />;
 }
 
+const PLATFORM_ORDER = [
+  "Facebook",
+  "Instagram",
+  "LinkedIn",
+  "GMB",
+  "X",
+  "Pinterest",
+] as const;
+
+function platformLabel(platform: string) {
+  return platform === "GMB"
+    ? "Google Business"
+    : platform === "X"
+      ? "X (Twitter)"
+      : platform;
+}
+
+/** Group published posts by their publish date (newest group first). */
+function groupPostsByDate(
+  posts: StudioPostRecord[]
+): Array<[string, StudioPostRecord[]]> {
+  const map = new Map<string, StudioPostRecord[]>();
+  for (const p of posts) {
+    const date = p.publishedAt
+      ? new Date(p.publishedAt).toLocaleDateString(undefined, {
+          year: "numeric",
+          month: "short",
+          day: "numeric",
+        })
+      : "Unknown date";
+    const arr = map.get(date) || [];
+    arr.push(p);
+    map.set(date, arr);
+  }
+  return Array.from(map.entries());
+}
+
 function countWords(text: string) {
   return String(text || "")
     .replace(/<[^>]+>/g, " ")
@@ -430,8 +467,11 @@ export default function ContentStudioPage() {
       setGeneratedPosts((prev) =>
         prev.map((p) => (p.id === result.post.id ? result.post : p))
       );
-      setListFilter("published");
-      showToast("Published live & locked — regenerate to reuse", "success");
+      setMainTab("archive");
+      showToast(
+        "Published & locked — moved to Archive (by platform & date)",
+        "success"
+      );
     } catch (err) {
       showToast(
         isApiError(err)
@@ -623,10 +663,26 @@ export default function ContentStudioPage() {
     }
   };
 
-  const filtered = generatedPosts.filter((p) => p.status === listFilter);
+  // Active list never shows published posts — they live in the Archive menu.
+  const filtered = generatedPosts.filter(
+    (p) => p.status === listFilter && p.status !== "published"
+  );
   const postsMissingImages = generatedPosts.filter(
     (p) => !p.image && p.status !== "published" && !p.locked
   ).length;
+
+  // Published posts, grouped by platform then by publish date (for Archive).
+  const publishedPosts = generatedPosts.filter((p) => p.status === "published");
+  const publishedGroups = PLATFORM_ORDER.map((pf) => ({
+    platform: pf as string,
+    posts: publishedPosts
+      .filter((p) => p.platform === pf)
+      .sort(
+        (a, b) =>
+          new Date(b.publishedAt || 0).getTime() -
+          new Date(a.publishedAt || 0).getTime()
+      ),
+  })).filter((g) => g.posts.length > 0);
 
   const intel = analysis?.intelligence;
   const visiblePages = (analysis?.pages || []).filter((p) => {
@@ -1204,7 +1260,7 @@ export default function ContentStudioPage() {
 
             {generateDone && (
               <div className="flex flex-wrap gap-2.5">
-                {(["draft", "scheduled", "published"] as ListFilter[]).map((f) => {
+                {(["draft", "scheduled"] as ListFilter[]).map((f) => {
                   const on = mainTab === "active" && listFilter === f;
                   return (
                     <button
@@ -1236,7 +1292,7 @@ export default function ContentStudioPage() {
                       : "bg-transparent text-muted border border-line hover:text-ink"
                   }`}
                 >
-                  Archive ({archiveTotal})
+                  Archive ({archiveTotal + publishedPosts.length})
                 </button>
               </div>
             )}
@@ -1301,67 +1357,153 @@ export default function ContentStudioPage() {
           )}
 
           {mainTab === "archive" && (
-            <div className="space-y-3">
+            <div className="space-y-5">
+              {/* Published posts — grouped by platform, then publish date */}
+              {publishedGroups.length > 0 && (
+                <div className="space-y-3">
+                  <p className="text-[11px] font-extrabold uppercase tracking-[0.09em] text-dim">
+                    Published posts
+                  </p>
+                  {publishedGroups.map((g) => (
+                    <div
+                      key={g.platform}
+                      className="bg-white rounded-2xl border border-line shadow-card overflow-hidden"
+                      style={{
+                        borderTop: `3px solid ${
+                          PLATFORM_BRAND_COLOR[
+                            g.platform as keyof typeof PLATFORM_BRAND_COLOR
+                          ] || "#6d4dff"
+                        }`,
+                      }}
+                    >
+                      <div className="px-4 py-3 border-b border-line flex items-center justify-between gap-2">
+                        <span className="flex items-center gap-2.5 text-sm font-bold text-ink">
+                          <PlatformGlyph platform={g.platform} size={18} />
+                          {platformLabel(g.platform)}
+                        </span>
+                        <span className="text-[11px] font-bold text-dim">
+                          {g.posts.length} published
+                        </span>
+                      </div>
+                      <div className="divide-y divide-line">
+                        {groupPostsByDate(g.posts).map(([date, posts]) => (
+                          <div key={date} className="px-4 py-3">
+                            <p className="text-[10px] font-extrabold uppercase tracking-[0.09em] text-dim mb-2">
+                              {date}
+                            </p>
+                            <ul className="flex flex-col gap-2.5">
+                              {posts.map((post) => (
+                                <li
+                                  key={post.id}
+                                  className="flex items-center justify-between gap-3"
+                                >
+                                  <span className="min-w-0 flex-1">
+                                    <span className="block text-[13px] font-semibold text-ink truncate">
+                                      {post.heading}
+                                    </span>
+                                    <span className="block text-[11px] text-dim font-mono truncate">
+                                      {post.publishedAt
+                                        ? new Date(
+                                            post.publishedAt
+                                          ).toLocaleTimeString([], {
+                                            hour: "2-digit",
+                                            minute: "2-digit",
+                                          })
+                                        : ""}
+                                      {post.url
+                                        ? ` · ${post.url.replace(/^https?:\/\//, "")}`
+                                        : ""}
+                                    </span>
+                                  </span>
+                                  <span className="flex items-center gap-2 shrink-0">
+                                    <Lock className="w-3.5 h-3.5 text-[#16a34a]" />
+                                    <button
+                                      type="button"
+                                      disabled={actionBusyId === post.id}
+                                      onClick={() => handleRewrite(post.id)}
+                                      className="text-[10px] font-bold text-muted border border-line px-2 py-1 rounded-lg hover:bg-navy-800 disabled:opacity-50"
+                                    >
+                                      {actionBusyId === post.id ? "…" : "Rewrite"}
+                                    </button>
+                                  </span>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Regenerated / archived drafts (server archive) */}
               {isLoadingArchive ? (
                 <p className="text-sm text-muted text-center py-6">Loading archive…</p>
-              ) : archiveTables.length === 0 ? (
-                <div className="glass-card p-8 rounded-2xl border border-navy-800 text-center text-dim text-sm">
-                  Archive is empty.
-                </div>
-              ) : (
-                archiveTables.map((table) => (
-                  <div
-                    key={table.websiteOrigin}
-                    className="glass-card rounded-2xl border border-navy-800 overflow-hidden"
-                  >
-                    <div className="px-4 py-3 border-b border-navy-800 flex flex-wrap justify-between gap-2">
-                      <div>
-                        <p className="text-sm font-bold text-ink">{table.websiteOrigin}</p>
-                        <p className="text-[11px] text-dim">
-                          {table.count} posts · {table.lockedCount} locked
-                        </p>
+              ) : archiveTables.length > 0 ? (
+                <div className="space-y-3">
+                  <p className="text-[11px] font-extrabold uppercase tracking-[0.09em] text-dim">
+                    Archived drafts
+                  </p>
+                  {archiveTables.map((table) => (
+                    <div
+                      key={table.websiteOrigin}
+                      className="bg-white rounded-2xl border border-line shadow-card overflow-hidden"
+                    >
+                      <div className="px-4 py-3 border-b border-line flex flex-wrap justify-between gap-2">
+                        <div>
+                          <p className="text-sm font-bold text-ink">{table.websiteOrigin}</p>
+                          <p className="text-[11px] text-dim">
+                            {table.count} posts · {table.lockedCount} locked
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setClearConfirmOrigin(table.websiteOrigin)}
+                          className="text-[11px] font-bold text-[#dc2626] border border-red-200 px-2 py-1 rounded-lg hover:bg-red-50"
+                        >
+                          Clear
+                        </button>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => setClearConfirmOrigin(table.websiteOrigin)}
-                        className="text-[11px] font-bold text-[#dc2626] border border-red-900/40 px-2 py-1 rounded-lg"
-                      >
-                        Clear
-                      </button>
-                    </div>
-                    <ul className="divide-y divide-navy-800">
-                      {table.posts.slice(0, 8).map((post) => {
-                        const locked = !!(
-                          post.publishLocked ||
-                          (post.status === "published" && post.locked)
-                        );
-                        return (
-                          <li
-                            key={post.id}
-                            className="px-4 py-2.5 flex items-center justify-between gap-2 text-xs"
-                          >
-                            <span className="min-w-0 truncate text-muted">
-                              {platformIcon(post.platform)}{" "}
-                              <span className="font-semibold text-ink">{post.heading}</span>
-                              {locked && (
-                                <Lock className="inline w-3 h-3 text-[#16a34a] ml-1" />
-                              )}
-                            </span>
-                            <button
-                              type="button"
-                              disabled={actionBusyId === post.id}
-                              onClick={() => handleRewrite(post.id)}
-                              className="shrink-0 text-[10px] font-bold text-orange-300 border border-orange-800/50 px-2 py-1 rounded-lg"
+                      <ul className="divide-y divide-line">
+                        {table.posts.slice(0, 8).map((post) => {
+                          const locked = !!(
+                            post.publishLocked ||
+                            (post.status === "published" && post.locked)
+                          );
+                          return (
+                            <li
+                              key={post.id}
+                              className="px-4 py-2.5 flex items-center justify-between gap-2 text-xs"
                             >
-                              Re-generate
-                            </button>
-                          </li>
-                        );
-                      })}
-                    </ul>
-                  </div>
-                ))
-              )}
+                              <span className="min-w-0 truncate text-muted">
+                                {platformIcon(post.platform)}{" "}
+                                <span className="font-semibold text-ink">{post.heading}</span>
+                                {locked && (
+                                  <Lock className="inline w-3 h-3 text-[#16a34a] ml-1" />
+                                )}
+                              </span>
+                              <button
+                                type="button"
+                                disabled={actionBusyId === post.id}
+                                onClick={() => handleRewrite(post.id)}
+                                className="shrink-0 text-[10px] font-bold text-muted border border-line px-2 py-1 rounded-lg hover:bg-navy-800 disabled:opacity-50"
+                              >
+                                Re-generate
+                              </button>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </div>
+                  ))}
+                </div>
+              ) : publishedGroups.length === 0 ? (
+                <div className="bg-white border border-dashed border-line rounded-[18px] p-10 text-center text-muted text-[13.5px]">
+                  Archive is empty — publish a post to see it here, grouped by
+                  platform and date.
+                </div>
+              ) : null}
 
               {clearConfirmOrigin && (
                 <div className="glass-card p-5 rounded-2xl border border-red-900/40 bg-red-50/20 text-center space-y-3">
