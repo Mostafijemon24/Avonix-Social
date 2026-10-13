@@ -16,7 +16,7 @@ export function PricingCards({
           key={plan.id}
           className={`glass-card p-6 rounded-2xl text-center flex flex-col justify-between ${
             plan.recommended
-              ? "border-2 border-orange-500 bg-orange-950/20 relative shadow-xl shadow-orange-500/10"
+              ? "border-2 border-orange-500 bg-orange-950/20 relative shadow-accent"
               : "border border-navy-800"
           }`}
         >

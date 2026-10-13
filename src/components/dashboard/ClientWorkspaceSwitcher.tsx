@@ -119,7 +119,7 @@ export function ClientWorkspaceSwitcher() {
       </span>
 
       {adding && (
-        <div className="absolute top-14 left-0 z-40 w-[360px] max-w-[90vw] bg-white border border-line rounded-2xl p-4 shadow-[0_14px_34px_rgba(18,26,48,0.18)]">
+        <div className="absolute top-14 left-0 z-40 w-[360px] max-w-[90vw] bg-white border border-line rounded-2xl p-4 shadow-[0_6px_18px_rgba(18,26,48,0.1)]">
           <p className="text-xs font-bold text-ink mb-3">Add client workspace</p>
           <input
             value={name}

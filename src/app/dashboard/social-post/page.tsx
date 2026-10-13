@@ -1629,7 +1629,7 @@ function PostListRow({
             ) : (
               <div className="relative">
                 {showPicker && (
-                  <div className="absolute bottom-full left-0 mb-2 bg-white border border-line rounded-xl p-3 z-20 w-[260px] shadow-[0_14px_34px_rgba(18,26,48,0.18)]">
+                  <div className="absolute bottom-full left-0 mb-2 bg-white border border-line rounded-xl p-3 z-20 w-[260px] shadow-[0_6px_18px_rgba(18,26,48,0.1)]">
                     <p className="text-[10px] text-muted font-bold mb-2">
                       Auto-post at
                     </p>

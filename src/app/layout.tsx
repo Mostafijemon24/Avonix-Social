@@ -1,22 +1,7 @@
 import type { Metadata } from "next";
-import { Plus_Jakarta_Sans, JetBrains_Mono } from "next/font/google";
 import { ToastProvider } from "@/components/ui/Toast";
 import { WorkspaceProvider } from "@/context/WorkspaceContext";
 import "./globals.css";
-
-const plusJakarta = Plus_Jakarta_Sans({
-  subsets: ["latin"],
-  weight: ["300", "400", "500", "600", "700", "800"],
-  variable: "--font-plus-jakarta",
-  display: "swap",
-});
-
-const jetbrainsMono = JetBrains_Mono({
-  subsets: ["latin"],
-  weight: ["400", "500", "600"],
-  variable: "--font-jetbrains",
-  display: "swap",
-});
 
 export const metadata: Metadata = {
   title: {
@@ -34,9 +19,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className="h-full bg-navy-950 text-ink">
-      <body
-        className={`${plusJakarta.variable} ${jetbrainsMono.variable} h-full bg-navy-950 text-ink antialiased font-sans selection:bg-orange-500 selection:text-white`}
-      >
+      <body className="h-full bg-navy-950 text-ink antialiased font-sans selection:bg-orange-500 selection:text-white">
         <ToastProvider>
           <WorkspaceProvider>{children}</WorkspaceProvider>
         </ToastProvider>

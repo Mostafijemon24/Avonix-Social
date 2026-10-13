@@ -9,8 +9,23 @@ const config: Config = {
   theme: {
     extend: {
       fontFamily: {
-        sans: ["var(--font-plus-jakarta)", "Plus Jakarta Sans", "sans-serif"],
-        mono: ["var(--font-jetbrains)", "JetBrains Mono", "ui-monospace", "monospace"],
+        sans: [
+          "-apple-system",
+          "BlinkMacSystemFont",
+          "Segoe UI",
+          "Roboto",
+          "Helvetica Neue",
+          "Arial",
+          "sans-serif",
+        ],
+        mono: [
+          "ui-monospace",
+          "SFMono-Regular",
+          "Menlo",
+          "Monaco",
+          "Consolas",
+          "monospace",
+        ],
       },
       colors: {
         // Primary accent. Historically "orange" — now the violet brand ramp.
@@ -55,8 +70,8 @@ const config: Config = {
         },
       },
       boxShadow: {
-        accent: "0 8px 20px rgba(109,77,255,0.35)",
-        card: "0 1px 3px rgba(18,26,48,0.05), 0 10px 30px rgba(18,26,48,0.05)",
+        accent: "0 1px 2px rgba(109,77,255,0.12)",
+        card: "0 1px 2px rgba(18,26,48,0.04)",
       },
       keyframes: {
         fadeIn: {

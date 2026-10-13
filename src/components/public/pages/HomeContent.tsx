@@ -32,7 +32,7 @@ export function HomeContent() {
         <div className="flex flex-col sm:flex-row gap-4 w-full sm:w-auto justify-center">
           <Link
             href="/register"
-            className="bg-orange-500 hover:bg-orange-600 text-white font-black text-xs sm:text-sm px-8 py-4 rounded-xl shadow-xl shadow-orange-500/30 transition-all"
+            className="bg-orange-500 hover:bg-orange-600 text-white font-black text-xs sm:text-sm px-8 py-4 rounded-xl shadow-accent transition-all"
           >
             Register & Launch Dashboard
           </Link>
@@ -61,7 +61,7 @@ export function HomeContent() {
             <button
               type="button"
               onClick={testSitemap}
-              className="bg-orange-500 hover:bg-orange-600 text-white font-bold text-xs rounded-xl py-3 px-4 shadow-lg shadow-orange-500/20"
+              className="bg-orange-500 hover:bg-orange-600 text-white font-bold text-xs rounded-xl py-3 px-4 shadow-accent"
             >
               Extract Keywords
             </button>

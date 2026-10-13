@@ -15,7 +15,7 @@ export function BrandLogo({
   return (
     <Link href={href} className="flex items-center space-x-3 min-w-0">
       <div
-        className={`${box} rounded-xl bg-orange-500 flex items-center justify-center font-black text-white shadow-lg shadow-orange-500/30 shrink-0`}
+        className={`${box} rounded-xl bg-orange-500 flex items-center justify-center font-black text-white shrink-0`}
       >
         AX
       </div>

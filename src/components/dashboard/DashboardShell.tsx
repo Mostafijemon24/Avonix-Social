@@ -377,7 +377,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
                 {(state.email || "U").slice(0, 1).toUpperCase()}
               </button>
               {profileOpen && (
-                <div className="absolute right-0 mt-2 w-[210px] bg-white border border-line rounded-xl shadow-[0_14px_34px_rgba(18,26,48,0.18)] z-40 p-2">
+                <div className="absolute right-0 mt-2 w-[210px] bg-white border border-line rounded-xl shadow-[0_6px_18px_rgba(18,26,48,0.1)] z-40 p-2">
                   <p className="text-[11px] text-dim px-2.5 py-1.5 truncate">{state.email}</p>
                   <button
                     type="button"
