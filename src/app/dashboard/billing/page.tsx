@@ -112,7 +112,7 @@ export default function BillingPage() {
             type="button"
             disabled={!paidPlan}
             onClick={() => topUp("stripe")}
-            className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-ink font-bold px-4 py-3 rounded-xl"
+            className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white font-bold px-4 py-3 rounded-xl"
           >
             Top-Up Stripe
           </button>
@@ -120,7 +120,7 @@ export default function BillingPage() {
             type="button"
             disabled={!paidPlan}
             onClick={() => topUp("paypal")}
-            className="bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-ink font-bold px-4 py-3 rounded-xl"
+            className="bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white font-bold px-4 py-3 rounded-xl"
           >
             Top-Up PayPal
           </button>
