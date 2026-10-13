@@ -46,7 +46,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
         {toasts.map((toast) => (
           <div
             key={toast.id}
-            className={`pointer-events-auto p-4 rounded-xl shadow-2xl text-white font-bold text-xs flex items-center justify-between animate-fade-in ${
+            className={`pointer-events-auto p-4 rounded-xl shadow-2xl text-ink font-bold text-xs flex items-center justify-between animate-fade-in ${
               toast.type === "success"
                 ? "bg-emerald-600"
                 : toast.type === "error"

@@ -8,7 +8,7 @@ import { api, isApiError, type StudioPostRecord } from "@/lib/api-client";
 import PostDetailsDrawer from "@/components/dashboard/PostDetailsDrawer";
 
 const STATUS = ["all", "draft", "scheduled", "published", "archived"] as const;
-const PLATFORMS = ["all", "Facebook", "Instagram", "LinkedIn", "GMB"] as const;
+const PLATFORMS = ["all", "Facebook", "Instagram", "LinkedIn", "GMB", "X", "Pinterest"] as const;
 const TYPES = ["all", "INTENT_PROXIMITY", "OFFER_PROMOTION_EVENT", "AUTHORITY_TRUST_PROOF", "FAQ_EDUCATIONAL"] as const;
 const TYPE_LABEL: Record<string, string> = {
   all: "All types",
@@ -162,7 +162,7 @@ export default function PostLibraryPage() {
   return (
     <div className="space-y-5 max-w-5xl mx-auto animate-fade-in">
       <div>
-        <h1 className="text-xl font-extrabold tracking-tight text-white">Post Library</h1>
+        <h1 className="text-xl font-extrabold tracking-tight text-ink">Post Library</h1>
         <p className="text-xs text-[color:var(--color-text-muted)] mt-1">
           All generated content for this client. Create new posts in Content Studio.
         </p>
@@ -174,7 +174,7 @@ export default function PostLibraryPage() {
             type="button"
             onClick={() => setFilter(s)}
             className={`px-3 py-1.5 rounded-full text-[11px] font-bold capitalize min-h-[36px] ${
-              filter === s ? "bg-orange-500 text-white" : "bg-[color:var(--color-card)] text-slate-400 border border-white/[0.07]"
+              filter === s ? "bg-orange-500 text-white" : "bg-[color:var(--color-card)] text-muted border border-line"
             }`}
           >
             {s} ({countFor(s)})
@@ -188,7 +188,7 @@ export default function PostLibraryPage() {
             type="button"
             onClick={() => setPlatform(p)}
             className={`px-3 py-1.5 rounded-full text-[11px] font-bold min-h-[36px] ${
-              platform === p ? "bg-navy-700 text-white" : "bg-[color:var(--color-card)] text-slate-500 border border-white/[0.07]"
+              platform === p ? "bg-navy-700 text-ink" : "bg-[color:var(--color-card)] text-dim border border-line"
             }`}
           >
             {p}
@@ -223,7 +223,7 @@ export default function PostLibraryPage() {
 
       {selected.length > 0 && (
         <div className="flex flex-wrap items-center gap-2 glass-card rounded-xl px-3 py-2">
-          <span className="text-[11px] font-bold text-white">Selected: {selected.length}</span>
+          <span className="text-[11px] font-bold text-ink">Selected: {selected.length}</span>
           <button type="button" className="btn-primary text-[11px]" onClick={() => setBulk("publish")}>
             Publish
           </button>
@@ -240,9 +240,9 @@ export default function PostLibraryPage() {
       )}
 
       {loading ? (
-        <p className="text-sm text-slate-500">Loading…</p>
+        <p className="text-sm text-dim">Loading…</p>
       ) : filtered.length === 0 ? (
-        <p className="text-sm text-slate-500">
+        <p className="text-sm text-dim">
           No posts yet.{" "}
           <Link href="/dashboard/social-post" className="text-orange-400 font-bold">
             Open Content Studio
@@ -250,7 +250,7 @@ export default function PostLibraryPage() {
         </p>
       ) : (
         <ul className="space-y-2">
-          <li className="flex items-center gap-2 px-1 text-[11px] text-slate-500">
+          <li className="flex items-center gap-2 px-1 text-[11px] text-dim">
             <input type="checkbox" checked={allVisibleSelected} onChange={toggleAll} />
             Select all
           </li>
@@ -273,13 +273,13 @@ export default function PostLibraryPage() {
                   onClick={() => setDetail(p)}
                 >
                   <div className="flex flex-wrap items-center gap-2 text-xs">
-                    <span className="font-bold text-white">{p.platform}</span>
+                    <span className="font-bold text-ink">{p.platform}</span>
                     <span className={statusPill(p)}>{p.archived ? "archived" : p.status}</span>
                     {p.gmbCategory && <span className="text-orange-300">{TYPE_LABEL[p.gmbCategory] || p.gmbCategory}</span>}
-                    {p.cta && <span className="text-slate-400">CTA · {p.cta}</span>}
-                    <span className="text-slate-500 font-mono truncate">{p.url}</span>
+                    {p.cta && <span className="text-muted">CTA · {p.cta}</span>}
+                    <span className="text-dim font-mono truncate">{p.url}</span>
                   </div>
-                  <p className="text-sm text-white font-semibold mt-1">{p.heading}</p>
+                  <p className="text-sm text-ink font-semibold mt-1">{p.heading}</p>
                 </button>
               </div>
             </li>
@@ -302,15 +302,15 @@ export default function PostLibraryPage() {
 
       {bulk && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-          <div className="w-full max-w-md rounded-2xl bg-[color:var(--color-card)] border border-white/[0.07] p-5">
-            <h3 className="text-base font-extrabold text-white">
+          <div className="w-full max-w-md rounded-2xl bg-[color:var(--color-card)] border border-line p-5">
+            <h3 className="text-base font-extrabold text-ink">
               {bulk === "archive" && `Archive ${selected.length} posts?`}
               {bulk === "publish" && `Publish ${selected.length} posts?`}
               {bulk === "schedule" && `Schedule ${selected.length} posts?`}
               {bulk === "regenerate" && `Regenerate ${selected.length} posts?`}
             </h3>
             {bulk === "publish" && (
-              <p className="text-[12px] text-slate-400 mt-2">
+              <p className="text-[12px] text-muted mt-2">
                 Publishing uses connected accounts for {platformsInSelection.join(", ") || "each platform"}.
                 Destinations are managed in Connections — not selected per post.
               </p>
@@ -323,7 +323,7 @@ export default function PostLibraryPage() {
                   value={scheduleAt}
                   onChange={(e) => setScheduleAt(e.target.value)}
                 />
-                <p className="text-[10px] text-slate-500">
+                <p className="text-[10px] text-dim">
                   Timezone: {Intl.DateTimeFormat().resolvedOptions().timeZone}
                 </p>
               </div>

@@ -401,7 +401,7 @@ export function RegisterFlow() {
 
   if (!initialized) {
     return (
-      <div className="min-h-[60vh] flex items-center justify-center text-slate-400 text-sm">
+      <div className="min-h-[60vh] flex items-center justify-center text-muted text-sm">
         Loading...
       </div>
     );
@@ -410,7 +410,7 @@ export function RegisterFlow() {
   return (
     <div className="max-w-md w-full mx-auto">
       <div className="glass-card bg-navy-900 rounded-3xl p-6 border border-navy-800 shadow-2xl text-center sm:text-left">
-        <h1 className="text-xl font-black text-white mb-1">
+        <h1 className="text-xl font-black text-ink mb-1">
           {step === "signin" && "Sign In"}
           {step === "register" && "Create Account"}
           {step === "verify" && "Verify Email"}
@@ -418,7 +418,7 @@ export function RegisterFlow() {
           {step === "forgot" && "Forgot Password"}
           {step === "reset" && "Reset Password"}
         </h1>
-        <p className="text-xs text-slate-400 mb-6">
+        <p className="text-xs text-muted mb-6">
           {step === "signin" && "Sign in with email and password every time."}
           {step === "register" &&
             "Set a strong password, then verify your email before Free Trial."}
@@ -456,7 +456,7 @@ export function RegisterFlow() {
             <button
               type="button"
               onClick={() => setStep("register")}
-              className="w-full text-slate-400 hover:text-white font-bold py-2"
+              className="w-full text-muted hover:text-ink font-bold py-2"
             >
               New account? Register →
             </button>
@@ -484,7 +484,7 @@ export function RegisterFlow() {
             <button
               type="button"
               onClick={() => setStep("signin")}
-              className="w-full text-slate-500 font-bold py-2"
+              className="w-full text-dim font-bold py-2"
             >
               ← Back to sign in
             </button>
@@ -493,13 +493,13 @@ export function RegisterFlow() {
 
         {step === "reset" && (
           <form onSubmit={handleResetPassword} className="space-y-3 text-xs" autoComplete="off">
-            <p className="text-[10px] text-slate-500">Account: {email}</p>
-            <p className="text-[10px] text-amber-400/90 -mt-1">
+            <p className="text-[10px] text-dim">Account: {email}</p>
+            <p className="text-[10px] text-[#d97706]/90 -mt-1">
               Use the latest 6-digit code you were given. Do not tap Resend — that cancels the
               current code. Mail often does not arrive.
             </p>
             <div>
-              <label className="block font-bold text-slate-300 mb-1">Email Reset Code</label>
+              <label className="block font-bold text-muted mb-1">Email Reset Code</label>
               <input
                 type="text"
                 name="reset-code"
@@ -510,7 +510,7 @@ export function RegisterFlow() {
                 value={resetCode}
                 onChange={(e) => setResetCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
                 autoComplete="one-time-code"
-                className="w-full border border-navy-700 rounded-xl p-3 bg-navy-950 font-bold text-white text-center text-lg tracking-[0.4em] font-mono"
+                className="w-full border border-navy-700 rounded-xl p-3 bg-navy-950 font-bold text-ink text-center text-lg tracking-[0.4em] font-mono"
               />
             </div>
             <PasswordField
@@ -536,9 +536,9 @@ export function RegisterFlow() {
               onChange={setConfirmPassword}
             />
             {confirmPassword && password !== confirmPassword ? (
-              <p className="text-[10px] text-red-400 -mt-1">New password and confirmation do not match.</p>
+              <p className="text-[10px] text-[#dc2626] -mt-1">New password and confirmation do not match.</p>
             ) : null}
-            <p className="text-[10px] text-slate-500 -mt-1">{PASSWORD_HINT}</p>
+            <p className="text-[10px] text-dim -mt-1">{PASSWORD_HINT}</p>
             <button
               type="submit"
               disabled={loading || resetCode.length !== 6}
@@ -550,14 +550,14 @@ export function RegisterFlow() {
               type="button"
               disabled={loading}
               onClick={handleResendPasswordReset}
-              className="w-full text-slate-400 hover:text-white font-bold py-2"
+              className="w-full text-muted hover:text-ink font-bold py-2"
             >
               Resend reset code
             </button>
             <button
               type="button"
               onClick={() => setStep("signin")}
-              className="w-full text-slate-500 font-bold py-2"
+              className="w-full text-dim font-bold py-2"
             >
               ← Back to sign in
             </button>
@@ -597,7 +597,7 @@ export function RegisterFlow() {
               value={confirmPassword}
               onChange={setConfirmPassword}
             />
-            <p className="text-[10px] text-slate-500 -mt-1">{PASSWORD_HINT}</p>
+            <p className="text-[10px] text-dim -mt-1">{PASSWORD_HINT}</p>
             <button
               type="submit"
               disabled={loading}
@@ -608,7 +608,7 @@ export function RegisterFlow() {
             <button
               type="button"
               onClick={() => setStep("signin")}
-              className="w-full text-slate-500 font-bold py-2"
+              className="w-full text-dim font-bold py-2"
             >
               ← Back to sign in
             </button>
@@ -624,9 +624,9 @@ export function RegisterFlow() {
 
         {step === "verify" && (
           <form onSubmit={handleVerify} className="space-y-3 text-xs" autoComplete="off">
-            <p className="text-[10px] text-slate-500">Account: {email}</p>
+            <p className="text-[10px] text-dim">Account: {email}</p>
             <div>
-              <label className="block font-bold text-slate-300 mb-1">Email Code</label>
+              <label className="block font-bold text-muted mb-1">Email Code</label>
               <input
                 ref={emailCodeRef}
                 type="text"
@@ -645,10 +645,10 @@ export function RegisterFlow() {
                 data-lpignore="true"
                 data-1p-ignore
                 placeholder=""
-                className="w-full border border-navy-700 rounded-xl p-3 bg-navy-950 font-bold text-white text-center text-lg tracking-[0.4em] font-mono"
+                className="w-full border border-navy-700 rounded-xl p-3 bg-navy-950 font-bold text-ink text-center text-lg tracking-[0.4em] font-mono"
               />
             </div>
-            <p className="text-[10px] text-slate-500">
+            <p className="text-[10px] text-dim">
               Check inbox and spam. Code expires in 10 minutes. Auto-verifies at 6 digits.
             </p>
             <button
@@ -662,7 +662,7 @@ export function RegisterFlow() {
               type="button"
               disabled={loading}
               onClick={handleResendOtp}
-              className="w-full text-slate-400 hover:text-white font-bold py-2"
+              className="w-full text-muted hover:text-ink font-bold py-2"
             >
               Resend email code
             </button>
@@ -671,7 +671,7 @@ export function RegisterFlow() {
 
         {step === "card" && (
           <form onSubmit={handleCard} className="space-y-3 text-xs">
-            <p className="text-[10px] text-slate-500">Account: {email}</p>
+            <p className="text-[10px] text-dim">Account: {email}</p>
             <Field label="Card Number" name="cardNumber" required />
             <div className="grid grid-cols-3 gap-2">
               <Field label="MM" name="expMonth" placeholder="12" required />
@@ -688,7 +688,7 @@ export function RegisterFlow() {
           </form>
         )}
 
-        <p className="text-[10px] text-slate-500 mt-6 text-center">
+        <p className="text-[10px] text-dim mt-6 text-center">
           <Link href="/" className="hover:text-orange-400">
             ← Back to home
           </Link>
@@ -721,7 +721,7 @@ function Field({
 }) {
   return (
     <div>
-      <label className="block font-bold text-slate-300 mb-1">{label}</label>
+      <label className="block font-bold text-muted mb-1">{label}</label>
       <input
         type={type}
         name={name}
@@ -731,7 +731,7 @@ function Field({
         defaultValue={defaultValue}
         autoComplete={autoComplete}
         inputMode={inputMode}
-        className="w-full border border-navy-700 rounded-xl p-3 bg-navy-950 font-bold text-white"
+        className="w-full border border-navy-700 rounded-xl p-3 bg-navy-950 font-bold text-ink"
       />
     </div>
   );

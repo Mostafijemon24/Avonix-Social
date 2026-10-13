@@ -30,7 +30,7 @@ export default function AdminUserDetailPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
-  if (!user) return <p className="text-slate-400 text-sm">Loading user...</p>;
+  if (!user) return <p className="text-muted text-sm">Loading user...</p>;
 
   const s = user.usageStats;
   const r = user.registration;
@@ -97,16 +97,16 @@ export default function AdminUserDetailPage() {
     <div className="space-y-6">
       <div className="flex flex-wrap justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-black text-white">{user.email}</h1>
-          <p className="text-xs text-slate-400 mt-1">
+          <h1 className="text-2xl font-black text-ink">{user.email}</h1>
+          <p className="text-xs text-muted mt-1">
             {user.planName} ·{" "}
             {user.unlimitedCredits ? (
-              <span className="text-emerald-400 font-bold">Unlimited credits</span>
+              <span className="text-[#16a34a] font-bold">Unlimited credits</span>
             ) : (
               `${user.credits}/${user.creditLimit} credits`
             )}
             {(user.hasPassword === false || r?.hasPassword === false) && (
-              <span className="text-amber-400 font-bold"> · No password set</span>
+              <span className="text-[#d97706] font-bold"> · No password set</span>
             )}
           </p>
         </div>
@@ -114,14 +114,14 @@ export default function AdminUserDetailPage() {
           <button
             type="button"
             onClick={toggleUnlimited}
-            className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-4 py-2 rounded-xl text-xs"
+            className="bg-emerald-600 hover:bg-emerald-500 text-ink font-bold px-4 py-2 rounded-xl text-xs"
           >
             {user.unlimitedCredits ? "Revoke Unlimited" : "Grant Unlimited"}
           </button>
           <button
             type="button"
             onClick={remove}
-            className="bg-red-600 hover:bg-red-500 text-white font-bold px-4 py-2 rounded-xl text-xs"
+            className="bg-red-600 hover:bg-red-500 text-ink font-bold px-4 py-2 rounded-xl text-xs"
           >
             Delete User
           </button>
@@ -129,19 +129,19 @@ export default function AdminUserDetailPage() {
       </div>
 
       {msg && (
-        <div className="bg-emerald-950/40 border border-emerald-500/40 text-emerald-300 text-xs p-3 rounded-xl">
+        <div className="bg-emerald-50 border border-emerald-200 text-[#16a34a] text-xs p-3 rounded-xl">
           {msg}
         </div>
       )}
       {err && (
-        <div className="bg-red-950/40 border border-red-500/40 text-red-300 text-xs p-3 rounded-xl">
+        <div className="bg-red-50 border border-red-200 text-[#dc2626] text-xs p-3 rounded-xl">
           {err}
         </div>
       )}
 
       {r && (
         <div className="glass-card p-6 rounded-2xl border border-navy-800">
-          <h2 className="text-sm font-bold text-white mb-4">Registration Data</h2>
+          <h2 className="text-sm font-bold text-ink mb-4">Registration Data</h2>
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 text-xs">
             {[
               ["Name", r.name || "—"],
@@ -157,12 +157,12 @@ export default function AdminUserDetailPage() {
               ["Updated", new Date(r.lastUpdated).toLocaleString()],
             ].map(([label, val]) => (
               <div key={String(label)}>
-                <p className="text-slate-500 font-bold uppercase text-[10px]">{label}</p>
-                <p className="text-white mt-1">{val}</p>
+                <p className="text-dim font-bold uppercase text-[10px]">{label}</p>
+                <p className="text-ink mt-1">{val}</p>
               </div>
             ))}
           </div>
-          {r.notes && <p className="text-xs text-slate-400 mt-4">Notes: {r.notes}</p>}
+          {r.notes && <p className="text-xs text-muted mt-4">Notes: {r.notes}</p>}
         </div>
       )}
 
@@ -178,15 +178,15 @@ export default function AdminUserDetailPage() {
           ["Payments", user.paymentLogs.length],
         ].map(([label, val]) => (
           <div key={String(label)} className="glass-card p-4 rounded-xl border border-navy-800">
-            <p className="text-[10px] text-slate-500 uppercase font-bold">{label}</p>
-            <p className="text-xl font-black text-white mt-1">{val}</p>
+            <p className="text-[10px] text-dim uppercase font-bold">{label}</p>
+            <p className="text-xl font-black text-ink mt-1">{val}</p>
           </div>
         ))}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="glass-card p-6 rounded-2xl border border-navy-800">
-          <h2 className="text-sm font-bold text-white mb-4">Set / Reset Password</h2>
+          <h2 className="text-sm font-bold text-ink mb-4">Set / Reset Password</h2>
           <div className="space-y-3 text-xs">
             <PasswordField
               label="New password"
@@ -214,28 +214,28 @@ export default function AdminUserDetailPage() {
             >
               Save Password
             </button>
-            <p className="text-[10px] text-slate-500">
+            <p className="text-[10px] text-dim">
               Also activates email verification so the user can sign in immediately.
             </p>
           </div>
         </div>
 
         <div className="glass-card p-6 rounded-2xl border border-navy-800">
-          <h2 className="text-sm font-bold text-white mb-4">Adjust Credits</h2>
+          <h2 className="text-sm font-bold text-ink mb-4">Adjust Credits</h2>
           <div className="space-y-3 text-xs">
             <input
               type="number"
               value={credits}
               onChange={(e) => setCredits(e.target.value)}
               placeholder={`Current: ${user.credits}`}
-              className="w-full border border-navy-700 bg-navy-950 rounded-xl p-3 text-white"
+              className="w-full border border-navy-700 bg-navy-950 rounded-xl p-3 text-ink"
             />
             <input
               type="text"
               value={reason}
               onChange={(e) => setReason(e.target.value)}
               placeholder="Reason"
-              className="w-full border border-navy-700 bg-navy-950 rounded-xl p-3 text-white"
+              className="w-full border border-navy-700 bg-navy-950 rounded-xl p-3 text-ink"
             />
             <button
               type="button"
@@ -248,12 +248,12 @@ export default function AdminUserDetailPage() {
         </div>
 
         <div className="glass-card p-6 rounded-2xl border border-navy-800">
-          <h2 className="text-sm font-bold text-white mb-4">Change Plan</h2>
+          <h2 className="text-sm font-bold text-ink mb-4">Change Plan</h2>
           <div className="space-y-3 text-xs">
             <select
               value={planSlug}
               onChange={(e) => setPlanSlug(e.target.value)}
-              className="w-full border border-navy-700 bg-navy-950 rounded-xl p-3 text-white"
+              className="w-full border border-navy-700 bg-navy-950 rounded-xl p-3 text-ink"
             >
               {plans.map((p) => (
                 <option key={p.slug} value={p.slug}>
@@ -264,7 +264,7 @@ export default function AdminUserDetailPage() {
             <button
               type="button"
               onClick={changePlan}
-              className="bg-navy-800 hover:bg-navy-700 text-white font-bold rounded-xl px-4 py-2.5"
+              className="bg-navy-800 hover:bg-navy-700 text-ink font-bold rounded-xl px-4 py-2.5"
             >
               Save Plan (reset credits to plan default)
             </button>
@@ -273,11 +273,11 @@ export default function AdminUserDetailPage() {
       </div>
 
       <div className="glass-card p-6 rounded-2xl border border-navy-800">
-        <h2 className="text-sm font-bold text-white mb-4">Usage Logs</h2>
+        <h2 className="text-sm font-bold text-ink mb-4">Usage Logs</h2>
         <div className="overflow-x-auto max-h-96">
           <table className="w-full text-xs">
             <thead>
-              <tr className="text-slate-500 border-b border-navy-800">
+              <tr className="text-dim border-b border-navy-800">
                 <th className="text-left py-2">Action</th>
                 <th className="text-left py-2">Model</th>
                 <th className="text-left py-2">Tokens</th>
@@ -288,7 +288,7 @@ export default function AdminUserDetailPage() {
             </thead>
             <tbody>
               {user.usageLogs.map((log) => (
-                <tr key={log.id} className="border-b border-navy-800/50 text-slate-300">
+                <tr key={log.id} className="border-b border-navy-800/50 text-muted">
                   <td className="py-2">{log.action}</td>
                   <td className="py-2">{log.model?.split("/").pop() || "—"}</td>
                   <td className="py-2">{log.totalTokens}</td>

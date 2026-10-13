@@ -38,11 +38,11 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
         <div className="p-5 border-b border-navy-800">
           <div className="flex items-center gap-2">
             <div className="w-9 h-9 rounded-xl bg-orange-500 flex items-center justify-center">
-              <Shield className="w-5 h-5 text-white" />
+              <Shield className="w-5 h-5 text-ink" />
             </div>
             <div>
-              <p className="text-white font-black text-sm">Super Admin</p>
-              <p className="text-[10px] text-slate-500">Avonix Social</p>
+              <p className="text-ink font-black text-sm">Super Admin</p>
+              <p className="text-[10px] text-dim">Avonix Social</p>
             </div>
           </div>
         </div>
@@ -61,7 +61,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
                 className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-bold transition-all ${
                   active
                     ? "bg-orange-500 text-white shadow-md"
-                    : "text-slate-400 hover:text-white hover:bg-navy-800"
+                    : "text-muted hover:text-ink hover:bg-navy-800"
                 }`}
               >
                 <Icon className="w-4 h-4" />
@@ -75,7 +75,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
           <button
             type="button"
             onClick={logout}
-            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-bold text-slate-400 hover:text-white hover:bg-navy-800"
+            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-bold text-muted hover:text-ink hover:bg-navy-800"
           >
             <LogOut className="w-4 h-4" />
             Sign Out

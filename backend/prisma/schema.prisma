@@ -109,7 +109,7 @@ model ConnectedAccount {
   user           User             @relation(fields: [userId], references: [id], onDelete: Cascade)
   workspaceId    String?
   workspace      ClientWorkspace? @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  provider       String // facebook | instagram | google_business | linkedin
+  provider       String // facebook | instagram | google_business | linkedin | x | pinterest
   authType       String           @default("oauth") // oauth | manual
   status         String           @default("connected") // connected | linked | expired | error
   accountId      String?
@@ -268,7 +268,7 @@ model StudioPost {
   fingerprint    String // url|platform|primaryKeyword — prevents duplicate publish
   websiteOrigin  String? // e.g. https://example.com — groups posts per website
   sourceUrl      String
-  platform       String // Facebook | Instagram | LinkedIn | GMB
+  platform       String // Facebook | Instagram | LinkedIn | GMB | X | Pinterest
   tone           String
   location       String
   primaryKeyword String

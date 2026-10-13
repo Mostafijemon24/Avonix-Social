@@ -19,8 +19,8 @@ export default function DashboardSupportPage() {
   return (
     <div className="space-y-6 max-w-3xl mx-auto animate-fade-in text-center sm:text-left">
       <div>
-        <h1 className="text-xl font-black text-white mb-1">Support</h1>
-        <p className="text-xs text-slate-400">
+        <h1 className="text-xl font-black text-ink mb-1">Support</h1>
+        <p className="text-xs text-muted">
           Get help with your account
           {activeName ? (
             <>
@@ -37,7 +37,7 @@ export default function DashboardSupportPage() {
           <Link
             key={q.href}
             href={q.href}
-            className="text-[11px] font-bold px-3 py-1.5 rounded-xl border border-navy-700 text-slate-300 hover:border-orange-500/50 hover:text-orange-400"
+            className="text-[11px] font-bold px-3 py-1.5 rounded-xl border border-navy-700 text-muted hover:border-orange-500/50 hover:text-orange-400"
           >
             {q.label}
           </Link>
@@ -45,8 +45,8 @@ export default function DashboardSupportPage() {
       </div>
 
       <div className="glass-card p-6 rounded-2xl border border-navy-800 text-left">
-        <h2 className="text-sm font-bold text-white mb-1">Submit a ticket</h2>
-        <p className="text-[11px] text-slate-400 mb-4">
+        <h2 className="text-sm font-bold text-ink mb-1">Submit a ticket</h2>
+        <p className="text-[11px] text-muted mb-4">
           Prefills your login email. Tickets go to the support team (same inbox as Contact).
         </p>
         <SupportTicketForm
@@ -56,7 +56,7 @@ export default function DashboardSupportPage() {
         />
       </div>
 
-      <p className="text-[11px] text-slate-500">
+      <p className="text-[11px] text-dim">
         Or email{" "}
         <a href="mailto:support@avonixsocial.com" className="text-orange-400 hover:underline">
           support@avonixsocial.com

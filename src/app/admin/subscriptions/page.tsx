@@ -12,19 +12,19 @@ export default function AdminSubscriptionsPage() {
     adminApi.subscriptions().then(setSubs).finally(() => setLoading(false));
   }, []);
 
-  if (loading) return <p className="text-slate-400 text-sm">Loading subscriptions...</p>;
+  if (loading) return <p className="text-muted text-sm">Loading subscriptions...</p>;
 
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-black text-white">Active Subscriptions ({subs.length})</h1>
-        <p className="text-xs text-slate-400 mt-1">Who bought which plan and via which gateway.</p>
+        <h1 className="text-2xl font-black text-ink">Active Subscriptions ({subs.length})</h1>
+        <p className="text-xs text-muted mt-1">Who bought which plan and via which gateway.</p>
       </div>
 
       <div className="glass-card rounded-2xl border border-navy-800 overflow-x-auto">
         <table className="w-full text-xs">
           <thead>
-            <tr className="text-slate-500 border-b border-navy-800 bg-navy-900/50">
+            <tr className="text-dim border-b border-navy-800 bg-navy-900/50">
               <th className="text-left p-4">User</th>
               <th className="text-left p-4">Plan</th>
               <th className="text-left p-4">Status</th>
@@ -36,13 +36,13 @@ export default function AdminSubscriptionsPage() {
           <tbody>
             {subs.length === 0 ? (
               <tr>
-                <td colSpan={6} className="p-8 text-center text-slate-500">
+                <td colSpan={6} className="p-8 text-center text-dim">
                   No active subscriptions yet.
                 </td>
               </tr>
             ) : (
               subs.map((s) => (
-                <tr key={s.id} className="border-b border-navy-800/50 text-slate-300">
+                <tr key={s.id} className="border-b border-navy-800/50 text-muted">
                   <td className="p-4">
                     <Link
                       href={`/admin/users/${s.userId}`}
@@ -57,7 +57,7 @@ export default function AdminSubscriptionsPage() {
                     </span>
                   </td>
                   <td className="p-4">
-                    <span className="text-emerald-400 capitalize">{s.status}</span>
+                    <span className="text-[#16a34a] capitalize">{s.status}</span>
                   </td>
                   <td className="p-4 capitalize">{s.gateway}</td>
                   <td className="p-4">{new Date(s.createdAt).toLocaleDateString()}</td>

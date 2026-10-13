@@ -122,7 +122,11 @@ export function buildRelevantImagePrompt({ keyword, location, heading, platform 
         ? "professional LinkedIn feed photo"
         : platform === "Instagram"
           ? "square Instagram feed photo"
-          : "Facebook link-preview landscape photo";
+          : platform === "X"
+            ? "landscape X (Twitter) in-stream photo"
+            : platform === "Pinterest"
+              ? "tall vertical 2:3 Pinterest pin photo, portrait composition"
+              : "Facebook link-preview landscape photo";
 
   return [
     `Ultra HD photorealistic ${platformHint}: ${subject}.`,

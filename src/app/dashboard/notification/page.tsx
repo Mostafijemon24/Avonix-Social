@@ -55,10 +55,10 @@ export default function NotificationPage() {
   return (
     <div className="space-y-6 max-w-7xl mx-auto animate-fade-in text-center sm:text-left">
       <div className="glass-card p-6 rounded-2xl border border-navy-800">
-        <h2 className="text-base font-bold text-white mb-2">
+        <h2 className="text-base font-bold text-ink mb-2">
           Email, WhatsApp & Telegram Alerts
         </h2>
-        <p className="text-xs text-slate-400 mb-6">
+        <p className="text-xs text-muted mb-6">
           Get notified if you miss a social/GBP post or forget to reply to Google Business
           reviews. Also alerts when wallet is low or subscription freezes.
         </p>
@@ -75,11 +75,11 @@ export default function NotificationPage() {
             onChange={(v) => setPrefs((p) => ({ ...p, notifyWhatsapp: v }))}
           />
           <div>
-            <label className="block font-bold text-slate-400 mb-1">WhatsApp number</label>
+            <label className="block font-bold text-muted mb-1">WhatsApp number</label>
             <input
               value={prefs.whatsappNumber}
               onChange={(e) => setPrefs((p) => ({ ...p, whatsappNumber: e.target.value }))}
-              className="w-full border border-navy-700 bg-navy-950 rounded-xl p-3 text-white"
+              className="w-full border border-navy-700 bg-navy-950 rounded-xl p-3 text-ink"
               placeholder="+1..."
             />
           </div>
@@ -89,11 +89,11 @@ export default function NotificationPage() {
             onChange={(v) => setPrefs((p) => ({ ...p, notifyTelegram: v }))}
           />
           <div>
-            <label className="block font-bold text-slate-400 mb-1">Telegram Chat ID</label>
+            <label className="block font-bold text-muted mb-1">Telegram Chat ID</label>
             <input
               value={prefs.telegramChatId}
               onChange={(e) => setPrefs((p) => ({ ...p, telegramChatId: e.target.value }))}
-              className="w-full border border-navy-700 bg-navy-950 rounded-xl p-3 text-white"
+              className="w-full border border-navy-700 bg-navy-950 rounded-xl p-3 text-ink"
               placeholder="From @userinfobot"
             />
           </div>
@@ -108,9 +108,9 @@ export default function NotificationPage() {
       </div>
 
       <div className="glass-card p-6 rounded-2xl border border-navy-800">
-        <h2 className="text-sm font-bold text-white mb-4">Recent Notifications</h2>
+        <h2 className="text-sm font-bold text-ink mb-4">Recent Notifications</h2>
         {logs.length === 0 ? (
-          <p className="text-xs text-slate-500">No notifications yet.</p>
+          <p className="text-xs text-dim">No notifications yet.</p>
         ) : (
           <div className="space-y-2 text-xs">
             {logs.map((l) => (
@@ -119,13 +119,13 @@ export default function NotificationPage() {
                 className="p-3 bg-navy-900 rounded-xl border border-navy-800 text-left"
               >
                 <div className="flex justify-between gap-2">
-                  <span className="text-white font-bold">{l.title}</span>
-                  <span className="text-slate-500 capitalize">
+                  <span className="text-ink font-bold">{l.title}</span>
+                  <span className="text-dim capitalize">
                     {l.channel} · {l.status}
                   </span>
                 </div>
-                <p className="text-slate-400 mt-1">{l.body}</p>
-                <p className="text-slate-600 mt-1">{new Date(l.createdAt).toLocaleString()}</p>
+                <p className="text-muted mt-1">{l.body}</p>
+                <p className="text-dim mt-1">{new Date(l.createdAt).toLocaleString()}</p>
               </div>
             ))}
           </div>
@@ -146,7 +146,7 @@ function Toggle({
 }) {
   return (
     <div className="p-4 bg-navy-900 rounded-xl border border-navy-800 flex items-center justify-between">
-      <span className="font-bold text-white">{label}</span>
+      <span className="font-bold text-ink">{label}</span>
       <input
         type="checkbox"
         checked={checked}

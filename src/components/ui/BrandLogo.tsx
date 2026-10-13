@@ -20,7 +20,7 @@ export function BrandLogo({
         AX
       </div>
       <span
-        className={`${text} font-black tracking-tight text-white ${
+        className={`${text} font-black tracking-tight text-ink ${
           compactOnMobile ? "hidden sm:inline" : ""
         }`}
       >

@@ -19,8 +19,8 @@ export function InsufficientCreditsBanner({
   available: number;
 }) {
   return (
-    <div className="bg-red-950/30 border border-red-500/40 rounded-xl p-4 text-xs text-red-300">
-      <strong className="text-red-400 block mb-1">Insufficient Credits</strong>
+    <div className="bg-red-50/30 border border-red-200 rounded-xl p-4 text-xs text-[#dc2626]">
+      <strong className="text-[#dc2626] block mb-1">Insufficient Credits</strong>
       This action requires <strong>{required}</strong> credits but you only have{" "}
       <strong>{available}</strong>. Upgrade your plan or top up from Plan & Price.
     </div>

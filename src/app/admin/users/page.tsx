@@ -122,14 +122,14 @@ export default function AdminUsersPage() {
     }
   };
 
-  if (loading) return <p className="text-slate-400 text-sm">Loading users...</p>;
+  if (loading) return <p className="text-muted text-sm">Loading users...</p>;
 
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-black text-white">All Users ({users.length})</h1>
-          <p className="text-xs text-slate-400 mt-1">
+          <h1 className="text-2xl font-black text-ink">All Users ({users.length})</h1>
+          <p className="text-xs text-muted mt-1">
             Create users with a password so they can sign in immediately.
           </p>
         </div>
@@ -143,12 +143,12 @@ export default function AdminUsersPage() {
       </div>
 
       {msg && (
-        <div className="bg-emerald-950/40 border border-emerald-500/40 text-emerald-300 text-xs p-3 rounded-xl">
+        <div className="bg-emerald-50 border border-emerald-200 text-[#16a34a] text-xs p-3 rounded-xl">
           {msg}
         </div>
       )}
       {err && (
-        <div className="bg-red-950/40 border border-red-500/40 text-red-300 text-xs p-3 rounded-xl">
+        <div className="bg-red-50 border border-red-200 text-[#dc2626] text-xs p-3 rounded-xl">
           {err}
         </div>
       )}
@@ -165,20 +165,20 @@ export default function AdminUsersPage() {
             ] as const
           ).map(([key, label]) => (
             <div key={key}>
-              <label className="text-slate-500 font-bold block mb-1">{label}</label>
+              <label className="text-dim font-bold block mb-1">{label}</label>
               <input
                 value={form[key]}
                 onChange={(e) => setForm((f) => ({ ...f, [key]: e.target.value }))}
-                className="w-full border border-navy-700 bg-navy-950 rounded-xl p-2.5 text-white"
+                className="w-full border border-navy-700 bg-navy-950 rounded-xl p-2.5 text-ink"
               />
             </div>
           ))}
           <div>
-            <label className="text-slate-500 font-bold block mb-1">Plan</label>
+            <label className="text-dim font-bold block mb-1">Plan</label>
             <select
               value={form.planSlug}
               onChange={(e) => setForm((f) => ({ ...f, planSlug: e.target.value }))}
-              className="w-full border border-navy-700 bg-navy-950 rounded-xl p-2.5 text-white"
+              className="w-full border border-navy-700 bg-navy-950 rounded-xl p-2.5 text-ink"
             >
               {plans.map((p) => (
                 <option key={p.slug} value={p.slug}>
@@ -188,7 +188,7 @@ export default function AdminUsersPage() {
             </select>
           </div>
           <div>
-            <label className="text-slate-500 font-bold block mb-1">Credits (optional)</label>
+            <label className="text-dim font-bold block mb-1">Credits (optional)</label>
             <input
               type="number"
               min={0}
@@ -196,9 +196,9 @@ export default function AdminUsersPage() {
               value={form.credits}
               onChange={(e) => setForm((f) => ({ ...f, credits: e.target.value }))}
               placeholder="Leave blank for plan default"
-              className="w-full border border-navy-700 bg-navy-950 rounded-xl p-2.5 text-white"
+              className="w-full border border-navy-700 bg-navy-950 rounded-xl p-2.5 text-ink"
             />
-            <p className="text-[10px] text-slate-500 mt-1">
+            <p className="text-[10px] text-dim mt-1">
               Leave blank for the plan default. For unlimited, tick the checkbox below — do not
               type a huge number.
             </p>
@@ -223,8 +223,8 @@ export default function AdminUsersPage() {
               onChange={(v) => setForm((f) => ({ ...f, confirmPassword: v }))}
             />
           </div>
-          <p className="md:col-span-3 text-[10px] text-slate-500">{PASSWORD_HINT}</p>
-          <label className="flex items-center gap-2 text-slate-300 font-bold">
+          <p className="md:col-span-3 text-[10px] text-dim">{PASSWORD_HINT}</p>
+          <label className="flex items-center gap-2 text-muted font-bold">
             <input
               type="checkbox"
               checked={form.unlimitedCredits}
@@ -245,7 +245,7 @@ export default function AdminUsersPage() {
       <div className="glass-card rounded-2xl border border-navy-800 overflow-x-auto">
         <table className="w-full text-xs">
           <thead>
-            <tr className="text-slate-500 border-b border-navy-800 bg-navy-900/50">
+            <tr className="text-dim border-b border-navy-800 bg-navy-900/50">
               <th className="text-left p-4">Email / Name</th>
               <th className="text-left p-4">Plan</th>
               <th className="text-left p-4">Credits</th>
@@ -256,14 +256,14 @@ export default function AdminUsersPage() {
           </thead>
           <tbody>
             {users.map((u) => (
-              <tr key={u.id} className="border-b border-navy-800/50 text-slate-300 hover:bg-navy-900/30">
+              <tr key={u.id} className="border-b border-navy-800/50 text-muted hover:bg-navy-900/30">
                 <td className="p-4">
                   <Link href={`/admin/users/${u.id}`} className="text-orange-400 font-bold hover:underline">
                     {u.email}
                   </Link>
-                  <p className="text-slate-500">{u.name || "—"}</p>
+                  <p className="text-dim">{u.name || "—"}</p>
                   {u.hasPassword === false && (
-                    <p className="text-amber-400 text-[10px] font-bold mt-1">No password — cannot sign in</p>
+                    <p className="text-[#d97706] text-[10px] font-bold mt-1">No password — cannot sign in</p>
                   )}
                 </td>
                 <td className="p-4">
@@ -271,11 +271,11 @@ export default function AdminUsersPage() {
                 </td>
                 <td className="p-4">
                   {u.unlimitedCredits ? (
-                    <span className="text-emerald-400 font-bold">Unlimited</span>
+                    <span className="text-[#16a34a] font-bold">Unlimited</span>
                   ) : (
                     <>
                       <span className="text-orange-500 font-bold">{u.credits}</span>
-                      <span className="text-slate-600">/{u.creditLimit}</span>
+                      <span className="text-dim">/{u.creditLimit}</span>
                     </>
                   )}
                 </td>
@@ -285,17 +285,17 @@ export default function AdminUsersPage() {
                   <button
                     type="button"
                     onClick={() => toggleUnlimited(u)}
-                    className="text-emerald-400 hover:underline font-bold"
+                    className="text-[#16a34a] hover:underline font-bold"
                   >
                     {u.unlimitedCredits ? "Revoke ∞" : "Grant ∞"}
                   </button>
-                  <Link href={`/admin/users/${u.id}`} className="text-slate-400 hover:text-white font-bold">
+                  <Link href={`/admin/users/${u.id}`} className="text-muted hover:text-ink font-bold">
                     View
                   </Link>
                   <button
                     type="button"
                     onClick={() => remove(u.id, u.email)}
-                    className="text-red-400 hover:underline font-bold"
+                    className="text-[#dc2626] hover:underline font-bold"
                   >
                     Delete
                   </button>

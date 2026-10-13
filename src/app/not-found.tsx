@@ -13,8 +13,8 @@ export default function NotFound() {
           <p className="text-[11px] font-black uppercase tracking-widest text-orange-500 mb-3">
             404
           </p>
-          <h1 className="text-3xl font-black text-white mb-3">Page not found</h1>
-          <p className="text-sm text-slate-400 mb-8 leading-relaxed">
+          <h1 className="text-3xl font-black text-ink mb-3">Page not found</h1>
+          <p className="text-sm text-muted mb-8 leading-relaxed">
             This URL is not a valid Avonix Social page. Go home, sign in, or create an
             account.
           </p>
@@ -27,13 +27,13 @@ export default function NotFound() {
             </Link>
             <Link
               href="/login"
-              className="bg-navy-800 hover:bg-navy-700 text-slate-200 text-xs font-bold px-5 py-2.5 rounded-xl border border-navy-700"
+              className="bg-navy-800 hover:bg-navy-700 text-ink text-xs font-bold px-5 py-2.5 rounded-xl border border-navy-700"
             >
               Sign In
             </Link>
             <Link
               href="/register"
-              className="bg-navy-800 hover:bg-navy-700 text-slate-200 text-xs font-bold px-5 py-2.5 rounded-xl border border-navy-700"
+              className="bg-navy-800 hover:bg-navy-700 text-ink text-xs font-bold px-5 py-2.5 rounded-xl border border-navy-700"
             >
               Register
             </Link>

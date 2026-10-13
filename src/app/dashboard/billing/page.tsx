@@ -70,7 +70,7 @@ export default function BillingPage() {
   return (
     <div className="space-y-6 max-w-7xl mx-auto animate-fade-in text-center sm:text-left">
       {frozen && (
-        <div className="bg-red-950/50 border border-red-500/40 text-red-200 text-xs p-4 rounded-2xl">
+        <div className="bg-red-50 border border-red-200 text-red-200 text-xs p-4 rounded-2xl">
           Subscription frozen — wallet empty. Top up below to reactivate. Notifications were sent
           to your email / WhatsApp / Telegram.
         </div>
@@ -79,40 +79,40 @@ export default function BillingPage() {
       <CreditUsagePanel />
 
       <div className="glass-card p-6 rounded-2xl border border-navy-800">
-        <h2 className="text-base font-bold text-white mb-1">Wallet Balance (USD)</h2>
-        <p className="text-xs text-slate-400 mb-4">
+        <h2 className="text-base font-bold text-ink mb-1">Wallet Balance (USD)</h2>
+        <p className="text-xs text-muted mb-4">
           {paidPlan
             ? "Pro / Agency only — top up via Stripe or PayPal when payments are enabled. Usage debits this balance after plan credits."
             : "Free Trial uses included credits only. Upgrade to Pro or Agency below to unlock wallet top-up and extra usage."}
         </p>
         <p className="text-3xl font-black text-orange-500 mb-4">${wallet.toFixed(2)}</p>
         {!paidPlan && wallet > 0 && (
-          <p className="text-[11px] text-amber-400 mb-4 bg-amber-950/20 border border-amber-500/30 rounded-xl px-3 py-2">
+          <p className="text-[11px] text-[#d97706] mb-4 bg-amber-50/20 border border-amber-200 rounded-xl px-3 py-2">
             This balance cannot be used on Free Trial. Upgrade your plan to activate wallet spending.
           </p>
         )}
         {state.cardOnFile && (
-          <p className="text-[10px] text-slate-500 mb-4">
+          <p className="text-[10px] text-dim mb-4">
             Card on file: {state.cardBrand || "card"} ···· {state.cardLast4}
           </p>
         )}
         <div className="flex flex-wrap gap-3 items-end text-xs max-w-md">
           <div className="flex-1">
-            <label className="block text-slate-500 font-bold mb-1">Custom amount (USD)</label>
+            <label className="block text-dim font-bold mb-1">Custom amount (USD)</label>
             <input
               type="number"
               min={1}
               value={amount}
               onChange={(e) => setAmount(e.target.value)}
               disabled={!paidPlan}
-              className="w-full border border-navy-700 bg-navy-950 rounded-xl p-3 text-white disabled:opacity-50"
+              className="w-full border border-navy-700 bg-navy-950 rounded-xl p-3 text-ink disabled:opacity-50"
             />
           </div>
           <button
             type="button"
             disabled={!paidPlan}
             onClick={() => topUp("stripe")}
-            className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white font-bold px-4 py-3 rounded-xl"
+            className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-ink font-bold px-4 py-3 rounded-xl"
           >
             Top-Up Stripe
           </button>
@@ -120,7 +120,7 @@ export default function BillingPage() {
             type="button"
             disabled={!paidPlan}
             onClick={() => topUp("paypal")}
-            className="bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white font-bold px-4 py-3 rounded-xl"
+            className="bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-ink font-bold px-4 py-3 rounded-xl"
           >
             Top-Up PayPal
           </button>
@@ -130,7 +130,7 @@ export default function BillingPage() {
           <div className="mt-6 overflow-x-auto">
             <table className="w-full text-xs">
               <thead>
-                <tr className="text-slate-500 border-b border-navy-800">
+                <tr className="text-dim border-b border-navy-800">
                   <th className="text-left py-2">Type</th>
                   <th className="text-left py-2">Amount</th>
                   <th className="text-left py-2">Balance</th>
@@ -139,9 +139,9 @@ export default function BillingPage() {
               </thead>
               <tbody>
                 {txns.slice(0, 10).map((t) => (
-                  <tr key={t.id} className="border-b border-navy-800/50 text-slate-300">
+                  <tr key={t.id} className="border-b border-navy-800/50 text-muted">
                     <td className="py-2 capitalize">{t.type.replace("_", " ")}</td>
-                    <td className={`py-2 font-bold ${t.amountUsd >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                    <td className={`py-2 font-bold ${t.amountUsd >= 0 ? "text-[#16a34a]" : "text-[#dc2626]"}`}>
                       {t.amountUsd >= 0 ? "+" : ""}
                       ${t.amountUsd.toFixed(4)}
                     </td>
@@ -156,8 +156,8 @@ export default function BillingPage() {
       </div>
 
       <div className="glass-card p-6 rounded-2xl border border-navy-800">
-        <h2 className="text-base font-bold text-white mb-1">Service Plans</h2>
-        <p className="text-xs text-slate-400 mb-6">
+        <h2 className="text-base font-bold text-ink mb-1">Service Plans</h2>
+        <p className="text-xs text-muted mb-6">
           Email verification and a valid card are required before joining any plan
           (including Free Trial).
         </p>

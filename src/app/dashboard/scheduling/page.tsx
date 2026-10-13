@@ -71,7 +71,7 @@ export default function SchedulingPage() {
     <div className="space-y-5 max-w-6xl mx-auto animate-fade-in">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-xl font-extrabold tracking-tight text-white">Scheduling</h1>
+          <h1 className="text-xl font-extrabold tracking-tight text-ink">Scheduling</h1>
           <p className="text-xs text-[color:var(--color-text-muted)] mt-1">
             Weekly queue using existing scheduled posts. Timezone: {tz}
           </p>
@@ -85,7 +85,7 @@ export default function SchedulingPage() {
           >
             <ChevronLeft className="w-4 h-4" />
           </button>
-          <p className="text-[12px] font-bold text-white min-w-[160px] text-center">
+          <p className="text-[12px] font-bold text-ink min-w-[160px] text-center">
             {weekStart.toLocaleDateString(undefined, { month: "short", day: "numeric" })} –{" "}
             {addDays(weekStart, 6).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
           </p>
@@ -106,22 +106,22 @@ export default function SchedulingPage() {
       <div className="grid grid-cols-1 min-[900px]:grid-cols-2 min-[1120px]:grid-cols-7 gap-2">
         {byDay.map((day) => (
           <div key={day.label} className="glass-card rounded-xl p-2 min-h-[120px] min-[1120px]:min-h-[180px] min-w-0">
-            <p className="label-caps text-slate-500">{day.label}</p>
-            <p className="text-[11px] text-slate-400 mb-2">{day.date.getDate()}</p>
+            <p className="label-caps text-dim">{day.label}</p>
+            <p className="text-[11px] text-muted mb-2">{day.date.getDate()}</p>
             <div className="space-y-1.5">
               {day.posts.length === 0 ? (
-                <p className="text-[11px] text-slate-500">No scheduled posts</p>
+                <p className="text-[11px] text-dim">No scheduled posts</p>
               ) : (
                 day.posts.map((p) => (
                   <button
                     key={p.id}
                     type="button"
                     onClick={() => setDetail(p)}
-                    className="w-full text-left rounded-lg border border-white/[0.07] bg-[color:var(--color-card-inner)] px-2 py-1.5 hover:border-orange-500/40 min-h-[44px]"
+                    className="w-full text-left rounded-lg border border-line bg-[color:var(--color-card-inner)] px-2 py-1.5 hover:border-orange-500/40 min-h-[44px]"
                   >
                     <p className="text-[10px] font-bold text-orange-400">{p.platform}</p>
-                    <p className="text-[11px] text-white font-semibold line-clamp-2">{p.heading}</p>
-                    <p className="text-[10px] text-slate-400 mt-0.5">
+                    <p className="text-[11px] text-ink font-semibold line-clamp-2">{p.heading}</p>
+                    <p className="text-[10px] text-muted mt-0.5">
                       {new Date(p.scheduledDate || "").toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} ·{" "}
                       {p.status}
                     </p>
@@ -134,7 +134,7 @@ export default function SchedulingPage() {
       </div>
 
       {posts.length === 0 ? (
-        <p className="text-sm text-slate-500">
+        <p className="text-sm text-dim">
           Nothing is scheduled this week.{" "}
           <Link href="/dashboard/social-post" className="text-orange-400 font-bold">
             Generate in Content Studio
@@ -142,9 +142,9 @@ export default function SchedulingPage() {
         </p>
       ) : (
         <section>
-            <h2 className="text-sm font-bold text-white mb-2">Upcoming</h2>
+            <h2 className="text-sm font-bold text-ink mb-2">Upcoming</h2>
             {upcoming.length === 0 ? (
-              <p className="text-xs text-slate-500">Nothing remaining after {weekEnd.toLocaleDateString()}.</p>
+              <p className="text-xs text-dim">Nothing remaining after {weekEnd.toLocaleDateString()}.</p>
             ) : (
               <ul className="space-y-2">
                 {upcoming.map((p) => (
@@ -154,8 +154,8 @@ export default function SchedulingPage() {
                       className="w-full text-left glass-card rounded-xl px-4 py-3"
                       onClick={() => setDetail(p)}
                     >
-                      <p className="text-sm font-bold text-white">{p.heading}</p>
-                      <p className="text-[11px] text-slate-400 mt-1">
+                      <p className="text-sm font-bold text-ink">{p.heading}</p>
+                      <p className="text-[11px] text-muted mt-1">
                         {p.platform} · {p.scheduledDate ? new Date(p.scheduledDate).toLocaleString() : "—"} · {p.status}
                       </p>
                     </button>

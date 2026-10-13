@@ -64,12 +64,12 @@ export function SupportTicketForm({
   return (
     <form onSubmit={handleSubmit} className="space-y-3 text-xs">
       <div>
-        <label className="block font-bold text-slate-300 mb-1">Topic</label>
+        <label className="block font-bold text-muted mb-1">Topic</label>
         <select
           name="topic"
           required
           defaultValue="account"
-          className="w-full border border-navy-700 bg-navy-950 rounded-xl p-3 text-white outline-none focus:ring-2 focus:ring-orange-500"
+          className="w-full border border-navy-700 bg-navy-950 rounded-xl p-3 text-ink outline-none focus:ring-2 focus:ring-orange-500"
         >
           {TOPICS.map((t) => (
             <option key={t.value} value={t.value}>
@@ -79,51 +79,51 @@ export function SupportTicketForm({
         </select>
       </div>
       <div>
-        <label className="block font-bold text-slate-300 mb-1">Your name</label>
+        <label className="block font-bold text-muted mb-1">Your name</label>
         <input
           name="name"
           type="text"
           required
           defaultValue={defaultName}
-          className="w-full border border-navy-700 bg-navy-950 rounded-xl p-3 text-white outline-none focus:ring-2 focus:ring-orange-500"
+          className="w-full border border-navy-700 bg-navy-950 rounded-xl p-3 text-ink outline-none focus:ring-2 focus:ring-orange-500"
         />
       </div>
       <div>
-        <label className="block font-bold text-slate-300 mb-1">Email</label>
+        <label className="block font-bold text-muted mb-1">Email</label>
         <input
           name="email"
           type="email"
           required
           defaultValue={defaultEmail}
-          className="w-full border border-navy-700 bg-navy-950 rounded-xl p-3 text-white outline-none focus:ring-2 focus:ring-orange-500"
+          className="w-full border border-navy-700 bg-navy-950 rounded-xl p-3 text-ink outline-none focus:ring-2 focus:ring-orange-500"
         />
       </div>
       <div>
-        <label className="block font-bold text-slate-300 mb-1">Company (optional)</label>
+        <label className="block font-bold text-muted mb-1">Company (optional)</label>
         <input
           name="company"
           type="text"
           defaultValue={defaultCompany}
-          className="w-full border border-navy-700 bg-navy-950 rounded-xl p-3 text-white outline-none focus:ring-2 focus:ring-orange-500"
+          className="w-full border border-navy-700 bg-navy-950 rounded-xl p-3 text-ink outline-none focus:ring-2 focus:ring-orange-500"
         />
       </div>
       <div>
-        <label className="block font-bold text-slate-300 mb-1">Phone (optional)</label>
+        <label className="block font-bold text-muted mb-1">Phone (optional)</label>
         <input
           name="phone"
           type="tel"
           placeholder="+880 ..."
-          className="w-full border border-navy-700 bg-navy-950 rounded-xl p-3 text-white outline-none focus:ring-2 focus:ring-orange-500"
+          className="w-full border border-navy-700 bg-navy-950 rounded-xl p-3 text-ink outline-none focus:ring-2 focus:ring-orange-500"
         />
       </div>
       <div>
-        <label className="block font-bold text-slate-300 mb-1">Describe the issue</label>
+        <label className="block font-bold text-muted mb-1">Describe the issue</label>
         <textarea
           name="message"
           rows={5}
           required
           placeholder="What were you trying to do? Any error message?"
-          className="w-full border border-navy-700 bg-navy-950 rounded-xl p-3 text-white outline-none focus:ring-2 focus:ring-orange-500"
+          className="w-full border border-navy-700 bg-navy-950 rounded-xl p-3 text-ink outline-none focus:ring-2 focus:ring-orange-500"
         />
       </div>
       <button

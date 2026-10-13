@@ -51,7 +51,7 @@ export function PasswordField({
   return (
     <div>
       <div className="flex items-center justify-between gap-2 mb-1">
-        <label className="block font-bold text-slate-300">{label}</label>
+        <label className="block font-bold text-muted">{label}</label>
         {showGenerate && (
           <button
             type="button"
@@ -73,12 +73,12 @@ export function PasswordField({
           value={controlled || showGenerate ? current : undefined}
           defaultValue={!controlled && !showGenerate ? defaultValue : undefined}
           onChange={(e) => setValue(e.target.value)}
-          className="w-full border border-navy-700 rounded-xl p-3 pr-11 bg-navy-950 font-bold text-white"
+          className="w-full border border-navy-700 rounded-xl p-3 pr-11 bg-navy-950 font-bold text-ink"
         />
         <button
           type="button"
           onClick={() => setVisible((v) => !v)}
-          className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-navy-800"
+          className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1.5 rounded-lg text-muted hover:text-ink hover:bg-navy-800"
           aria-label={visible ? "Hide password" : "Show password"}
         >
           {visible ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}

@@ -40,6 +40,20 @@ export const PLATFORM_RULES = {
     maxWords: 200,
     tone: "LinkedIn Company Page post; professional insight-led; first person plural or brand voice",
   },
+  x: {
+    label: "X (Twitter)",
+    action: "social_post",
+    minWords: 18,
+    maxWords: 38,
+    tone: "X (Twitter) post; one tight keyword-led line under 280 characters; strong hook, no fluff",
+  },
+  pinterest: {
+    label: "Pinterest",
+    action: "social_post",
+    minWords: 20,
+    maxWords: 70,
+    tone: "Pinterest pin description; keyword-rich and descriptive; optimized for Pinterest search; image is required",
+  },
 };
 
 function buildPrompt({ provider, primaryKeyword, secondaryKeywords, location, address, intent }) {

@@ -33,13 +33,13 @@ export default function DashboardPage() {
   return (
     <div className="space-y-6 max-w-7xl mx-auto animate-fade-in text-left">
       <div>
-        <h1 className="text-2xl font-black text-white tracking-tight">Dashboard</h1>
-        <p className="text-slate-400 text-sm mt-1">
+        <h1 className="text-2xl font-black text-ink tracking-tight">Dashboard</h1>
+        <p className="text-muted text-sm mt-1">
           What is happening, what needs attention, and what is ready to publish.
         </p>
         <div className="mt-3 flex flex-wrap gap-2 text-xs">
-          <span className="bg-navy-800 border border-navy-700 px-3 py-1.5 rounded-full text-slate-300">
-            Plan: <strong className="text-white">{plan.name}</strong>
+          <span className="bg-navy-800 border border-navy-700 px-3 py-1.5 rounded-full text-muted">
+            Plan: <strong className="text-ink">{plan.name}</strong>
           </span>
         </div>
       </div>
@@ -52,24 +52,24 @@ export default function DashboardPage() {
           { label: "Needs attention", value: needs },
         ].map((stat) => (
           <div key={stat.label} className="glass-card p-5 rounded-2xl border border-navy-800">
-            <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">
+            <span className="text-xs font-bold text-muted uppercase tracking-wider">
               {stat.label}
             </span>
-            <p className="text-3xl font-black mt-2 text-white">{stat.value}</p>
+            <p className="text-3xl font-black mt-2 text-ink">{stat.value}</p>
           </div>
         ))}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <div className="glass-card p-6 rounded-2xl border border-navy-800">
-          <h2 className="text-sm font-bold text-white mb-3">Needs attention</h2>
+          <h2 className="text-sm font-bold text-ink mb-3">Needs attention</h2>
           {attention.length === 0 ? (
-            <p className="text-xs text-slate-500">No connection issues right now.</p>
+            <p className="text-xs text-dim">No connection issues right now.</p>
           ) : (
             <ul className="space-y-2">
               {attention.map((a) => (
                 <li key={a.id} className="flex items-center justify-between text-xs">
-                  <span className="text-amber-300">
+                  <span className="text-[#d97706]">
                     P1 — {a.accountName || a.provider} needs reauthorization
                   </span>
                   <Link href="/dashboard/connections" className="text-orange-400 font-bold">
@@ -81,14 +81,14 @@ export default function DashboardPage() {
           )}
         </div>
         <div className="glass-card p-6 rounded-2xl border border-navy-800">
-          <h2 className="text-sm font-bold text-white mb-3">Connection readiness</h2>
-          {(["facebook", "instagram", "linkedin", "google_business"] as const).map((p) => {
+          <h2 className="text-sm font-bold text-ink mb-3">Connection readiness</h2>
+          {(["facebook", "instagram", "linkedin", "google_business", "x", "pinterest"] as const).map((p) => {
             const group = accounts.filter((a) => a.provider === p);
             const ok = group.filter((a) => a.publishReady).length;
             return (
-              <p key={p} className="text-xs text-slate-400 mb-1 capitalize">
+              <p key={p} className="text-xs text-muted mb-1 capitalize">
                 {p.replace("_", " ")}:{" "}
-                <span className="text-white font-bold">
+                <span className="text-ink font-bold">
                   {ok}/{group.length}
                 </span>
               </p>
@@ -98,8 +98,8 @@ export default function DashboardPage() {
       </div>
 
       <div className="glass-card p-6 rounded-2xl border border-navy-800">
-        <h2 className="text-sm font-bold text-white mb-2">Performance analytics</h2>
-        <p className="text-xs text-slate-400">
+        <h2 className="text-sm font-bold text-ink mb-2">Performance analytics</h2>
+        <p className="text-xs text-muted">
           Performance analytics not connected. Connect reporting to show real impressions and
           reach — invented numbers are never shown.
         </p>
