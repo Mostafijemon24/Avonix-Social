@@ -31,20 +31,21 @@ type SyncSummary = {
 };
 
 const STATUS_STYLE: Record<string, string> = {
-  draft: "bg-slate-500/15 text-slate-300 border-slate-500/30",
+  pending: "bg-slate-500/15 text-slate-300 border-slate-500/30",
+  draft: "bg-sky-500/15 text-sky-300 border-sky-500/30",
   scheduled: "bg-amber-500/15 text-amber-300 border-amber-500/30",
   published: "bg-emerald-500/15 text-emerald-300 border-emerald-500/30",
   failed: "bg-red-500/15 text-red-300 border-red-500/30",
 };
 
-function StatusBadge({ status }: { status: string }) {
+function StatusBadge({ status, generated }: { status: string; generated: boolean }) {
+  // A draft that hasn't been generated yet is "Pending"; once generated it is a "Draft".
+  const key = status === "draft" ? (generated ? "draft" : "pending") : status;
   const label =
-    status === "draft"
+    key === "pending"
       ? "Pending"
-      : status === "failed"
-        ? "Failed"
-        : status.charAt(0).toUpperCase() + status.slice(1);
-  const cls = STATUS_STYLE[status] || STATUS_STYLE.draft;
+      : key.charAt(0).toUpperCase() + key.slice(1);
+  const cls = STATUS_STYLE[key] || STATUS_STYLE.pending;
   return (
     <span className={`inline-block rounded-full border px-2 py-0.5 text-[10px] font-bold ${cls}`}>
       {label}
@@ -68,6 +69,8 @@ export default function AutomationPage() {
   const [posts, setPosts] = useState<StudioPostRecord[]>([]);
   const [summary, setSummary] = useState<SyncSummary | null>(null);
   const [syncing, setSyncing] = useState(false);
+  const [generatingAll, setGeneratingAll] = useState(false);
+  const [generatingIds, setGeneratingIds] = useState<Set<string>>(new Set());
   const [detail, setDetail] = useState<StudioPostRecord | null>(null);
 
   const loadPosts = useCallback(async () => {
@@ -119,7 +122,6 @@ export default function AutomationPage() {
         platforms,
         tone,
         location: location.trim() || undefined,
-        imageSource: "ai",
         autoSchedule,
         // Interpret the sheet's wall-clock Schedule_Time in the user's timezone.
         tzOffsetMinutes: -new Date().getTimezoneOffset(),
@@ -136,7 +138,7 @@ export default function AutomationPage() {
         hasRowId: res.hasRowId,
       });
       showToast(
-        `Synced: ${res.created} new, ${res.updated} updated, ${res.scheduled} scheduled`,
+        `Synced ${res.created + res.updated} row(s). Now click Generate.`,
         "success"
       );
       await loadPosts();
@@ -147,16 +149,70 @@ export default function AutomationPage() {
     }
   }, [state.email, state.activeWorkspaceId, sheetId, range, platforms, tone, location, autoSchedule, showToast, loadPosts]);
 
+  // Generate a single row on demand.
+  const handleGenerateRow = useCallback(
+    async (postId: string) => {
+      if (!state.email) return;
+      setGeneratingIds((prev) => new Set(prev).add(postId));
+      try {
+        const res = await api.generateSheetPosts({ email: state.email, postId });
+        const failed = res.outcomes?.some((o) => o.outcome === "generation_failed");
+        showToast(failed ? "Generation failed for this row" : "Post generated", failed ? "error" : "success");
+        await loadPosts();
+      } catch (err) {
+        showToast(isApiError(err) ? err.error : "Generation failed", "error");
+      } finally {
+        setGeneratingIds((prev) => {
+          const next = new Set(prev);
+          next.delete(postId);
+          return next;
+        });
+      }
+    },
+    [state.email, showToast, loadPosts]
+  );
+
+  // Bulk-generate every row that hasn't been generated yet.
+  const handleGenerateAll = useCallback(async () => {
+    if (!state.email) return;
+    setGeneratingAll(true);
+    try {
+      const res = await api.generateSheetPosts({
+        email: state.email,
+        workspaceId: state.activeWorkspaceId || undefined,
+        sheetId: sheetId.trim() || undefined,
+      });
+      showToast(res.message || `Generated ${res.generated} post(s)`, res.failed ? "error" : "success");
+      await loadPosts();
+    } catch (err) {
+      showToast(isApiError(err) ? err.error : "Bulk generation failed", "error");
+    } finally {
+      setGeneratingAll(false);
+    }
+  }, [state.email, state.activeWorkspaceId, sheetId, showToast, loadPosts]);
+
+  // A sheet post is "generated" once content has been produced for it.
+  const isGenerated = useCallback(
+    (p: StudioPostRecord) => (p.sheet ? p.sheet.generated : !!p.content),
+    []
+  );
+
   const counts = useMemo(() => {
     const c = { pending: 0, scheduled: 0, published: 0, failed: 0 };
     for (const p of posts) {
-      if (p.status === "scheduled") c.scheduled += 1;
-      else if (p.status === "published") c.published += 1;
+      if (p.status === "published") c.published += 1;
       else if (p.status === "failed") c.failed += 1;
-      else c.pending += 1;
+      else if (p.status === "scheduled") c.scheduled += 1;
+      else if (!isGenerated(p)) c.pending += 1; // draft + not yet generated
     }
     return c;
-  }, [posts]);
+  }, [posts, isGenerated]);
+
+  // Rows that still need AI generation (ungenerated skeletons + failed retries).
+  const toGenerate = useMemo(
+    () => posts.filter((p) => p.status !== "published" && (!isGenerated(p) || p.status === "failed")),
+    [posts, isGenerated]
+  );
 
   return (
     <div className="space-y-5 max-w-6xl mx-auto animate-fade-in">
@@ -170,16 +226,12 @@ export default function AutomationPage() {
         </div>
         <button
           type="button"
-          className="btn-primary inline-flex items-center gap-2 text-sm disabled:opacity-60"
+          className="btn-secondary inline-flex items-center gap-2 text-sm disabled:opacity-60"
           onClick={handleSync}
-          disabled={syncing || configured === false}
+          disabled={syncing || generatingAll || configured === false}
         >
-          {syncing ? (
-            <RefreshCw className="w-4 h-4 animate-spin" />
-          ) : (
-            <Sparkles className="w-4 h-4" />
-          )}
-          {syncing ? "Generating…" : "Sync from Google Sheet & Generate"}
+          <RefreshCw className={`w-4 h-4 ${syncing ? "animate-spin" : ""}`} />
+          {syncing ? "Syncing…" : "Sync from Google Sheet"}
         </button>
       </div>
 
@@ -335,6 +387,25 @@ export default function AutomationPage() {
 
       {/* Table */}
       <div className="glass-card rounded-xl overflow-hidden">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line px-3 py-2.5">
+          <p className="text-xs font-bold text-ink">
+            Content calendar
+            <span className="text-dim font-normal ml-2">
+              {posts.length} row{posts.length === 1 ? "" : "s"}
+              {toGenerate.length > 0 ? ` · ${toGenerate.length} to generate` : ""}
+            </span>
+          </p>
+          <button
+            type="button"
+            className="btn-primary inline-flex items-center gap-2 text-xs disabled:opacity-50"
+            onClick={handleGenerateAll}
+            disabled={generatingAll || syncing || toGenerate.length === 0}
+            title={toGenerate.length === 0 ? "All rows already generated" : "Generate content for all pending rows"}
+          >
+            {generatingAll ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+            {generatingAll ? "Generating…" : `Generate Posts${toGenerate.length ? ` (${toGenerate.length})` : ""}`}
+          </button>
+        </div>
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs">
             <thead className="bg-[color:var(--color-card-inner)] text-dim">
@@ -352,7 +423,8 @@ export default function AutomationPage() {
                 <tr>
                   <td colSpan={6} className="px-3 py-8 text-center text-dim">
                     No posts yet. Configure your sheet and click{" "}
-                    <b className="text-ink">Sync from Google Sheet &amp; Generate</b>.
+                    <b className="text-ink">Sync from Google Sheet</b>, then{" "}
+                    <b className="text-ink">Generate Posts</b>.
                   </td>
                 </tr>
               ) : (
@@ -370,6 +442,8 @@ export default function AutomationPage() {
                     <td className="px-3 py-2">
                       {p.image ? (
                         <span className="text-emerald-400 font-bold">Yes</span>
+                      ) : p.sheet?.generateImage ? (
+                        <span className="text-amber-300">Planned</span>
                       ) : (
                         <span className="text-dim">No</span>
                       )}
@@ -378,19 +452,39 @@ export default function AutomationPage() {
                       {p.scheduledDate ? new Date(p.scheduledDate).toLocaleString() : "—"}
                     </td>
                     <td className="px-3 py-2">
-                      <StatusBadge status={p.status} />
+                      <StatusBadge status={p.status} generated={isGenerated(p)} />
                     </td>
-                    <td className="px-3 py-2 text-right">
-                      <button
-                        type="button"
-                        className="btn-secondary text-[11px] whitespace-nowrap"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setDetail(p);
-                        }}
-                      >
-                        View / Edit
-                      </button>
+                    <td className="px-3 py-2">
+                      <div className="flex items-center justify-end gap-1.5">
+                        {p.status !== "published" && (
+                          <button
+                            type="button"
+                            className="btn-primary text-[11px] whitespace-nowrap inline-flex items-center gap-1 disabled:opacity-50"
+                            disabled={generatingIds.has(p.id) || generatingAll}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleGenerateRow(p.id);
+                            }}
+                          >
+                            {generatingIds.has(p.id) ? (
+                              <RefreshCw className="w-3 h-3 animate-spin" />
+                            ) : (
+                              <Sparkles className="w-3 h-3" />
+                            )}
+                            {isGenerated(p) ? "Regenerate" : "Generate"}
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          className="btn-secondary text-[11px] whitespace-nowrap"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setDetail(p);
+                          }}
+                        >
+                          View / Edit
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))

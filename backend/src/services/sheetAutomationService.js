@@ -1,16 +1,24 @@
 /**
  * 30-Day Automated Post Generation & Scheduling — orchestrator.
  *
- * Flow (all server-side; no API keys ever reach the browser):
- *   1. Read the plan from Google Sheets (googleSheetsService).
- *   2. For each topic, generate an SEO title + body via the existing
- *      OpenRouter pipeline (generatePostContentWithAi).
- *   3. If Generate_Image = Yes, create an image via generateStudioImage
- *      (OpenRouter gpt-image-1); otherwise skip entirely.
- *   4. Persist each item as a StudioPost. Rows with a future Schedule_Time
- *      become status "scheduled" + scheduledAt, so the existing cron
- *      (processDueScheduledPosts, run on an interval from reminderService)
- *      publishes them live via connected OAuth accounts at the right time.
+ * This module is split into two independent phases so the user stays in control:
+ *
+ *   PHASE 1 — SYNC (syncSheetOnly):
+ *     Read the plan from Google Sheets and store a lightweight "skeleton" post
+ *     per (row × selected platform). No AI is called yet — the user can preview
+ *     the whole calendar in the table first. Skeletons are status "draft" with
+ *     meta.generated = false.
+ *
+ *   PHASE 2 — GENERATE (generateSheetPosts):
+ *     On demand (per-row "Generate" or a bulk "Generate Posts" button), run the
+ *     existing OpenRouter pipeline to produce an SEO title + body for that post,
+ *     optionally an image (ONLY when Generate_Image = Yes), and arm the schedule.
+ *     Content is written PER PLATFORM, so Facebook/LinkedIn/X each read
+ *     distinctly for the same topic (see PLATFORM_STYLE in autoPosterService).
+ *
+ * Rows with a future Schedule_Time become status "scheduled" + scheduledAt once
+ * generated, so the existing cron (processDueScheduledPosts, run on an interval
+ * from reminderService) publishes them live via connected OAuth accounts.
  *
  * IDENTITY / IDEMPOTENCY:
  *   - Preferred identity is an immutable Row_ID column in the sheet. With it,
@@ -18,11 +26,12 @@
  *     inserting rows is safe.
  *   - Without Row_ID we fall back to a content-based fingerprint (topic); this
  *     cannot distinguish an edit from a new topic, so a warning is returned.
- *   - Re-syncs update existing draft/scheduled posts in place. Already-published
+ *   - Re-syncs refresh skeletons/metadata in place and NEVER wipe already
+ *     generated content (unless the topic itself changed). Already-published
  *     (locked) posts are NEVER rewritten, and removed sheet rows NEVER delete
  *     existing posts.
- *   - Concurrent syncs for the same user are rejected (in-memory lock) so two
- *     parallel requests cannot create duplicates.
+ *   - Concurrent syncs/generations for the same user are rejected (in-memory
+ *     lock) so two parallel requests cannot create duplicates.
  *
  * BILLING NOTE: this mirrors the existing bulk generator (generateAutoPosterSuite),
  * which does not deduct credits at generation time. We intentionally do NOT invent
@@ -42,7 +51,7 @@ import { selectBestStudioProviders } from "./studioProviderRouter.js";
 
 const SHEET_ORIGIN_PREFIX = "sheet:";
 
-/** In-memory per-user sync lock — prevents concurrent syncs creating duplicates. */
+/** In-memory per-user lock — prevents concurrent sync/generate creating dupes. */
 const activeSyncs = new Set();
 
 async function resolveUser(email) {
@@ -67,11 +76,6 @@ function sheetFingerprint(spreadsheetId, platform, row) {
   return crypto.createHash("sha256").update(key).digest("hex").slice(0, 32);
 }
 
-function pickPlatform(platform) {
-  const p = String(platform || "").trim();
-  return PLATFORM_CONFIG[p] ? p : "Facebook";
-}
-
 /**
  * Normalize the requested platforms into a de-duplicated list of valid ones.
  * Accepts an array (`platforms`) and/or a single `platform` for back-compat.
@@ -94,10 +98,55 @@ function safeError(message) {
   return String(message || "Unknown error").slice(0, 200);
 }
 
+const norm = (s) => String(s || "").toLowerCase().trim();
+
+/** Merge a patch into a post's generalKeywords JSON meta, preserving keywords. */
+function packMeta(existingRaw, patch) {
+  let base = {};
+  try {
+    const v = JSON.parse(existingRaw || "{}");
+    if (v && typeof v === "object" && !Array.isArray(v)) base = v;
+  } catch {
+    /* ignore malformed meta */
+  }
+  return JSON.stringify({ ...base, ...patch });
+}
+
+/** Read the meta object back out of a post's generalKeywords JSON. */
+function readMeta(post) {
+  try {
+    const v = JSON.parse(post.generalKeywords || "{}");
+    if (v && typeof v === "object" && !Array.isArray(v)) return v;
+  } catch {
+    /* ignore */
+  }
+  return {};
+}
+
+/** Ask the provider router for the best writing/image models for this batch. */
+async function pickProviderModels({ sheetId, location, includeImages, imageSource }) {
+  const decision = await selectBestStudioProviders({
+    websiteUrl: `https://docs.google.com/spreadsheets/d/${sheetId}`,
+    location,
+    masterIntent: "30-day content calendar",
+    dominantIntent: "Awareness",
+    includeImages,
+    forceImageSource: imageSource,
+  });
+  return {
+    decision,
+    writingModel: decision?.writing?.model,
+    imageModel: decision?.image?.model,
+  };
+}
+
+/* ────────────────────────────── PHASE 1: SYNC ────────────────────────────── */
+
 /**
- * Sync the Google Sheet, generate content (+ optional images), and store posts.
+ * Sync the Google Sheet and store/refresh a skeleton post per (row × platform).
+ * NO AI is called here — content is generated later via generateSheetPosts.
  */
-export async function syncSheetAndGenerate({
+export async function syncSheetOnly({
   email,
   workspaceId,
   sheetId,
@@ -106,7 +155,6 @@ export async function syncSheetAndGenerate({
   platforms,
   tone,
   location,
-  imageSource = "ai",
   autoSchedule = true,
   tzOffsetMinutes = null,
 }) {
@@ -123,13 +171,12 @@ export async function syncSheetAndGenerate({
     };
   }
 
-  // Concurrency guard: one sync per user at a time.
   if (activeSyncs.has(auth.user.id)) {
     return {
       ok: false,
       status: 409,
       configured: true,
-      error: "A sync is already running for this account. Please wait for it to finish.",
+      error: "A sync or generation is already running for this account. Please wait for it to finish.",
     };
   }
   activeSyncs.add(auth.user.id);
@@ -139,7 +186,6 @@ export async function syncSheetAndGenerate({
     const chosenTone = pickTone(tone);
     const place = String(location || "").trim().slice(0, 120);
 
-    // 1) Read the plan.
     let sheet;
     try {
       sheet = await fetchSheetRows({ sheetId, range, tzOffsetMinutes });
@@ -165,12 +211,15 @@ export async function syncSheetAndGenerate({
         configured: true,
         sheetId: sheet.sheetId,
         hasRowId: sheet.hasRowId,
+        platforms: chosenPlatforms,
+        tone: chosenTone,
         created: 0,
         updated: 0,
         skipped: 0,
         scheduled: 0,
         drafts: 0,
         failed: 0,
+        pending: 0,
         warnings,
         outcomes: [],
         posts: [],
@@ -178,27 +227,14 @@ export async function syncSheetAndGenerate({
       };
     }
 
-    // 2) Let the router pick the best writing + image model once for the batch.
-    const includeImages = sheet.rows.some((r) => r.generateImage);
-    const providerDecision = await selectBestStudioProviders({
-      websiteUrl: `https://docs.google.com/spreadsheets/d/${sheet.sheetId}`,
-      location: place,
-      masterIntent: "30-day content calendar",
-      dominantIntent: "Awareness",
-      includeImages,
-      forceImageSource: imageSource,
-    });
-    const writingModel = providerDecision?.writing?.model;
-    const imageModel = providerDecision?.image?.model;
-
     const websiteOrigin = `${SHEET_ORIGIN_PREFIX}${sheet.sheetId}`;
     const sourceUrl = `https://docs.google.com/spreadsheets/d/${sheet.sheetId}`;
 
-    const results = { created: 0, updated: 0, skipped: 0, scheduled: 0, drafts: 0, failed: 0 };
+    const results = { created: 0, updated: 0, skipped: 0, pending: 0 };
     const outcomes = [];
     const savedRows = [];
 
-    // Each sheet row fans out to one post per selected platform.
+    // Each sheet row fans out to one skeleton post per selected platform.
     for (const row of sheet.rows) {
       for (const chosenPlatform of chosenPlatforms) {
         const fingerprint = sheetFingerprint(sheet.sheetId, chosenPlatform, row);
@@ -213,102 +249,73 @@ export async function syncSheetAndGenerate({
           continue;
         }
 
-        // 3) Generate SEO title + body through the existing OpenRouter pipeline.
-        let gen;
-        try {
-          gen = await generatePostContentWithAi(
-            chosenPlatform,
-            { primary: row.topic, secondary: "", general: [] },
-            place,
-            "",
-            chosenTone,
-            { writingModel, sourceTitle: row.topic, writingIntent: "Awareness" }
-          );
-        } catch (err) {
-          results.failed += 1;
-          const saved = await upsertPost({
+        const existingMeta = existing ? readMeta(existing) : {};
+        const wasGenerated = existingMeta.generated === true;
+        const topicChanged = existing ? norm(existing.primaryKeyword) !== norm(row.topic) : false;
+        const preserveGenerated = wasGenerated && !topicChanged;
+
+        // Planned schedule (for display + later arming). Note vs real instant.
+        let scheduleNote = null;
+        if (autoSchedule && row.hasScheduleText && !row.scheduledAt) scheduleNote = "schedule_unparseable";
+        else if (autoSchedule && row.scheduledAt && row.scheduledAt.getTime() <= Date.now()) scheduleNote = "schedule_in_past";
+        const plannedScheduleAt = row.scheduledAt ? row.scheduledAt.toISOString() : null;
+
+        const base = baseData({ row, chosenPlatform, chosenTone, place, websiteOrigin, sourceUrl, sheet });
+        const sharedMeta = {
+          generateImage: !!row.generateImage,
+          plannedScheduleAt,
+          autoSchedule: !!autoSchedule,
+          scheduleNote,
+        };
+
+        let saved;
+        if (preserveGenerated) {
+          // Keep generated content/image/status — just refresh metadata.
+          saved = await upsertPost({
             existing,
             userId: auth.user.id,
-            base: baseData({ row, chosenPlatform, chosenTone, place, websiteOrigin, sourceUrl, sheet }),
+            base,
             overrides: {
-              status: "failed",
-              scheduledAt: null,
-              heading: row.topic,
-              content: existing?.content || "",
-              contentHtml: existing?.contentHtml || "",
-              extraMeta: { lastError: safeError(err.message), failedStage: "content" },
+              status: existing.status,
+              scheduledAt: existing.scheduledAt,
+              heading: existing.heading,
+              content: existing.content,
+              contentHtml: existing.contentHtml,
+              imageUrl: existing.imageUrl,
+              extraMeta: { ...sharedMeta, generated: true },
             },
           });
-          savedRows.push(saved);
-          outcomes.push({ rowNumber: row.rowNumber, rowId: row.rowId, topic: row.topic, platform: chosenPlatform, outcome: "generation_failed", error: safeError(err.message) });
-          continue;
+          results.updated += 1;
+          outcomes.push({ rowNumber: row.rowNumber, rowId: row.rowId, topic: row.topic, platform: chosenPlatform, outcome: "synced_kept_generated" });
+        } else {
+          // New row, previously-ungenerated skeleton, or topic edited → (re)seed skeleton.
+          saved = await upsertPost({
+            existing,
+            userId: auth.user.id,
+            base,
+            overrides: {
+              status: "draft",
+              scheduledAt: row.scheduledAt || null,
+              heading: row.topic,
+              content: "",
+              contentHtml: "",
+              imageUrl: topicChanged ? null : existing?.imageUrl ?? null,
+              extraMeta: { ...sharedMeta, generated: false },
+            },
+          });
+          if (existing) results.updated += 1;
+          else results.created += 1;
+          results.pending += 1;
+          outcomes.push({
+            rowNumber: row.rowNumber,
+            rowId: row.rowId,
+            topic: row.topic,
+            platform: chosenPlatform,
+            outcome: existing ? (topicChanged ? "synced_topic_changed" : "synced") : "synced_new",
+            ...(scheduleNote ? { note: scheduleNote } : {}),
+          });
         }
-
-        // 4) Conditional image generation (ONLY when Generate_Image = Yes).
-        let imageUrl = existing?.imageUrl || null;
-        let imageError = null;
-        if (row.generateImage) {
-          try {
-            const img = await generateStudioImage({
-              keyword: row.topic,
-              location: place,
-              platform: chosenPlatform,
-              heading: gen.heading,
-              imageSource,
-              preferredModel: imageModel,
-            });
-            if (img?.url) imageUrl = img.url;
-            else imageError = img?.error || "Image generation returned no URL";
-          } catch (imgErr) {
-            imageError = safeError(imgErr.message);
-          }
-        }
-
-        // 5) Decide schedule vs draft (with explicit past/invalid handling).
-        let status = "draft";
-        let scheduledAt = null;
-        let scheduleNote = null;
-        if (autoSchedule && row.scheduledAt) {
-          if (row.scheduledAt.getTime() > Date.now()) {
-            status = "scheduled";
-            scheduledAt = row.scheduledAt;
-          } else {
-            scheduleNote = "schedule_in_past"; // left as draft, not auto-published
-          }
-        } else if (autoSchedule && row.hasScheduleText && !row.scheduledAt) {
-          scheduleNote = "schedule_unparseable"; // left as draft
-        }
-
-        const saved = await upsertPost({
-          existing,
-          userId: auth.user.id,
-          base: baseData({ row, chosenPlatform, chosenTone, place, websiteOrigin, sourceUrl, sheet }),
-          overrides: {
-            status,
-            scheduledAt,
-            heading: gen.heading || row.topic,
-            content: gen.content || "",
-            contentHtml: gen.contentHtml || gen.content || "",
-            imageUrl,
-            extraMeta: { imageError: imageError || null, scheduleNote },
-          },
-        });
-
-        if (existing) results.updated += 1;
-        else results.created += 1;
-        if (status === "scheduled") results.scheduled += 1;
-        else results.drafts += 1;
-
         savedRows.push(saved);
-        outcomes.push({
-          rowNumber: row.rowNumber,
-          rowId: row.rowId,
-          topic: row.topic,
-          platform: chosenPlatform,
-          outcome: existing ? "updated" : status === "scheduled" ? "scheduled" : "draft_created",
-          ...(imageError ? { imageError } : {}),
-          ...(scheduleNote ? { note: scheduleNote } : {}),
-        });
       }
     }
 
@@ -320,15 +327,257 @@ export async function syncSheetAndGenerate({
       platforms: chosenPlatforms,
       tone: chosenTone,
       ...results,
-      providerDecision,
+      scheduled: 0,
+      drafts: results.pending,
+      failed: 0,
       warnings,
       outcomes,
       posts: savedRows.map(serializePost),
+      message: `Synced ${savedRows.length} row(s). Click "Generate" on a row (or "Generate Posts" for all) to create the content.`,
     };
   } finally {
     activeSyncs.delete(auth.user.id);
   }
 }
+
+/* ──────────────────────────── PHASE 2: GENERATE ──────────────────────────── */
+
+/**
+ * Core generation for a single already-synced post record.
+ * Produces platform-specific content, an optional image, arms the schedule,
+ * and flips meta.generated = true. Preserves the fingerprint (idempotent).
+ */
+async function generateForPostRecord(post, { imageSource = "ai" } = {}) {
+  const meta = readMeta(post);
+  const platform = PLATFORM_CONFIG[post.platform] ? post.platform : "Facebook";
+  const tone = pickTone(post.tone);
+  const place = String(post.location || "").trim().slice(0, 120);
+  const topic = post.primaryKeyword || meta.sourceTitle || post.heading || "";
+
+  const { writingModel, imageModel } = await pickProviderModels({
+    sheetId: (post.websiteOrigin || "").replace(SHEET_ORIGIN_PREFIX, ""),
+    location: place,
+    includeImages: !!meta.generateImage,
+    imageSource,
+  });
+
+  // 1) Platform-specific SEO title + body.
+  let gen;
+  try {
+    gen = await generatePostContentWithAi(
+      platform,
+      { primary: topic, secondary: "", general: [] },
+      place,
+      "",
+      tone,
+      { writingModel, sourceTitle: topic, writingIntent: "Awareness" }
+    );
+  } catch (err) {
+    const updated = await prisma.studioPost.update({
+      where: { id: post.id },
+      data: {
+        status: "failed",
+        generalKeywords: packMeta(post.generalKeywords, {
+          generated: false,
+          lastError: safeError(err.message),
+          failedStage: "content",
+        }),
+      },
+    });
+    return { post: serializePost(updated), outcome: { postId: post.id, platform, topic, outcome: "generation_failed", error: safeError(err.message) } };
+  }
+
+  // 2) Conditional image generation (ONLY when Generate_Image = Yes).
+  let imageUrl = post.imageUrl || null;
+  let imageError = null;
+  if (meta.generateImage) {
+    try {
+      const img = await generateStudioImage({
+        keyword: topic,
+        location: place,
+        platform,
+        heading: gen.heading,
+        imageSource,
+        preferredModel: imageModel,
+      });
+      if (img?.url) imageUrl = img.url;
+      else imageError = img?.error || "Image generation returned no URL";
+    } catch (imgErr) {
+      imageError = safeError(imgErr.message);
+    }
+  }
+
+  // 3) Arm the schedule (future + autoSchedule → scheduled; else draft).
+  const autoSchedule = meta.autoSchedule !== false;
+  const planned = meta.plannedScheduleAt ? new Date(meta.plannedScheduleAt) : null;
+  const hasPlanned = planned && !Number.isNaN(planned.getTime());
+  let status = "draft";
+  let scheduledAt = hasPlanned ? planned : null; // keep for display even if draft
+  let scheduleNote = meta.scheduleNote || null;
+  if (autoSchedule && hasPlanned) {
+    if (planned.getTime() > Date.now()) {
+      status = "scheduled";
+      scheduleNote = null;
+    } else {
+      scheduleNote = "schedule_in_past"; // left as draft, never auto-published
+    }
+  }
+
+  const updated = await prisma.studioPost.update({
+    where: { id: post.id },
+    data: {
+      heading: gen.heading || topic,
+      content: gen.content || "",
+      contentHtml: gen.contentHtml || gen.content || "",
+      imageUrl,
+      status,
+      scheduledAt,
+      locked: false,
+      archived: false,
+      generalKeywords: packMeta(post.generalKeywords, {
+        generated: true,
+        imageError: imageError || null,
+        scheduleNote,
+        lastError: null,
+        failedStage: null,
+      }),
+    },
+  });
+
+  return {
+    post: serializePost(updated),
+    outcome: {
+      postId: post.id,
+      platform,
+      topic,
+      outcome: status === "scheduled" ? "scheduled" : "generated",
+      ...(imageError ? { imageError } : {}),
+      ...(scheduleNote ? { note: scheduleNote } : {}),
+    },
+  };
+}
+
+/**
+ * Generate content for one post (`postId`), a set (`postIds`), or every
+ * still-pending sheet post for the user (no ids → bulk). Published/locked
+ * posts are always skipped.
+ */
+export async function generateSheetPosts({
+  email,
+  workspaceId,
+  sheetId,
+  postId,
+  postIds,
+  imageSource = "ai",
+  onlyPending = true,
+}) {
+  const auth = await resolveUser(email);
+  if (!auth.ok) return auth;
+
+  if (activeSyncs.has(auth.user.id)) {
+    return {
+      ok: false,
+      status: 409,
+      error: "A sync or generation is already running for this account. Please wait for it to finish.",
+    };
+  }
+  activeSyncs.add(auth.user.id);
+
+  try {
+    // Resolve the target set.
+    let targets = [];
+    const explicitIds = postId ? [postId] : Array.isArray(postIds) ? postIds : [];
+
+    if (explicitIds.length) {
+      targets = await prisma.studioPost.findMany({
+        where: {
+          id: { in: explicitIds },
+          userId: auth.user.id,
+          websiteOrigin: { startsWith: SHEET_ORIGIN_PREFIX },
+        },
+      });
+    } else {
+      const where = {
+        userId: auth.user.id,
+        websiteOrigin: sheetId ? `${SHEET_ORIGIN_PREFIX}${sheetId}` : { startsWith: SHEET_ORIGIN_PREFIX },
+        archived: false,
+        NOT: { status: "published" },
+      };
+      if (workspaceId) where.workspaceId = workspaceId;
+      const all = await prisma.studioPost.findMany({ where, orderBy: [{ scheduledAt: "asc" }, { createdAt: "asc" }], take: 200 });
+      // onlyPending → not-yet-generated skeletons + previously failed rows.
+      targets = onlyPending
+        ? all.filter((p) => readMeta(p).generated !== true || p.status === "failed")
+        : all;
+    }
+
+    const results = { generated: 0, scheduled: 0, drafts: 0, failed: 0, skipped: 0 };
+    const outcomes = [];
+    const savedRows = [];
+
+    for (const post of targets) {
+      if (post.locked && post.status === "published") {
+        results.skipped += 1;
+        outcomes.push({ postId: post.id, platform: post.platform, outcome: "skipped_published" });
+        continue;
+      }
+      const { post: saved, outcome } = await generateForPostRecord(post, { imageSource });
+      savedRows.push(saved);
+      outcomes.push(outcome);
+      if (outcome.outcome === "generation_failed") results.failed += 1;
+      else {
+        results.generated += 1;
+        if (outcome.outcome === "scheduled") results.scheduled += 1;
+        else results.drafts += 1;
+      }
+    }
+
+    return {
+      ok: true,
+      ...results,
+      requested: targets.length,
+      outcomes,
+      posts: savedRows,
+      message:
+        targets.length === 0
+          ? "Nothing to generate — all selected rows are already generated."
+          : `Generated ${results.generated} post(s)${results.failed ? `, ${results.failed} failed` : ""}.`,
+    };
+  } finally {
+    activeSyncs.delete(auth.user.id);
+  }
+}
+
+/**
+ * Convenience: sync the sheet AND immediately generate every pending row.
+ * Kept for back-compat / "do it all at once" callers.
+ */
+export async function syncSheetAndGenerate(params) {
+  const sync = await syncSheetOnly(params);
+  if (!sync.ok) return sync;
+  const gen = await generateSheetPosts({
+    email: params.email,
+    workspaceId: params.workspaceId,
+    sheetId: sync.sheetId,
+    imageSource: params.imageSource || "ai",
+    onlyPending: true,
+  });
+  if (!gen.ok) return { ...sync, generateError: gen.error };
+  // Return a merged, generation-shaped summary.
+  return {
+    ...sync,
+    created: sync.created,
+    updated: sync.updated,
+    skipped: sync.skipped + (gen.skipped || 0),
+    scheduled: gen.scheduled || 0,
+    drafts: gen.drafts || 0,
+    failed: gen.failed || 0,
+    outcomes: gen.outcomes,
+    posts: gen.posts,
+  };
+}
+
+/* ─────────────────────────────── SHARED HELPERS ──────────────────────────── */
 
 /** Build the immutable-ish base fields for a StudioPost row from a sheet row. */
 function baseData({ row, chosenPlatform, chosenTone, place, websiteOrigin, sourceUrl, sheet }) {
@@ -369,7 +618,8 @@ async function upsertPost({ existing, userId, base, overrides }) {
     heading: overrides.heading,
     content: overrides.content,
     contentHtml: overrides.contentHtml ?? overrides.content ?? "",
-    imageUrl: overrides.imageUrl ?? existing?.imageUrl ?? null,
+    // Honor an explicit imageUrl override (including null to clear it).
+    imageUrl: "imageUrl" in overrides ? overrides.imageUrl : existing?.imageUrl ?? null,
     status: overrides.status,
     scheduledAt: overrides.scheduledAt ?? null,
     locked: false,

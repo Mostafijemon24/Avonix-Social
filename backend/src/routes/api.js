@@ -42,7 +42,8 @@ import {
   getGmbRulesCatalog,
 } from "../services/autoPosterService.js";
 import {
-  syncSheetAndGenerate,
+  syncSheetOnly,
+  generateSheetPosts,
   listSheetPosts,
   sheetAutomationStatus,
 } from "../services/sheetAutomationService.js";
@@ -663,7 +664,10 @@ router.get("/sheet-automation/status", (_req, res) => {
   res.json(sheetAutomationStatus());
 });
 
-/** Sync the sheet, generate content (+ optional images), store + schedule. */
+/**
+ * PHASE 1 — Sync the sheet and store a skeleton post per (row × platform) so the
+ * user can preview the calendar. No AI is called here; use /generate afterward.
+ */
 router.post("/sheet-automation/sync", async (req, res) => {
   try {
     const {
@@ -675,14 +679,13 @@ router.post("/sheet-automation/sync", async (req, res) => {
       platforms,
       tone,
       location,
-      imageSource,
       autoSchedule,
       tzOffsetMinutes,
     } = req.body || {};
     if (!email) return res.status(400).json({ error: "email is required" });
     const gate = assertSessionMatchesEmail(req, email);
     if (!gate.ok) return res.status(gate.status).json({ error: gate.error });
-    const result = await syncSheetAndGenerate({
+    const result = await syncSheetOnly({
       email,
       workspaceId,
       sheetId,
@@ -691,7 +694,6 @@ router.post("/sheet-automation/sync", async (req, res) => {
       platforms,
       tone,
       location,
-      imageSource: imageSource || "ai",
       autoSchedule: autoSchedule !== false && autoSchedule !== "false",
       tzOffsetMinutes:
         tzOffsetMinutes === undefined || tzOffsetMinutes === null || tzOffsetMinutes === ""
@@ -702,6 +704,33 @@ router.post("/sheet-automation/sync", async (req, res) => {
     res.json(result);
   } catch (err) {
     console.error("[sheet-automation/sync]", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * PHASE 2 — Generate AI content (+ optional image) for synced posts.
+ * Body: { postId } (one row), { postIds } (a set), or neither (all pending).
+ */
+router.post("/sheet-automation/generate", async (req, res) => {
+  try {
+    const { email, workspaceId, sheetId, postId, postIds, imageSource, onlyPending } = req.body || {};
+    if (!email) return res.status(400).json({ error: "email is required" });
+    const gate = assertSessionMatchesEmail(req, email);
+    if (!gate.ok) return res.status(gate.status).json({ error: gate.error });
+    const result = await generateSheetPosts({
+      email,
+      workspaceId,
+      sheetId,
+      postId,
+      postIds,
+      imageSource: imageSource || "ai",
+      onlyPending: onlyPending !== false && onlyPending !== "false",
+    });
+    if (!result.ok) return res.status(result.status || 400).json(result);
+    res.json(result);
+  } catch (err) {
+    console.error("[sheet-automation/generate]", err);
     res.status(500).json({ error: err.message });
   }
 });

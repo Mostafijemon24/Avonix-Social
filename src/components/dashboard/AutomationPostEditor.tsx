@@ -10,9 +10,17 @@
  * Note: we intentionally do NOT expose "rewrite" here because that rotates the
  * post fingerprint and would make the next sheet sync create a duplicate.
  */
-import { useState } from "react";
-import { X, ImagePlus, RefreshCw, Trash2, Save, Send, CalendarClock } from "lucide-react";
+import { useEffect, useState } from "react";
+import { X, ImagePlus, RefreshCw, Trash2, Save, Send, CalendarClock, Sparkles } from "lucide-react";
 import { api, isApiError, type StudioPostRecord } from "@/lib/api-client";
+
+const toLocalInput = (iso: string | null | undefined) => {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+};
 
 type ImageSource = "ai" | "free";
 
@@ -29,12 +37,16 @@ export default function AutomationPostEditor({ post, email, onClose, onChanged, 
   const [content, setContent] = useState(post.content || "");
   const [imageSource, setImageSource] = useState<ImageSource>("ai");
   const [busy, setBusy] = useState<string | null>(null);
-  const [when, setWhen] = useState(() => {
-    if (!post.scheduledDate) return "";
-    const d = new Date(post.scheduledDate);
-    const pad = (n: number) => String(n).padStart(2, "0");
-    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-  });
+  const [when, setWhen] = useState(() => toLocalInput(post.scheduledDate || post.sheet?.plannedScheduleAt));
+
+  // Re-sync local fields whenever the post is re-fetched after a server write
+  // (keyed on updatedAt so we never clobber the user mid-typing).
+  useEffect(() => {
+    setHeading(post.heading || "");
+    setContent(post.content || "");
+    setWhen(toLocalInput(post.scheduledDate || post.sheet?.plannedScheduleAt));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [post.id, post.updatedAt]);
 
   const dirty = heading !== (post.heading || "") || content !== (post.content || "");
 
@@ -51,6 +63,7 @@ export default function AutomationPostEditor({ post, email, onClose, onChanged, 
   };
 
   const published = post.status === "published";
+  const generated = post.sheet ? post.sheet.generated : !!post.content;
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-black/50" onClick={onClose}>
@@ -70,6 +83,25 @@ export default function AutomationPostEditor({ post, email, onClose, onChanged, 
             <X className="w-4 h-4" />
           </button>
         </div>
+
+        {/* Generate full post (content + optional image) via AI */}
+        {!published && (
+          <button
+            type="button"
+            disabled={!!busy}
+            className="btn-primary w-full mt-4 inline-flex items-center justify-center gap-2 text-sm disabled:opacity-50"
+            onClick={() =>
+              run("gen", async () => {
+                const res = await api.generateSheetPosts({ email, postId: post.id });
+                const failed = res.outcomes?.some((o) => o.outcome === "generation_failed");
+                showToast(failed ? "Generation failed" : generated ? "Post regenerated" : "Post generated", failed ? "error" : "success");
+              })
+            }
+          >
+            {busy === "gen" ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+            {busy === "gen" ? "Generating…" : generated ? "Regenerate with AI" : "Generate with AI"}
+          </button>
+        )}
 
         {/* Image */}
         <div className="mt-4">

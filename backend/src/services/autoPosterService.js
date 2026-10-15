@@ -145,6 +145,30 @@ export const PLATFORM_CONFIG = {
   },
 };
 
+/**
+ * Per-platform VOICE / STYLE guide.
+ *
+ * PLATFORM_CONFIG above already enforces hard structural differences per
+ * platform (word/char bounds, links, hashtags). This map adds the *editorial*
+ * difference so the same topic reads distinctly on each network instead of
+ * being duplicated verbatim — a LinkedIn post should not sound like an X post.
+ * It is injected into the generation prompt (see generatePostContentWithAi).
+ */
+export const PLATFORM_STYLE = {
+  Facebook:
+    "Warm, conversational and community-first. Open with a relatable hook, keep it to 1–2 short paragraphs, and invite engagement with a light question or soft CTA. Friendly but still credible.",
+  Instagram:
+    "Punchy and visual-first. Lead with a scroll-stopping first line, use short snackable sentences with line breaks, keep it upbeat and aspirational, and finish with a tight CTA plus relevant hashtags.",
+  LinkedIn:
+    "Professional and insight-led. Share a clear point of view or practical takeaway in confident, value-driven language with short line breaks for readability. Credible and useful, never salesy or hype-y.",
+  GMB:
+    "Local-first and action-oriented, written for Google Business Profile readers near the business, highlighting the offer and a clear next step.",
+  X:
+    "Extremely concise and sharp. One strong idea with a bold hook and zero fluff. Must comfortably fit within 280 characters.",
+  Pinterest:
+    "Descriptive, keyword-rich and inspirational — written as a search-friendly Pin description that helps the image get discovered.",
+};
+
 /** Part 2 target platforms — 15 URLs × 6 platforms */
 export const STUDIO_POST_PLATFORMS = [
   "Facebook",
@@ -1281,6 +1305,7 @@ export async function generatePostContentWithAi(
         {
           role: "system",
           content: `You write SEO-led social posts for ${platform}. Return ONLY JSON: {heading:string, content:string}. English only, no emojis, no markdown, no HTML, no inline hyperlinks. Word count between ${cfg.minWords} and ${cfg.maxWords}. Tone: ${tone}.
+Platform voice & style (write distinctly for ${platform}; do NOT reuse the same wording or structure you would use on another platform): ${PLATFORM_STYLE[platform] || ""}
 Rules:
 - Never wrap keywords in links or HTML.
 - Do NOT put a URL in the middle of a sentence.
@@ -2410,6 +2435,19 @@ export function serializePost(row) {
     sourceTitle: meta.sourceTitle || null,
     validation,
     ruleset: meta.ruleset || (row.platform === "GMB" ? GMB_RULESET_VERSION : null),
+    // 30-Day Automation metadata (only present for Google-Sheet posts).
+    sheet:
+      meta.source === "google-sheet"
+        ? {
+            generated: meta.generated === true,
+            generateImage: !!meta.generateImage,
+            plannedScheduleAt: meta.plannedScheduleAt || null,
+            scheduleNote: meta.scheduleNote || null,
+            imageError: meta.imageError || null,
+            rowId: meta.rowId || null,
+            rowNumber: meta.rowNumber ?? null,
+          }
+        : null,
   };
 }
 

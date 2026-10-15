@@ -117,6 +117,16 @@ export type StudioPostRecord = {
     wordCount?: number;
   } | null;
   ruleset?: string | null;
+  /** 30-Day Automation metadata (present only for Google-Sheet posts). */
+  sheet?: {
+    generated: boolean;
+    generateImage: boolean;
+    plannedScheduleAt: string | null;
+    scheduleNote: string | null;
+    imageError: string | null;
+    rowId: string | null;
+    rowNumber: number | null;
+  } | null;
 };
 
 export type ArchiveWebsiteTable = {
@@ -884,6 +894,7 @@ export const api = {
       skipped: number;
       scheduled: number;
       drafts: number;
+      pending?: number;
       failed?: number;
       message?: string;
       warnings?: string[];
@@ -897,13 +908,45 @@ export const api = {
         imageError?: string;
         note?: string;
       }>;
-      providerDecision?: {
-        writing?: { label: string; model: string };
-        image?: { label: string; model: string | null; source: string };
-      };
       posts: StudioPostRecord[];
       error?: string;
     }>("/sheet-automation/sync", {
+      method: "POST",
+      body: JSON.stringify(payload),
+      timeoutMs: 2 * 60 * 1000,
+    }),
+
+  /** Generate AI content (+ optional image) for synced sheet posts. */
+  generateSheetPosts: (payload: {
+    email: string;
+    workspaceId?: string;
+    sheetId?: string;
+    postId?: string;
+    postIds?: string[];
+    imageSource?: "auto" | "ai" | "free";
+    onlyPending?: boolean;
+  }) =>
+    request<{
+      ok: boolean;
+      generated: number;
+      scheduled: number;
+      drafts: number;
+      failed: number;
+      skipped: number;
+      requested: number;
+      message?: string;
+      outcomes?: Array<{
+        postId: string;
+        platform: string;
+        topic: string;
+        outcome: string;
+        error?: string;
+        imageError?: string;
+        note?: string;
+      }>;
+      posts: StudioPostRecord[];
+      error?: string;
+    }>("/sheet-automation/generate", {
       method: "POST",
       body: JSON.stringify(payload),
       timeoutMs: 10 * 60 * 1000,
