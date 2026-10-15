@@ -72,6 +72,18 @@ function pickPlatform(platform) {
   return PLATFORM_CONFIG[p] ? p : "Facebook";
 }
 
+/**
+ * Normalize the requested platforms into a de-duplicated list of valid ones.
+ * Accepts an array (`platforms`) and/or a single `platform` for back-compat.
+ * Each sheet row fans out to one post per selected platform.
+ */
+function pickPlatforms(platforms, platform) {
+  let list = Array.isArray(platforms) ? platforms : [];
+  if (!list.length && platform) list = [platform];
+  list = [...new Set(list.map((p) => String(p || "").trim()).filter((p) => PLATFORM_CONFIG[p]))];
+  return list.length ? list : ["Facebook"];
+}
+
 function pickTone(tone) {
   const t = String(tone || "").trim();
   return TONE_PRESETS.includes(t) ? t : TONE_PRESETS[0];
@@ -91,6 +103,7 @@ export async function syncSheetAndGenerate({
   sheetId,
   range,
   platform,
+  platforms,
   tone,
   location,
   imageSource = "ai",
@@ -122,7 +135,7 @@ export async function syncSheetAndGenerate({
   activeSyncs.add(auth.user.id);
 
   try {
-    const chosenPlatform = pickPlatform(platform);
+    const chosenPlatforms = pickPlatforms(platforms, platform);
     const chosenTone = pickTone(tone);
     const place = String(location || "").trim().slice(0, 120);
 
@@ -185,114 +198,118 @@ export async function syncSheetAndGenerate({
     const outcomes = [];
     const savedRows = [];
 
+    // Each sheet row fans out to one post per selected platform.
     for (const row of sheet.rows) {
-      const fingerprint = sheetFingerprint(sheet.sheetId, chosenPlatform, row);
-      const existing = await prisma.studioPost.findFirst({
-        where: { userId: auth.user.id, fingerprint },
-      });
+      for (const chosenPlatform of chosenPlatforms) {
+        const fingerprint = sheetFingerprint(sheet.sheetId, chosenPlatform, row);
+        const existing = await prisma.studioPost.findFirst({
+          where: { userId: auth.user.id, fingerprint },
+        });
 
-      // Never clobber a post that already went live.
-      if (existing && existing.locked && existing.status === "published") {
-        results.skipped += 1;
-        outcomes.push({ rowNumber: row.rowNumber, rowId: row.rowId, topic: row.topic, outcome: "skipped_published" });
-        continue;
-      }
+        // Never clobber a post that already went live.
+        if (existing && existing.locked && existing.status === "published") {
+          results.skipped += 1;
+          outcomes.push({ rowNumber: row.rowNumber, rowId: row.rowId, topic: row.topic, platform: chosenPlatform, outcome: "skipped_published" });
+          continue;
+        }
 
-      // 3) Generate SEO title + body through the existing OpenRouter pipeline.
-      let gen;
-      try {
-        gen = await generatePostContentWithAi(
-          chosenPlatform,
-          { primary: row.topic, secondary: "", general: [] },
-          place,
-          "",
-          chosenTone,
-          { writingModel, sourceTitle: row.topic, writingIntent: "Awareness" }
-        );
-      } catch (err) {
-        results.failed += 1;
+        // 3) Generate SEO title + body through the existing OpenRouter pipeline.
+        let gen;
+        try {
+          gen = await generatePostContentWithAi(
+            chosenPlatform,
+            { primary: row.topic, secondary: "", general: [] },
+            place,
+            "",
+            chosenTone,
+            { writingModel, sourceTitle: row.topic, writingIntent: "Awareness" }
+          );
+        } catch (err) {
+          results.failed += 1;
+          const saved = await upsertPost({
+            existing,
+            userId: auth.user.id,
+            base: baseData({ row, chosenPlatform, chosenTone, place, websiteOrigin, sourceUrl, sheet }),
+            overrides: {
+              status: "failed",
+              scheduledAt: null,
+              heading: row.topic,
+              content: existing?.content || "",
+              contentHtml: existing?.contentHtml || "",
+              extraMeta: { lastError: safeError(err.message), failedStage: "content" },
+            },
+          });
+          savedRows.push(saved);
+          outcomes.push({ rowNumber: row.rowNumber, rowId: row.rowId, topic: row.topic, platform: chosenPlatform, outcome: "generation_failed", error: safeError(err.message) });
+          continue;
+        }
+
+        // 4) Conditional image generation (ONLY when Generate_Image = Yes).
+        let imageUrl = existing?.imageUrl || null;
+        let imageError = null;
+        if (row.generateImage) {
+          try {
+            const img = await generateStudioImage({
+              keyword: row.topic,
+              location: place,
+              platform: chosenPlatform,
+              heading: gen.heading,
+              imageSource,
+              preferredModel: imageModel,
+            });
+            if (img?.url) imageUrl = img.url;
+            else imageError = img?.error || "Image generation returned no URL";
+          } catch (imgErr) {
+            imageError = safeError(imgErr.message);
+          }
+        }
+
+        // 5) Decide schedule vs draft (with explicit past/invalid handling).
+        let status = "draft";
+        let scheduledAt = null;
+        let scheduleNote = null;
+        if (autoSchedule && row.scheduledAt) {
+          if (row.scheduledAt.getTime() > Date.now()) {
+            status = "scheduled";
+            scheduledAt = row.scheduledAt;
+          } else {
+            scheduleNote = "schedule_in_past"; // left as draft, not auto-published
+          }
+        } else if (autoSchedule && row.hasScheduleText && !row.scheduledAt) {
+          scheduleNote = "schedule_unparseable"; // left as draft
+        }
+
         const saved = await upsertPost({
           existing,
           userId: auth.user.id,
           base: baseData({ row, chosenPlatform, chosenTone, place, websiteOrigin, sourceUrl, sheet }),
           overrides: {
-            status: "failed",
-            scheduledAt: null,
-            heading: row.topic,
-            content: existing?.content || "",
-            contentHtml: existing?.contentHtml || "",
-            extraMeta: { lastError: safeError(err.message), failedStage: "content" },
+            status,
+            scheduledAt,
+            heading: gen.heading || row.topic,
+            content: gen.content || "",
+            contentHtml: gen.contentHtml || gen.content || "",
+            imageUrl,
+            extraMeta: { imageError: imageError || null, scheduleNote },
           },
         });
+
+        if (existing) results.updated += 1;
+        else results.created += 1;
+        if (status === "scheduled") results.scheduled += 1;
+        else results.drafts += 1;
+
         savedRows.push(saved);
-        outcomes.push({ rowNumber: row.rowNumber, rowId: row.rowId, topic: row.topic, outcome: "generation_failed", error: safeError(err.message) });
-        continue;
+        outcomes.push({
+          rowNumber: row.rowNumber,
+          rowId: row.rowId,
+          topic: row.topic,
+          platform: chosenPlatform,
+          outcome: existing ? "updated" : status === "scheduled" ? "scheduled" : "draft_created",
+          ...(imageError ? { imageError } : {}),
+          ...(scheduleNote ? { note: scheduleNote } : {}),
+        });
       }
-
-      // 4) Conditional image generation (ONLY when Generate_Image = Yes).
-      let imageUrl = existing?.imageUrl || null;
-      let imageError = null;
-      if (row.generateImage) {
-        try {
-          const img = await generateStudioImage({
-            keyword: row.topic,
-            location: place,
-            platform: chosenPlatform,
-            heading: gen.heading,
-            imageSource,
-            preferredModel: imageModel,
-          });
-          if (img?.url) imageUrl = img.url;
-          else imageError = img?.error || "Image generation returned no URL";
-        } catch (imgErr) {
-          imageError = safeError(imgErr.message);
-        }
-      }
-
-      // 5) Decide schedule vs draft (with explicit past/invalid handling).
-      let status = "draft";
-      let scheduledAt = null;
-      let scheduleNote = null;
-      if (autoSchedule && row.scheduledAt) {
-        if (row.scheduledAt.getTime() > Date.now()) {
-          status = "scheduled";
-          scheduledAt = row.scheduledAt;
-        } else {
-          scheduleNote = "schedule_in_past"; // left as draft, not auto-published
-        }
-      } else if (autoSchedule && row.hasScheduleText && !row.scheduledAt) {
-        scheduleNote = "schedule_unparseable"; // left as draft
-      }
-
-      const saved = await upsertPost({
-        existing,
-        userId: auth.user.id,
-        base: baseData({ row, chosenPlatform, chosenTone, place, websiteOrigin, sourceUrl, sheet }),
-        overrides: {
-          status,
-          scheduledAt,
-          heading: gen.heading || row.topic,
-          content: gen.content || "",
-          contentHtml: gen.contentHtml || gen.content || "",
-          imageUrl,
-          extraMeta: { imageError: imageError || null, scheduleNote },
-        },
-      });
-
-      if (existing) results.updated += 1;
-      else results.created += 1;
-      if (status === "scheduled") results.scheduled += 1;
-      else results.drafts += 1;
-
-      savedRows.push(saved);
-      outcomes.push({
-        rowNumber: row.rowNumber,
-        rowId: row.rowId,
-        topic: row.topic,
-        outcome: existing ? "updated" : status === "scheduled" ? "scheduled" : "draft_created",
-        ...(imageError ? { imageError } : {}),
-        ...(scheduleNote ? { note: scheduleNote } : {}),
-      });
     }
 
     return {
@@ -300,7 +317,7 @@ export async function syncSheetAndGenerate({
       configured: true,
       sheetId: sheet.sheetId,
       hasRowId: sheet.hasRowId,
-      platform: chosenPlatform,
+      platforms: chosenPlatforms,
       tone: chosenTone,
       ...results,
       providerDecision,

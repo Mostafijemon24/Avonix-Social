@@ -865,6 +865,7 @@ export const api = {
     sheetId?: string;
     range?: string;
     platform?: string;
+    platforms?: string[];
     tone?: string;
     location?: string;
     imageSource?: "auto" | "ai" | "free";
@@ -876,7 +877,7 @@ export const api = {
       configured?: boolean;
       sheetId?: string;
       hasRowId?: boolean;
-      platform?: string;
+      platforms?: string[];
       tone?: string;
       created: number;
       updated: number;
@@ -890,6 +891,7 @@ export const api = {
         rowNumber: number;
         rowId: string | null;
         topic: string;
+        platform?: string;
         outcome: string;
         error?: string;
         imageError?: string;

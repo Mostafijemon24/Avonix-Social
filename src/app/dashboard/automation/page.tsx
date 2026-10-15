@@ -13,7 +13,7 @@ import { RefreshCw, Sparkles, ImageIcon, CalendarClock, AlertTriangle } from "lu
 import { useWorkspace } from "@/context/WorkspaceContext";
 import { useToast } from "@/components/ui/Toast";
 import { api, isApiError, type StudioPostRecord } from "@/lib/api-client";
-import PostDetailsDrawer from "@/components/dashboard/PostDetailsDrawer";
+import AutomationPostEditor from "@/components/dashboard/AutomationPostEditor";
 
 const PLATFORMS = ["Facebook", "Instagram", "LinkedIn", "GMB", "X", "Pinterest"];
 const TONES = ["Professional", "Enthusiastic", "Empathetic", "Authoritative", "Storytelling"];
@@ -60,7 +60,7 @@ export default function AutomationPage() {
   const [defaultRange, setDefaultRange] = useState("Sheet1!A:D");
   const [sheetId, setSheetId] = useState("");
   const [range, setRange] = useState("");
-  const [platform, setPlatform] = useState("Facebook");
+  const [platforms, setPlatforms] = useState<string[]>([...PLATFORMS]);
   const [tone, setTone] = useState("Professional");
   const [location, setLocation] = useState("");
   const [autoSchedule, setAutoSchedule] = useState(true);
@@ -95,9 +95,17 @@ export default function AutomationPage() {
     loadPosts();
   }, [loadPosts]);
 
+  const togglePlatform = useCallback((p: string) => {
+    setPlatforms((prev) => (prev.includes(p) ? prev.filter((x) => x !== p) : [...prev, p]));
+  }, []);
+
   const handleSync = useCallback(async () => {
     if (!state.email) {
       showToast("Sign in required", "error");
+      return;
+    }
+    if (platforms.length === 0) {
+      showToast("Select at least one platform", "error");
       return;
     }
     setSyncing(true);
@@ -108,7 +116,7 @@ export default function AutomationPage() {
         workspaceId: state.activeWorkspaceId || undefined,
         sheetId: sheetId.trim() || undefined,
         range: range.trim() || undefined,
-        platform,
+        platforms,
         tone,
         location: location.trim() || undefined,
         imageSource: "ai",
@@ -137,7 +145,7 @@ export default function AutomationPage() {
     } finally {
       setSyncing(false);
     }
-  }, [state.email, state.activeWorkspaceId, sheetId, range, platform, tone, location, autoSchedule, showToast, loadPosts]);
+  }, [state.email, state.activeWorkspaceId, sheetId, range, platforms, tone, location, autoSchedule, showToast, loadPosts]);
 
   const counts = useMemo(() => {
     const c = { pending: 0, scheduled: 0, published: 0, failed: 0 };
@@ -217,16 +225,39 @@ export default function AutomationPage() {
             onChange={(e) => setLocation(e.target.value)}
           />
         </label>
-        <label className="block">
-          <span className="label-caps text-dim">Platform</span>
-          <select className="input-field mt-1 w-full" value={platform} onChange={(e) => setPlatform(e.target.value)}>
-            {PLATFORMS.map((p) => (
-              <option key={p} value={p}>
-                {p}
-              </option>
-            ))}
-          </select>
-        </label>
+        <div className="block sm:col-span-2 lg:col-span-3">
+          <div className="flex items-center justify-between">
+            <span className="label-caps text-dim">Platforms (each topic → one post per selected platform)</span>
+            <div className="flex gap-2">
+              <button type="button" className="text-[10px] text-orange-400 font-bold" onClick={() => setPlatforms([...PLATFORMS])}>
+                All
+              </button>
+              <button type="button" className="text-[10px] text-dim font-bold" onClick={() => setPlatforms([])}>
+                None
+              </button>
+            </div>
+          </div>
+          <div className="mt-1.5 flex flex-wrap gap-2">
+            {PLATFORMS.map((p) => {
+              const on = platforms.includes(p);
+              return (
+                <button
+                  key={p}
+                  type="button"
+                  onClick={() => togglePlatform(p)}
+                  className={`rounded-full border px-3 py-1.5 text-[11px] font-bold transition min-h-[36px] ${
+                    on
+                      ? "border-orange-500/50 bg-orange-500/15 text-orange-300"
+                      : "border-line text-muted hover:border-orange-500/30"
+                  }`}
+                >
+                  {on ? "✓ " : ""}
+                  {p}
+                </button>
+              );
+            })}
+          </div>
+        </div>
         <label className="block">
           <span className="label-caps text-dim">Tone</span>
           <select className="input-field mt-1 w-full" value={tone} onChange={(e) => setTone(e.target.value)}>
@@ -313,12 +344,13 @@ export default function AutomationPage() {
                 <th className="px-3 py-2 font-bold">Image</th>
                 <th className="px-3 py-2 font-bold">Schedule_Time</th>
                 <th className="px-3 py-2 font-bold">Status</th>
+                <th className="px-3 py-2 font-bold text-right">Action</th>
               </tr>
             </thead>
             <tbody>
               {posts.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="px-3 py-8 text-center text-dim">
+                  <td colSpan={6} className="px-3 py-8 text-center text-dim">
                     No posts yet. Configure your sheet and click{" "}
                     <b className="text-ink">Sync from Google Sheet &amp; Generate</b>.
                   </td>
@@ -348,6 +380,18 @@ export default function AutomationPage() {
                     <td className="px-3 py-2">
                       <StatusBadge status={p.status} />
                     </td>
+                    <td className="px-3 py-2 text-right">
+                      <button
+                        type="button"
+                        className="btn-secondary text-[11px] whitespace-nowrap"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setDetail(p);
+                        }}
+                      >
+                        View / Edit
+                      </button>
+                    </td>
                   </tr>
                 ))
               )}
@@ -357,13 +401,20 @@ export default function AutomationPage() {
       </div>
 
       {detail && state.email && (
-        <PostDetailsDrawer
+        <AutomationPostEditor
           post={detail}
           email={state.email}
           onClose={() => setDetail(null)}
-          onChanged={() => {
-            loadPosts();
-            setDetail(null);
+          onChanged={async () => {
+            await loadPosts();
+            // Keep the drawer open with refreshed data after an edit.
+            try {
+              const fresh = await api.listSheetPosts(state.email!, state.activeWorkspaceId || undefined);
+              const updated = (fresh.posts || []).find((x) => x.id === detail.id);
+              setDetail(updated || null);
+            } catch {
+              setDetail(null);
+            }
           }}
           showToast={showToast}
         />
