@@ -847,6 +847,72 @@ export const api = {
       "/auto-poster/validate",
       { method: "POST", body: JSON.stringify(payload) }
     ),
+
+  /* ── 30-Day Sheet Automation ── */
+
+  getSheetAutomationStatus: () =>
+    request<{
+      ok: boolean;
+      configured: boolean;
+      defaultSheetId: string | null;
+      defaultRange: string;
+      maxRows?: number;
+    }>("/sheet-automation/status"),
+
+  syncSheetAutomation: (payload: {
+    email: string;
+    workspaceId?: string;
+    sheetId?: string;
+    range?: string;
+    platform?: string;
+    tone?: string;
+    location?: string;
+    imageSource?: "auto" | "ai" | "free";
+    autoSchedule?: boolean;
+    tzOffsetMinutes?: number;
+  }) =>
+    request<{
+      ok: boolean;
+      configured?: boolean;
+      sheetId?: string;
+      hasRowId?: boolean;
+      platform?: string;
+      tone?: string;
+      created: number;
+      updated: number;
+      skipped: number;
+      scheduled: number;
+      drafts: number;
+      failed?: number;
+      message?: string;
+      warnings?: string[];
+      outcomes?: Array<{
+        rowNumber: number;
+        rowId: string | null;
+        topic: string;
+        outcome: string;
+        error?: string;
+        imageError?: string;
+        note?: string;
+      }>;
+      providerDecision?: {
+        writing?: { label: string; model: string };
+        image?: { label: string; model: string | null; source: string };
+      };
+      posts: StudioPostRecord[];
+      error?: string;
+    }>("/sheet-automation/sync", {
+      method: "POST",
+      body: JSON.stringify(payload),
+      timeoutMs: 10 * 60 * 1000,
+    }),
+
+  listSheetPosts: (email: string, workspaceId?: string, sheetId?: string) =>
+    request<{ ok: boolean; posts: StudioPostRecord[] }>(
+      `/sheet-automation/posts?email=${encodeURIComponent(email)}${
+        workspaceId ? `&workspaceId=${encodeURIComponent(workspaceId)}` : ""
+      }${sheetId ? `&sheetId=${encodeURIComponent(sheetId)}` : ""}`
+    ),
 };
 
 export type ConnectedAccount = {

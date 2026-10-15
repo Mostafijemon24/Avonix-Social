@@ -18,6 +18,7 @@ export const DASHBOARD_PRIMARY_NAV = [
 
 export const DASHBOARD_MORE_NAV = [
   { href: "/dashboard/library", label: "Post Library", id: "library" },
+  { href: "/dashboard/automation", label: "30-Day Automation", id: "automation" },
   { href: "/dashboard/scheduling", label: "Scheduling", id: "scheduling" },
   { href: "/dashboard/review-reply", label: "Review Reply", id: "reviewreply" },
   { href: "/dashboard/notification", label: "Notifications", id: "notification" },

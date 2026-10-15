@@ -25,6 +25,11 @@
 .env
 .env*.local
 
+# google service account keys (never commit)
+/backend/secrets/
+*-sa.json
+service-account*.json
+
 # debug
 npm-debug.log*
 yarn-debug.log*

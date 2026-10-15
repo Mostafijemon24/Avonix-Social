@@ -21,6 +21,7 @@ import {
   ClipboardCheck,
   Layers,
   LogOut,
+  Sparkles,
 } from "lucide-react";
 import { BrandLogo } from "@/components/ui/BrandLogo";
 import PlatformGlyph from "@/components/ui/PlatformGlyph";
@@ -36,6 +37,7 @@ const ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
   connections: Link2,
   gbppost: MapPin,
   library: Library,
+  automation: Sparkles,
   scheduling: CalendarClock,
   reviewreply: MessageSquare,
   notification: Bell,

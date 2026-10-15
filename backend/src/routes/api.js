@@ -41,6 +41,11 @@ import {
   updateStudioPostContent,
   getGmbRulesCatalog,
 } from "../services/autoPosterService.js";
+import {
+  syncSheetAndGenerate,
+  listSheetPosts,
+  sheetAutomationStatus,
+} from "../services/sheetAutomationService.js";
 import connectionsRoutes from "./connections.js";
 import workspacesRoutes from "./workspaces.js";
 import { assertSessionMatchesEmail } from "../middleware/userAuth.js";
@@ -645,6 +650,75 @@ router.post("/auto-poster/attach-images", async (req, res) => {
     res.json(result);
   } catch (err) {
     console.error("[auto-poster/attach-images]", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* ───────────────────────────────────────────────────────────────
+ * 30-Day Sheet Automation — Google Sheet → AI content/image → schedule
+ * ─────────────────────────────────────────────────────────────── */
+
+/** Is the server configured to read Google Sheets? (no secrets returned) */
+router.get("/sheet-automation/status", (_req, res) => {
+  res.json(sheetAutomationStatus());
+});
+
+/** Sync the sheet, generate content (+ optional images), store + schedule. */
+router.post("/sheet-automation/sync", async (req, res) => {
+  try {
+    const {
+      email,
+      workspaceId,
+      sheetId,
+      range,
+      platform,
+      tone,
+      location,
+      imageSource,
+      autoSchedule,
+      tzOffsetMinutes,
+    } = req.body || {};
+    if (!email) return res.status(400).json({ error: "email is required" });
+    const gate = assertSessionMatchesEmail(req, email);
+    if (!gate.ok) return res.status(gate.status).json({ error: gate.error });
+    const result = await syncSheetAndGenerate({
+      email,
+      workspaceId,
+      sheetId,
+      range,
+      platform,
+      tone,
+      location,
+      imageSource: imageSource || "ai",
+      autoSchedule: autoSchedule !== false && autoSchedule !== "false",
+      tzOffsetMinutes:
+        tzOffsetMinutes === undefined || tzOffsetMinutes === null || tzOffsetMinutes === ""
+          ? null
+          : Number(tzOffsetMinutes),
+    });
+    if (!result.ok) return res.status(result.status || 400).json(result);
+    res.json(result);
+  } catch (err) {
+    console.error("[sheet-automation/sync]", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/** List all posts generated from a Google Sheet for this user. */
+router.get("/sheet-automation/posts", async (req, res) => {
+  try {
+    const email = req.query.email;
+    if (!email) return res.status(400).json({ error: "email is required" });
+    const gate = assertSessionMatchesEmail(req, email);
+    if (!gate.ok) return res.status(gate.status).json({ error: gate.error });
+    const result = await listSheetPosts({
+      email,
+      workspaceId: req.query.workspaceId || undefined,
+      sheetId: req.query.sheetId || undefined,
+    });
+    if (!result.ok) return res.status(result.status || 400).json(result);
+    res.json(result);
+  } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });

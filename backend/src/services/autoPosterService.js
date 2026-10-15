@@ -2359,7 +2359,7 @@ function liveGmbValidation(row, packed) {
   });
 }
 
-function serializePost(row) {
+export function serializePost(row) {
   const packed = unpackKeywordPack(row.generalKeywords);
   const general = packed.keywords;
   const meta = packed.meta || {};
