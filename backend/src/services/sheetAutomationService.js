@@ -123,6 +123,34 @@ function readMeta(post) {
   return {};
 }
 
+/** Two posts belong to the same sheet row when their Row_ID (or topic) matches. */
+function sameSheetRow(post, other, otherMeta) {
+  const meta = readMeta(post);
+  if (meta.rowId || otherMeta.rowId) return meta.rowId === otherMeta.rowId;
+  return norm(post.primaryKeyword) === norm(other.primaryKeyword);
+}
+
+/**
+ * Cost-saver: find an image already generated for the SAME sheet row (any other
+ * platform). The image is generated ONCE per row and reused across every
+ * platform-specific post for that row, so we never pay for N images per row.
+ */
+async function findRowImage(post) {
+  const siblings = await prisma.studioPost.findMany({
+    where: {
+      userId: post.userId,
+      websiteOrigin: post.websiteOrigin,
+      imageUrl: { not: null },
+      NOT: { id: post.id },
+    },
+    select: { id: true, imageUrl: true, generalKeywords: true, primaryKeyword: true },
+  });
+  for (const s of siblings) {
+    if (s.imageUrl && sameSheetRow(post, s, readMeta(s))) return s.imageUrl;
+  }
+  return null;
+}
+
 /** Ask the provider router for the best writing/image models for this batch. */
 async function pickProviderModels({ sheetId, location, includeImages, imageSource }) {
   const decision = await selectBestStudioProviders({
@@ -387,23 +415,32 @@ async function generateForPostRecord(post, { imageSource = "ai" } = {}) {
     return { post: serializePost(updated), outcome: { postId: post.id, platform, topic, outcome: "generation_failed", error: safeError(err.message) } };
   }
 
-  // 2) Conditional image generation (ONLY when Generate_Image = Yes).
+  // 2) Conditional image (ONLY when Generate_Image = Yes).
+  //    The image is generated ONCE per sheet row and the SAME url is reused for
+  //    every platform post of that row, to save image-API costs.
   let imageUrl = post.imageUrl || null;
   let imageError = null;
-  if (meta.generateImage) {
-    try {
-      const img = await generateStudioImage({
-        keyword: topic,
-        location: place,
-        platform,
-        heading: gen.heading,
-        imageSource,
-        preferredModel: imageModel,
-      });
-      if (img?.url) imageUrl = img.url;
-      else imageError = img?.error || "Image generation returned no URL";
-    } catch (imgErr) {
-      imageError = safeError(imgErr.message);
+  let imageReused = false;
+  if (meta.generateImage && !imageUrl) {
+    const shared = await findRowImage(post);
+    if (shared) {
+      imageUrl = shared; // reuse the row's existing image — no new API call
+      imageReused = true;
+    } else {
+      try {
+        const img = await generateStudioImage({
+          keyword: topic,
+          location: place,
+          platform,
+          heading: gen.heading,
+          imageSource,
+          preferredModel: imageModel,
+        });
+        if (img?.url) imageUrl = img.url;
+        else imageError = img?.error || "Image generation returned no URL";
+      } catch (imgErr) {
+        imageError = safeError(imgErr.message);
+      }
     }
   }
 
@@ -451,6 +488,7 @@ async function generateForPostRecord(post, { imageSource = "ai" } = {}) {
       platform,
       topic,
       outcome: status === "scheduled" ? "scheduled" : "generated",
+      ...(imageReused ? { imageReused: true } : {}),
       ...(imageError ? { imageError } : {}),
       ...(scheduleNote ? { note: scheduleNote } : {}),
     },

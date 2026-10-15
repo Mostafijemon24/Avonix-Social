@@ -403,7 +403,7 @@ export default function AutomationPage() {
             title={toGenerate.length === 0 ? "All rows already generated" : "Generate content for all pending rows"}
           >
             {generatingAll ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
-            {generatingAll ? "Generating…" : `Generate Posts${toGenerate.length ? ` (${toGenerate.length})` : ""}`}
+            {generatingAll ? "Generating…" : `Generate All Pending${toGenerate.length ? ` (${toGenerate.length})` : ""}`}
           </button>
         </div>
         <div className="overflow-x-auto">
