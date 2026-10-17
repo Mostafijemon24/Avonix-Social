@@ -4,13 +4,13 @@
  * Heavy work stays on the backend; client only receives keyword results.
  */
 import { callOpenRouter } from "../openrouter.js";
+import { safeFetchText, mapWithConcurrency } from "./crawlUtils.js";
 
 const FETCH_TIMEOUT_MS = Number(process.env.SITE_FETCH_TIMEOUT_MS || 10000);
-const MAX_SITEMAP_URLS = Number(process.env.SITE_MAX_SITEMAP_URLS || 400);
-const MAX_PAGES_TO_FETCH = Number(process.env.SITE_MAX_PAGES || 40);
-const MAX_CHILD_SITEMAPS = Number(process.env.SITE_MAX_CHILD_SITEMAPS || 20);
-const USER_AGENT =
-  "Mozilla/5.0 (compatible; AvonixSocialBot/1.0; +https://social.avonixai.com)";
+const MAX_SITEMAP_URLS = Number(process.env.SITE_MAX_SITEMAP_URLS || 2000);
+const MAX_PAGES_TO_FETCH = Number(process.env.SITE_MAX_PAGES || 150);
+const MAX_CHILD_SITEMAPS = Number(process.env.SITE_MAX_CHILD_SITEMAPS || 50);
+const FETCH_CONCURRENCY = Number(process.env.SITE_FETCH_CONCURRENCY || 8);
 
 const STOP_WORDS = new Set(
   `a an the and or but if in on at to for of from by with as is are was were be been being
@@ -38,21 +38,8 @@ export function normalizeDomain(input) {
 }
 
 async function fetchText(url) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
-  try {
-    const res = await fetch(url, {
-      signal: controller.signal,
-      headers: { "User-Agent": USER_AGENT, Accept: "text/html,application/xml,*/*" },
-      redirect: "follow",
-    });
-    if (!res.ok) return null;
-    return await res.text();
-  } catch {
-    return null;
-  } finally {
-    clearTimeout(timer);
-  }
+  const res = await safeFetchText(url, { timeoutMs: FETCH_TIMEOUT_MS });
+  return res.ok ? res.text : null;
 }
 
 function extractLocsFromXml(xml) {
@@ -113,31 +100,36 @@ export async function discoverSitemapUrls(origin) {
 
   const pageUrls = new Set();
   const tried = new Set();
+  let childBudget = MAX_CHILD_SITEMAPS;
 
-  for (const smUrl of candidates) {
-    if (tried.has(smUrl)) continue;
+  const isSitemapLoc = (u) => /sitemap/i.test(u) && /\.xml(\?|$)/i.test(u);
+
+  // Recursively walk a sitemap (or sitemap index), following nested index
+  // files up to the child budget. We no longer stop after an arbitrary 20
+  // URLs — every eligible page should be discoverable.
+  const walkSitemap = async (smUrl, depth = 0) => {
+    if (tried.has(smUrl) || depth > 5) return;
     tried.add(smUrl);
     const xml = await fetchText(smUrl);
-    if (!xml || !xml.includes("<loc")) continue;
+    if (!xml || !xml.includes("<loc")) return;
 
     const locs = extractLocsFromXml(xml);
-    const childSitemaps = locs.filter((u) => /sitemap/i.test(u) && /\.xml(\?|$)/i.test(u));
-    const pages = locs.filter((u) => !childSitemaps.includes(u) && isLikelyPageUrl(u));
-
-    for (const p of pages) pageUrls.add(p);
-
-    for (const child of childSitemaps.slice(0, MAX_CHILD_SITEMAPS)) {
-      if (tried.has(child)) continue;
-      tried.add(child);
-      const childXml = await fetchText(child);
-      if (!childXml) continue;
-      const childLocs = extractLocsFromXml(childXml);
-      for (const p of childLocs) {
-        if (isLikelyPageUrl(p)) pageUrls.add(p);
-      }
+    const childSitemaps = locs.filter(isSitemapLoc);
+    const pages = locs.filter((u) => !isSitemapLoc(u) && isLikelyPageUrl(u));
+    for (const p of pages) {
+      if (pageUrls.size < MAX_SITEMAP_URLS) pageUrls.add(p);
     }
 
-    if (pageUrls.size >= 20) break;
+    for (const child of childSitemaps) {
+      if (childBudget <= 0 || pageUrls.size >= MAX_SITEMAP_URLS) break;
+      childBudget--;
+      await walkSitemap(child, depth + 1);
+    }
+  };
+
+  for (const smUrl of candidates) {
+    if (pageUrls.size >= MAX_SITEMAP_URLS) break;
+    await walkSitemap(smUrl);
   }
 
   // Fallback: harvest internal links from homepage when sitemap is thin
@@ -356,26 +348,20 @@ export async function analyzeSite(domainInput, opts = {}) {
       .sort((a, b) => urlPriority(b) - urlPriority(a)),
   ].slice(0, MAX_PAGES_TO_FETCH);
 
-  const pages = [];
-  for (let i = 0; i < prioritized.length; i += 5) {
-    const batch = prioritized.slice(i, i + 5);
-    const results = await Promise.all(
-      batch.map(async (url) => {
-        const html = await fetchText(url);
-        if (!html) return null;
-        return {
-          url,
-          title: tagText(html, "title"),
-          h1: tagText(html, "h1"),
-          h2s: allTagTexts(html, "h2"),
-          description:
-            metaContent(html, "description") || metaContent(html, "og:description"),
-          bodyText: stripHtml(html).slice(0, 10000),
-        };
-      })
-    );
-    for (const p of results) if (p) pages.push(p);
-  }
+  const results = await mapWithConcurrency(prioritized, FETCH_CONCURRENCY, async (url) => {
+    const html = await fetchText(url);
+    if (!html) return null;
+    return {
+      url,
+      title: tagText(html, "title"),
+      h1: tagText(html, "h1"),
+      h2s: allTagTexts(html, "h2"),
+      description:
+        metaContent(html, "description") || metaContent(html, "og:description"),
+      bodyText: stripHtml(html).slice(0, 10000),
+    };
+  });
+  const pages = results.filter(Boolean);
 
   if (pages.length === 0) {
     return {

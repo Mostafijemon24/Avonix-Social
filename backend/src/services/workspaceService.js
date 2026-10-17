@@ -329,9 +329,13 @@ export async function saveWorkspaceSitemap({ email, workspaceId, sitemap }) {
 }
 
 export async function resolveActiveWorkspace(user) {
+  // Never seed the default workspace (and therefore the business name used in
+  // generated marketing copy) from the account owner's personal name. Use the
+  // company if present, otherwise let ensureDefaultWorkspace fall back to the
+  // neutral "My Business" default.
   const { workspaces, activeId } = await ensureDefaultWorkspace(
     user.id,
-    user.company || user.name
+    user.company || null
   );
   const active = workspaces.find((w) => w.id === activeId) || workspaces[0];
   return { workspace: active, activeId };

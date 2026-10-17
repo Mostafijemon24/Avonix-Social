@@ -63,11 +63,27 @@ type PendingItem = {
   accountUrl: string | null;
   alreadyConnected: boolean;
   metadata?: {
+    type?: string | null;
+    publishable?: boolean;
     address?: string | null;
     phone?: string | null;
     hours?: string | null;
+    locationId?: string | null;
+    locationName?: string | null;
+    googleAccount?: string | null;
+    googleAccountName?: string | null;
     note?: string | null;
   } | null;
+};
+
+type PendingWarning = { account: string; reason: string };
+
+const WARNING_LABEL: Record<string, string> = {
+  permission: "permission denied (API not enabled or no manage access)",
+  expired: "authorization expired",
+  quota: "Google quota exceeded",
+  "google-down": "Google temporarily unavailable",
+  error: "could not be read",
 };
 
 function health(acc: ConnectedAccount) {
@@ -95,6 +111,7 @@ function ConnectionsInner() {
   const [setup, setSetup] = useState<ConnectionsSetup | null>(null);
   const [pickerProvider, setPickerProvider] = useState<string | null>(null);
   const [pendingItems, setPendingItems] = useState<PendingItem[]>([]);
+  const [pendingWarnings, setPendingWarnings] = useState<PendingWarning[]>([]);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [pickerLoading, setPickerLoading] = useState(false);
 
@@ -125,6 +142,7 @@ function ConnectionsInner() {
         );
         const items = data.items || [];
         setPendingItems(items);
+        setPendingWarnings(data.warnings || []);
         setSelectedIds([]);
         if (!data.pending || !items.length) {
           showToast("No pending accounts to select. Start Connect another again.", "error");
@@ -200,6 +218,7 @@ function ConnectionsInner() {
       );
       setPickerProvider(null);
       setPendingItems([]);
+      setPendingWarnings([]);
       await load();
     } catch (err) {
       showToast(isApiError(err) ? err.error : "Could not connect selected accounts", "error");
@@ -224,6 +243,7 @@ function ConnectionsInner() {
     }
     setPickerProvider(null);
     setPendingItems([]);
+    setPendingWarnings([]);
   };
 
   const disconnect = async (id: string) => {
@@ -273,7 +293,11 @@ function ConnectionsInner() {
     () => PLATFORMS.find((p) => p.id === pickerProvider),
     [pickerProvider]
   );
-  const availableCount = pendingItems.filter((i) => !i.alreadyConnected).length;
+  const availableCount = pendingItems.filter(
+    (i) =>
+      !i.alreadyConnected &&
+      !(pickerProvider === "google_business" && i.metadata?.publishable === false)
+  ).length;
 
   return (
     <div className="space-y-11 max-w-[900px] mx-auto animate-fade-in text-left">
@@ -458,14 +482,33 @@ function ConnectionsInner() {
             {pickerLoading ? (
               <p className="text-sm text-dim mt-4">Loading eligible accounts…</p>
             ) : (
+              <>
+                {pendingWarnings.length > 0 && (
+                  <ul className="mt-4 space-y-1">
+                    {pendingWarnings.map((w) => (
+                      <li
+                        key={w.account}
+                        className="text-[11px] text-[color:var(--color-warn,#d97706)] bg-amber-50/20 border border-amber-500/20 rounded-lg px-3 py-2"
+                      >
+                        {w.account}: {WARNING_LABEL[w.reason] || w.reason}
+                      </li>
+                    ))}
+                  </ul>
+                )}
               <ul className="mt-4 space-y-2">
                 {pendingItems.map((item) => {
                   const checked = selectedIds.includes(item.accountId);
+                  // For GBP, only real publishable locations may be selected;
+                  // account-only / empty items are shown but not selectable.
+                  const notPublishable =
+                    pickerProvider === "google_business" &&
+                    item.metadata?.publishable === false;
+                  const disabled = item.alreadyConnected || notPublishable;
                   return (
                     <li key={item.accountId}>
                       <label
                         className={`flex items-start gap-3 rounded-xl border px-3 py-3 ${
-                          item.alreadyConnected
+                          disabled
                             ? "border-line bg-navy-950/40 opacity-70"
                             : "border-line bg-[color:var(--color-card-inner)] cursor-pointer"
                         }`}
@@ -473,7 +516,7 @@ function ConnectionsInner() {
                         <input
                           type="checkbox"
                           className="mt-1"
-                          disabled={item.alreadyConnected}
+                          disabled={disabled}
                           checked={item.alreadyConnected ? true : checked}
                           onChange={() => {
                             setSelectedIds((prev) =>
@@ -488,6 +531,10 @@ function ConnectionsInner() {
                           <span className="block text-[11px] font-semibold mt-0.5">
                             {item.alreadyConnected ? (
                               <span className="text-[color:var(--color-ready)]">Already Connected</span>
+                            ) : notPublishable ? (
+                              <span className="text-[color:var(--color-warn,#d97706)]">
+                                No specific location — not publishable
+                              </span>
                             ) : (
                               <span className="text-muted">Available</span>
                             )}
@@ -495,12 +542,26 @@ function ConnectionsInner() {
                           {item.metadata?.address && (
                             <span className="block text-[11px] text-dim">{item.metadata.address}</span>
                           )}
+                          {(item.metadata?.googleAccountName || item.metadata?.googleAccount) && (
+                            <span className="block text-[11px] text-dim">
+                              Google account: {item.metadata.googleAccountName || item.metadata.googleAccount}
+                            </span>
+                          )}
+                          {item.metadata?.locationId && (
+                            <span className="block text-[10px] text-dim font-mono truncate">
+                              {item.metadata.locationId}
+                            </span>
+                          )}
+                          {item.metadata?.note && (
+                            <span className="block text-[11px] text-dim italic">{item.metadata.note}</span>
+                          )}
                         </span>
                       </label>
                     </li>
                   );
                 })}
               </ul>
+              </>
             )}
             <div className="mt-5 flex flex-wrap gap-2 justify-end">
               <button type="button" className="btn-secondary text-[12px]" onClick={discardPicker}>

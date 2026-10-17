@@ -77,6 +77,17 @@ async function request<T>(
   return data as T;
 }
 
+export type OverlayConfig = {
+  enabled?: boolean;
+  title?: string;
+  anchorPct?: number; // vertical anchor (fraction of height), default ~0.59
+  fontSizePct?: number;
+  color?: string;
+  panel?: boolean;
+  panelOpacity?: number;
+  appliedAt?: string;
+};
+
 export type StudioPostRecord = {
   id: string;
   url: string;
@@ -94,6 +105,23 @@ export type StudioPostRecord = {
   wordCount?: number;
   charCount?: number;
   image: string | null;
+  /** Original image before a title overlay (non-destructive) */
+  imageSourceUrl?: string | null;
+  /** Persisted title-overlay settings so the editor can reopen/adjust them */
+  overlay?: OverlayConfig | null;
+  /** Batch 4: null | "pending" | "ready" | "failed" (deferred image generation) */
+  imageStatus?: "pending" | "ready" | "failed" | null;
+  imagePending?: boolean;
+  /** Structured, validated CTA — reflects the platform's REAL link capability */
+  ctaInfo?: {
+    ctaText: string | null;
+    ctaType: string | null;
+    destinationUrl: string | null;
+    destinationType: string | null;
+    linkCapability: "native_button" | "body_link" | "profile_link" | "none" | string;
+    validationStatus: string;
+    warnings: string[];
+  } | null;
   status: "draft" | "scheduled" | "published" | string;
   locked: boolean;
   scheduledDate: string | null;
@@ -151,6 +179,52 @@ export type StudioPageAnalysis = {
   };
 };
 
+export type SelectionPage = {
+  id: string;
+  url: string;
+  title: string;
+  pageType: string;
+  writingIntent: string;
+  areaCoverage: string;
+  reachable: boolean;
+  status: "analyzed" | "failed" | "excluded";
+  selected: boolean;
+  keywords: { primary: string; secondary: string[] };
+};
+
+export type SelectionService = {
+  id: string;
+  name: string;
+  pages: string[];
+  pageCount: number;
+  selected: boolean;
+};
+
+export type PageSelectionResult = {
+  ok: boolean;
+  websiteOrigin: string;
+  workspaceId: string;
+  counts: {
+    total: number;
+    analyzed: number;
+    failed: number;
+    excluded: number;
+    selected: number;
+  };
+  pages: SelectionPage[];
+  services: SelectionService[];
+  error?: string;
+};
+
+export type PageSelectionSaveResult = {
+  ok: boolean;
+  pagesUpdated?: number;
+  servicesUpdated?: number;
+  rejected?: string[];
+  selection?: PageSelectionResult;
+  error?: string;
+};
+
 export type WebsiteAnalyzeResult = {
   ok: boolean;
   workspaceId: string | null;
@@ -166,13 +240,44 @@ export type WebsiteAnalyzeResult = {
   masterIntent: string;
   dominantIntent: string;
   pages: StudioPageAnalysis[];
+  cached?: boolean;
+  selection?: PageSelectionResult | null;
+  inventory?: {
+    discovered: number;
+    duplicates: number;
+    eligible: number;
+    excluded: number;
+    queued: number;
+    analyzedSuccess: number;
+    failed: number;
+    remaining: number;
+    complete: boolean;
+  };
+  excludedSample?: { url: string; reason: string }[];
+  failedSample?: { url: string; reason: string }[];
+  services?: {
+    name: string;
+    pages: string[];
+    pageCount: number;
+    pageTypes: string[];
+  }[];
+  metrics?: {
+    durationMs: number;
+    concurrency: number;
+    cache: { size: number; hits: number; misses: number; hitRate: number };
+  };
   intelligence?: {
     primaryKeywords: string[];
     secondaryKeywords: string[];
     location: string;
     pagesAnalyzed: number;
     servicesFound: number;
+    servicePageCount?: number;
     linksFound: number;
+    discovered?: number;
+    failed?: number;
+    excluded?: number;
+    remaining?: number;
   };
   error?: string;
 };
@@ -465,6 +570,7 @@ export const api = {
       ok: boolean;
       pending: boolean;
       provider: string;
+      warnings?: Array<{ account: string; reason: string }>;
       items: Array<{
         accountId: string;
         accountName: string;
@@ -472,10 +578,16 @@ export const api = {
         alreadyConnected: boolean;
         metadata?: {
           type?: string | null;
+          publishable?: boolean;
           address?: string | null;
           phone?: string | null;
           hours?: string | null;
           locationName?: string | null;
+          locationId?: string | null;
+          locationTitle?: string | null;
+          storeCode?: string | null;
+          googleAccount?: string | null;
+          googleAccountName?: string | null;
           note?: string | null;
         } | null;
       }>;
@@ -622,6 +734,8 @@ export const api = {
     platforms?: string[];
     websiteUrl?: string;
     gmbCategory?: string;
+    /** Batch 4: default true — return text drafts first, images out-of-band */
+    deferImages?: boolean;
   }) =>
     request<{
       ok: boolean;
@@ -665,6 +779,9 @@ export const api = {
       posts: StudioPostRecord[];
       skippedLocked: Array<{ url: string; platform: string; reason: string }>;
       tones: string[];
+      /** Batch 4: whether images were deferred and which postIds still need them */
+      imagesDeferred?: boolean;
+      imagesPending?: string[];
       error?: string;
     }>("/auto-poster/generate", {
       method: "POST",
@@ -679,11 +796,33 @@ export const api = {
     websiteUrl: string;
     location?: string;
     maxPages?: number;
+    forceRefresh?: boolean;
   }) =>
     request<WebsiteAnalyzeResult>("/auto-poster/analyze-website", {
       method: "POST",
       body: JSON.stringify(payload),
       timeoutMs: 3 * 60 * 1000,
+    }),
+
+  /** Load the persisted page / service selection for a website (survives refresh) */
+  getPageSelection: (email: string, websiteUrl: string, workspaceId?: string) =>
+    request<PageSelectionResult>(
+      `/auto-poster/selection?email=${encodeURIComponent(email)}&websiteUrl=${encodeURIComponent(
+        websiteUrl
+      )}${workspaceId ? `&workspaceId=${encodeURIComponent(workspaceId)}` : ""}`
+    ),
+
+  /** Persist the user's page / service selection (validated server-side) */
+  savePageSelection: (payload: {
+    email: string;
+    workspaceId?: string;
+    websiteUrl: string;
+    selectedUrls?: string[];
+    selectedServices?: string[];
+  }) =>
+    request<PageSelectionSaveResult>("/auto-poster/selection", {
+      method: "POST",
+      body: JSON.stringify(payload),
     }),
 
   listStudioPosts: (email: string, workspaceId?: string, status?: string, includeArchived = false) =>
@@ -821,6 +960,38 @@ export const api = {
       timeoutMs: 5 * 60 * 1000,
     }),
 
+  /** Batch 5 — re-arm a post's durable image job after a terminal failure */
+  retryImageJob: (payload: { email: string; postId: string }) =>
+    request<{ ok: boolean; post: StudioPostRecord; error?: string }>(
+      "/auto-poster/jobs/retry-image",
+      { method: "POST", body: JSON.stringify(payload) }
+    ),
+
+  /** Batch 5 — durable background job status for the signed-in user (scoped) */
+  listBackgroundJobs: (email: string, status?: string, workspaceId?: string) =>
+    request<{
+      ok: boolean;
+      jobs: Array<{
+        id: string;
+        type: string;
+        status: "queued" | "running" | "succeeded" | "failed" | "canceled" | string;
+        resourceId: string | null;
+        attempts: number;
+        maxAttempts: number;
+        lastError: string | null;
+        runAfter: string | null;
+        startedAt: string | null;
+        finishedAt: string | null;
+        createdAt: string;
+        updatedAt: string | null;
+      }>;
+      error?: string;
+    }>(
+      `/auto-poster/jobs?email=${encodeURIComponent(email)}${
+        status ? `&status=${encodeURIComponent(status)}` : ""
+      }${workspaceId ? `&workspaceId=${encodeURIComponent(workspaceId)}` : ""}`
+    ),
+
   getGmbRules: () =>
     request<{
       ok: boolean;
@@ -855,6 +1026,31 @@ export const api = {
   }) =>
     request<{ ok: boolean; post: StudioPostRecord; validation?: StudioPostRecord["validation"] }>(
       "/auto-poster/validate",
+      { method: "POST", body: JSON.stringify(payload) }
+    ),
+
+  /** Feature B — delete / cancel a post (status-aware, race-safe, owner-scoped) */
+  deleteStudioPost: (payload: { email: string; postId: string }) =>
+    request<{
+      ok: boolean;
+      deleted?: boolean;
+      postId?: string;
+      wasScheduled?: boolean;
+      wasPublished?: boolean;
+      remoteNote?: string;
+      error?: string;
+    }>("/auto-poster/delete", { method: "POST", body: JSON.stringify(payload) }),
+
+  /** Feature D — apply / remove a professional title overlay on a post image */
+  applyStudioImageOverlay: (payload: {
+    email: string;
+    postId: string;
+    overlayConfig?: OverlayConfig;
+    renderedImage?: string; // JPEG data URL composited by the browser canvas
+    removeOverlay?: boolean;
+  }) =>
+    request<{ ok: boolean; post: StudioPostRecord; error?: string }>(
+      "/auto-poster/post-image/overlay",
       { method: "POST", body: JSON.stringify(payload) }
     ),
 

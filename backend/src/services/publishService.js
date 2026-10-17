@@ -5,6 +5,9 @@ import prisma from "../db.js";
 import { isFullyVerified } from "./verifyService.js";
 import { stampActivity } from "./reminderService.js";
 import { resolveActiveWorkspace } from "./workspaceService.js";
+import { resolvePublishableLocation } from "./gbpDiscovery.js";
+import { buildGbpCallToAction } from "./ctaEngine.js";
+import { enforceLength } from "../content/platformPolicy.js";
 
 const SOCIAL_PROVIDERS = ["facebook", "instagram", "linkedin", "x", "pinterest"];
 const GBP_PROVIDERS = ["google_business"];
@@ -286,8 +289,10 @@ async function publishX(account, message, imageUrl) {
   });
   if (!accessToken) throw new Error("X token missing — reconnect in Connections");
 
-  // Enforce the 280-char limit defensively (generation already caps, but edits may not).
-  const text = String(message || "").slice(0, 280);
+  // Enforce the limit defensively using the versioned platform policy (X uses
+  // weighted counting — URLs count as 23 — so this is more accurate than a raw
+  // 280 slice). Generation already caps, but manual edits may not.
+  const text = enforceLength("X", String(message || "")).text;
 
   // Attach an image when present — best-effort so a media hiccup never blocks the tweet.
   let mediaIds = null;
@@ -368,59 +373,33 @@ async function publishPinterest(account, message, imageUrl) {
 
 async function resolveGbpLocation(accessToken, account) {
   const meta = parseMeta(account);
-  if (meta.locationName) return meta.locationName;
+  // Fast path + safety: use the explicitly selected location; only auto-resolve
+  // when the account has exactly ONE location. Never guess among many.
+  const resolved = await resolvePublishableLocation(meta, accessToken);
 
-  const accountName = meta.googleAccount || account.accountId;
-  if (!accountName || accountName === "google-user") {
-    // List accounts then locations
-    const accountsRes = await fetch(
-      "https://mybusinessaccountmanagement.googleapis.com/v1/accounts",
-      { headers: { Authorization: `Bearer ${accessToken}` } }
-    );
-    const accountsData = await accountsRes.json();
-    const first = (accountsData.accounts || [])[0];
-    if (!first?.name) {
-      throw new Error("No Google Business account found — reconnect GBP");
-    }
-    return resolveLocationUnderAccount(accessToken, first.name, account.id);
+  // Persist a freshly auto-resolved single location so future publishes skip
+  // the lookup (an explicitly selected location is already stored).
+  if (resolved.resolvedByFallback && account.id) {
+    const row = await prisma.connectedAccount.findUnique({ where: { id: account.id } });
+    const prev = parseMeta(row || {});
+    await prisma.connectedAccount.update({
+      where: { id: account.id },
+      data: {
+        metadata: JSON.stringify({
+          ...prev,
+          googleAccount: resolved.googleAccount || prev.googleAccount,
+          locationName: resolved.locationName,
+          locationTitle: resolved.locationTitle || prev.locationTitle,
+        }),
+        accountName: resolved.locationTitle || row?.accountName,
+      },
+    });
   }
 
-  return resolveLocationUnderAccount(accessToken, accountName, account.id);
+  return resolved.locationName;
 }
 
-async function resolveLocationUnderAccount(accessToken, accountName, connectedId) {
-  const locRes = await fetch(
-    `https://mybusinessbusinessinformation.googleapis.com/v1/${accountName}/locations?readMask=name,title`,
-    { headers: { Authorization: `Bearer ${accessToken}` } }
-  );
-  const locData = await locRes.json();
-  const location = (locData.locations || [])[0];
-  if (!location?.name) {
-    throw new Error(
-      "No GBP location found under this account. Add a location in Google Business, then reconnect."
-    );
-  }
-
-  // Persist for next publish
-  const row = await prisma.connectedAccount.findUnique({ where: { id: connectedId } });
-  const prev = parseMeta(row || {});
-  await prisma.connectedAccount.update({
-    where: { id: connectedId },
-    data: {
-      metadata: JSON.stringify({
-        ...prev,
-        googleAccount: accountName,
-        locationName: location.name,
-        locationTitle: location.title,
-      }),
-      accountName: location.title || row?.accountName,
-    },
-  });
-
-  return location.name;
-}
-
-async function publishGbpPost(account, message) {
+async function publishGbpPost(account, message, cta = null) {
   const accessToken = await refreshGoogleToken(account);
   const locationName = await resolveGbpLocation(accessToken, account);
   // localPosts still on mybusiness v4 path using accounts/.../locations/...
@@ -433,6 +412,18 @@ async function publishGbpPost(account, message) {
     parent = `${meta.googleAccount}/${locationName}`;
   }
 
+  const payload = {
+    languageCode: "en-US",
+    // GBP localPost.summary hard limit (1,500) sourced from the versioned policy.
+    summary: enforceLength("GMB", message).text,
+    topicType: "STANDARD",
+  };
+  // Attach the REAL native CTA button only when the engine produced a valid,
+  // supported action — never a quoted phrase. buildGbpCallToAction returns null
+  // for unsupported/invalid actions, so behaviour is unchanged when absent.
+  const callToAction = buildGbpCallToAction(cta);
+  if (callToAction) payload.callToAction = callToAction;
+
   const res = await fetch(
     `https://mybusiness.googleapis.com/v4/${parent}/localPosts`,
     {
@@ -441,11 +432,7 @@ async function publishGbpPost(account, message) {
         Authorization: `Bearer ${accessToken}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({
-        languageCode: "en-US",
-        summary: message.slice(0, 1500),
-        topicType: "STANDARD",
-      }),
+      body: JSON.stringify(payload),
     }
   );
   const data = await res.json().catch(() => ({}));
@@ -498,6 +485,8 @@ async function publishGbpReviewReply(account, message, reviewName) {
 export async function publishContent(opts) {
   const { email, content, action, imageUrl, reviewName, connectionIds, workspaceId, contentByProvider } =
     opts;
+  // Optional structured CTA per provider (e.g. { google_business: {...} }).
+  const ctaByProvider = opts.cta && typeof opts.cta === "object" ? opts.cta : {};
   const fallbackMessage = String(content || "").trim();
   if (!fallbackMessage && !(contentByProvider && Object.keys(contentByProvider).length)) {
     return { ok: false, status: 400, error: "Content is required" };
@@ -585,7 +574,7 @@ export async function publishContent(opts) {
         if (publishAction === "review_reply") {
           result = await publishGbpReviewReply(account, message, reviewName);
         } else {
-          result = await publishGbpPost(account, message);
+          result = await publishGbpPost(account, message, ctaByProvider[account.provider] || null);
         }
       } else {
         throw new Error(`Unsupported provider: ${account.provider}`);

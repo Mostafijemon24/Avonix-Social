@@ -260,6 +260,55 @@ model Lead {
   @@index([status])
 }
 
+/**
+ * Persisted website page inventory + user selection (Sitemap Selection step).
+ * One row per discovered page, scoped to user + workspace + website origin.
+ * `workspaceId` is coalesced to "" (never null) so the uniqueness constraint
+ * reliably prevents duplicate page records even for the default workspace.
+ */
+model WebsitePage {
+  id                String    @id @default(cuid())
+  userId            String
+  workspaceId       String    @default("")
+  websiteOrigin     String // https://example.com
+  url               String // normalized page URL
+  title             String    @default("")
+  pageType          String    @default("")
+  writingIntent     String    @default("")
+  areaCoverage      String    @default("")
+  primaryKeyword    String    @default("")
+  secondaryKeywords String    @default("[]") // JSON array
+  reachable         Boolean   @default(true)
+  status            String    @default("analyzed") // analyzed | failed | excluded
+  selected          Boolean   @default(false)
+  selectedAt        DateTime?
+  analyzedAt        DateTime  @default(now())
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@unique([userId, workspaceId, websiteOrigin, url])
+  @@index([userId, workspaceId, websiteOrigin])
+  @@index([userId, workspaceId, websiteOrigin, selected])
+}
+
+/** Detected services per website with cross-page evidence + user selection. */
+model WebsiteService {
+  id            String    @id @default(cuid())
+  userId        String
+  workspaceId   String    @default("")
+  websiteOrigin String
+  name          String
+  pages         String    @default("[]") // JSON array of evidence URLs
+  pageCount     Int       @default(0)
+  selected      Boolean   @default(true)
+  selectedAt    DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@unique([userId, workspaceId, websiteOrigin, name])
+  @@index([userId, workspaceId, websiteOrigin])
+}
+
 /** Content Studio auto-poster records (draft / scheduled / published+locked / archived) */
 model StudioPost {
   id             String    @id @default(cuid())
@@ -278,12 +327,16 @@ model StudioPost {
   content        String
   contentHtml    String?
   imageUrl       String?
-  status         String    @default("draft") // draft | scheduled | published
+  imageSourceUrl String? // original image before a title overlay (non-destructive edit)
+  overlayConfig  String? // JSON of the title-overlay settings so it can be reopened/adjusted
+  imageStatus    String? // null = none/legacy | pending | ready | failed (Batch 4 deferred images)
+  status         String    @default("draft") // draft | scheduled | publishing | published | canceled
   locked         Boolean   @default(false)
   archived       Boolean   @default(false)
   archivedAt     DateTime?
   scheduledAt    DateTime?
   publishedAt    DateTime?
+  canceledAt     DateTime? // when a scheduled post was canceled/deleted (audit)
   rewriteOfId    String?
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
@@ -293,4 +346,43 @@ model StudioPost {
   @@index([userId, workspaceId, archived])
   @@index([userId, websiteOrigin, archived])
   @@index([status, scheduledAt])
+}
+
+/**
+ * Batch 5 — durable background job queue. The database IS the queue (no extra
+ * infra): every accepted job is committed here before being reported queued,
+ * survives process/worker restarts, is claimed atomically (so two workers can
+ * never run the same job), retries with bounded exponential backoff, and is
+ * idempotent via a unique dedupeKey (one job per logical unit of work).
+ */
+model BackgroundJob {
+  id             String    @id @default(cuid())
+  type           String // e.g. "image.generate"
+  status         String    @default("queued") // queued | running | succeeded | failed | canceled
+  dedupeKey      String    @unique // idempotent enqueue — one job per logical unit
+  payload        String    @default("{}") // JSON input for the handler
+  result         String? // JSON of the handler result (on success)
+  lastError      String? // last failure message (never contains secrets/tokens)
+  attempts       Int       @default(0)
+  maxAttempts    Int       @default(5)
+  priority       Int       @default(0) // higher runs first
+
+  // Tenancy / isolation — jobs are always scoped and never cross tenants.
+  userId         String?
+  workspaceId    String?
+  websiteOrigin  String?
+  resourceId     String? // e.g. the StudioPost id this job acts on
+
+  // Scheduling + leasing for safe concurrent claim and restart recovery.
+  runAfter       DateTime  @default(now()) // earliest time this job may run (backoff)
+  lockedBy       String? // worker id that currently holds the lease
+  leaseExpiresAt DateTime? // a running job past this is considered crashed → requeued
+  startedAt      DateTime?
+  finishedAt     DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([status, runAfter])
+  @@index([userId, workspaceId, status])
+  @@index([resourceId])
 }

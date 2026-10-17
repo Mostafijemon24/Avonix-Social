@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import {
   Calendar,
@@ -8,6 +8,7 @@ import {
   Download,
   Globe,
   Image as ImageIcon,
+  Link2 as LinkIcon,
   Lock,
   MapPin,
   Pencil,
@@ -16,6 +17,7 @@ import {
   Search,
   Send,
   Trash2,
+  Type,
   X,
 } from "lucide-react";
 import { useToast } from "@/components/ui/Toast";
@@ -26,9 +28,16 @@ import {
   isApiError,
   type StudioPageAnalysis,
   type StudioPostRecord,
+  type OverlayConfig,
   type WebsiteAnalyzeResult,
   type ArchiveWebsiteTable,
 } from "@/lib/api-client";
+import {
+  drawTitleOverlay,
+  exportOverlayDataURL,
+  OVERLAY_DEFAULTS,
+  type OverlayDraftConfig,
+} from "@/lib/overlay-layout";
 
 const TONE_PRESETS = [
   "Professional",
@@ -37,6 +46,17 @@ const TONE_PRESETS = [
   "Authoritative",
   "Storytelling",
 ] as const;
+
+/**
+ * Max pages fed into post GENERATION (pages × platforms ⇒ credits). This is a
+ * cost control, NOT the analysis cap — analysis now covers every eligible page.
+ */
+const MAX_GEN_PAGES = 15;
+
+/** Stable signature of a selection so we only auto-save real changes. */
+function selectionSig(urls: string[], services: string[]): string {
+  return JSON.stringify([[...urls].sort(), [...services].sort()]);
+}
 
 const PLATFORM_MIN_WORDS: Record<string, number> = {
   Facebook: 120,
@@ -172,6 +192,16 @@ function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+/** Short host for a destination URL (CTA preview). */
+function hostOf(url: string | null): string {
+  if (!url) return "";
+  try {
+    return new URL(url).host.replace(/^www\./, "");
+  } catch {
+    return url;
+  }
+}
+
 async function downloadImage(url: string, filename: string) {
   try {
     const res = await fetch(url);
@@ -200,6 +230,13 @@ export default function ContentStudioPage() {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysis, setAnalysis] = useState<WebsiteAnalyzeResult | null>(null);
   const [selectedPages, setSelectedPages] = useState<StudioPageAnalysis[]>([]);
+  const [selectedServices, setSelectedServices] = useState<string[]>([]);
+  const [selectionSaveState, setSelectionSaveState] =
+    useState<"idle" | "saving" | "saved" | "error">("idle");
+  // Signature of the last-persisted selection — avoids redundant saves right
+  // after hydration while still auto-saving genuine user changes.
+  const savedSelectionSigRef = useRef<string>("");
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // —— Existing generate / publish (later parts reuse) ——
   const [selectedTone, setSelectedTone] =
@@ -212,6 +249,8 @@ export default function ContentStudioPage() {
 
   // —— Part 3: images ——
   const [includeImages, setIncludeImages] = useState(false);
+  // Batch 4: true while deferred images are being generated in the background.
+  const [bgImageActive, setBgImageActive] = useState(false);
   const [imageSource, setImageSource] = useState<ImageSource>("auto");
   const [channels, setChannels] = useState<string[]>(["Facebook", "Instagram", "LinkedIn", "GMB"]);
   const [gmbCategory, setGmbCategory] = useState<string>("INTENT_PROXIMITY");
@@ -302,6 +341,9 @@ export default function ContentStudioPage() {
     setGeneratedPosts([]);
     setAnalysis(null);
     setSelectedPages([]);
+    setSelectedServices([]);
+    savedSelectionSigRef.current = "";
+    setSelectionSaveState("idle");
     setGenerateDone(false);
     setExpandedId(null);
     setArchiveTables([]);
@@ -318,7 +360,9 @@ export default function ContentStudioPage() {
     loadArchive();
   }, [state.activeWorkspaceId, state.email, state.sitemap?.location, state.sitemap?.url, loadRecords, loadArchive, state.workspaces]);
 
-  const handleAnalyzeWebsite = async () => {
+  const handleReanalyzeFresh = () => handleAnalyzeWebsite(true);
+
+  const handleAnalyzeWebsite = async (forceRefresh = false) => {
     if (!websiteUrl.trim()) {
       showToast("Enter a website URL", "error");
       return;
@@ -336,18 +380,43 @@ export default function ContentStudioPage() {
         workspaceId: state.activeWorkspaceId || undefined,
         websiteUrl: websiteUrl.trim(),
         location: location.trim() || undefined,
-        maxPages: 15,
+        forceRefresh,
       });
 
       setAnalysis(result);
-      setSelectedPages(result.pages || []);
+      // Hydrate selection from the persisted DB snapshot so refreshes /
+      // re-login keep the user's choices; fall back to the top-N default.
+      const sel = result.selection;
+      let initPages: StudioPageAnalysis[];
+      let initServices: string[];
+      if (sel && sel.pages) {
+        const selectedUrls = new Set(
+          sel.pages.filter((p) => p.selected).map((p) => p.url)
+        );
+        initPages = (result.pages || []).filter((p) => selectedUrls.has(p.url));
+        initServices = (sel.services || []).filter((s) => s.selected).map((s) => s.name);
+      } else {
+        initPages = (result.pages || []).slice(0, MAX_GEN_PAGES);
+        initServices = (result.services || []).map((s) => s.name);
+      }
+      setSelectedPages(initPages);
+      setSelectedServices(initServices);
+      // Mark this hydrated state as already persisted (seeded server-side).
+      savedSelectionSigRef.current = selectionSig(
+        initPages.map((p) => p.url),
+        initServices
+      );
+      setSelectionSaveState("idle");
       if (result.location && !location.trim()) {
         setLocation(result.location);
       }
-      showToast(
-        `Found ${result.pageCount} pages — review intelligence, then continue`,
-        "success"
-      );
+      const inv = result.inventory;
+      const msg = inv
+        ? `${inv.discovered} discovered → ${inv.eligible} eligible → ${inv.analyzedSuccess} analyzed${
+            inv.failed ? ` · ${inv.failed} failed` : ""
+          }${result.cached ? " (cached)" : ""}`
+        : `Found ${result.pageCount} pages — review intelligence, then continue`;
+      showToast(msg, "success");
     } catch (err) {
       showToast(
         isApiError(err) ? err.error : "Website analysis failed",
@@ -358,18 +427,74 @@ export default function ContentStudioPage() {
     }
   };
 
+  // Debounced auto-save of the page/service selection to the database.
+  useEffect(() => {
+    if (!analysis || !state.email) return;
+    const sig = selectionSig(selectedPages.map((p) => p.url), selectedServices);
+    if (sig === savedSelectionSigRef.current) return; // nothing changed
+    setSelectionSaveState("saving");
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(async () => {
+      try {
+        await api.savePageSelection({
+          email: state.email,
+          workspaceId: state.activeWorkspaceId || undefined,
+          websiteUrl: analysis.websiteUrl || websiteUrl.trim(),
+          selectedUrls: selectedPages.map((p) => p.url),
+          selectedServices,
+        });
+        savedSelectionSigRef.current = sig;
+        setSelectionSaveState("saved");
+      } catch {
+        setSelectionSaveState("error");
+      }
+    }, 600);
+    return () => {
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedPages, selectedServices, analysis, state.email, state.activeWorkspaceId]);
+
+  const toggleService = (name: string) => {
+    setSelectedServices((prev) =>
+      prev.includes(name) ? prev.filter((n) => n !== name) : [...prev, name]
+    );
+  };
+
   const togglePage = (url: string) => {
     setSelectedPages((prev) => {
       const exists = prev.some((p) => p.url === url);
       if (exists) return prev.filter((p) => p.url !== url);
       const page = analysis?.pages.find((p) => p.url === url);
       if (!page) return prev;
-      if (prev.length >= 15) {
-        showToast("Max 15 pages for post generation", "error");
+      if (prev.length >= MAX_GEN_PAGES) {
+        showToast(`Max ${MAX_GEN_PAGES} pages for post generation`, "error");
         return prev;
       }
       return [...prev, page];
     });
+  };
+
+  /** Persist the current selection NOW (used before generation to avoid a race
+   *  with the debounced auto-save, since generation reads selection from DB). */
+  const flushSelection = async () => {
+    if (!analysis || !state.email) return;
+    const sig = selectionSig(selectedPages.map((p) => p.url), selectedServices);
+    if (sig === savedSelectionSigRef.current) return;
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    try {
+      await api.savePageSelection({
+        email: state.email,
+        workspaceId: state.activeWorkspaceId || undefined,
+        websiteUrl: analysis.websiteUrl || websiteUrl.trim(),
+        selectedUrls: selectedPages.map((p) => p.url),
+        selectedServices,
+      });
+      savedSelectionSigRef.current = sig;
+      setSelectionSaveState("saved");
+    } catch {
+      setSelectionSaveState("error");
+    }
   };
 
   const handleScanAndGenerate = async () => {
@@ -397,6 +522,8 @@ export default function ContentStudioPage() {
     setGeneratePhase("Analyzing");
 
     try {
+      // Ensure the DB reflects the latest selection before the server reads it.
+      await flushSelection();
       const result = await api.generateAutoPoster({
         email: state.email,
         workspaceId: state.activeWorkspaceId || undefined,
@@ -409,6 +536,8 @@ export default function ContentStudioPage() {
         platforms: channels,
         websiteUrl: analysis?.websiteUrl || websiteUrl.trim() || undefined,
         gmbCategory: channels.includes("GMB") ? gmbCategory : undefined,
+        // Batch 4: get the (fast) text drafts back immediately; images follow.
+        deferImages: true,
       });
 
       const posts = result.posts || [];
@@ -418,6 +547,7 @@ export default function ContentStudioPage() {
       setGenerateDone(true);
       setMainTab("active");
       setStep(4);
+      const pendingImages = result.imagesDeferred ? result.imagesPending || [] : [];
       if (result.archivedCount) {
         await loadArchive();
         showToast(
@@ -427,10 +557,15 @@ export default function ContentStudioPage() {
       } else {
         const writer = result.providerDecision?.writing?.label || "template";
         showToast(
-          `Complete — ${posts.length} posts via ${writer}`,
+          pendingImages.length
+            ? `Drafts ready — ${posts.length} posts via ${writer}. Generating ${pendingImages.length} image(s) in the background…`
+            : `Complete — ${posts.length} posts via ${writer}`,
           "success"
         );
       }
+      // Images are already enqueued as durable server-side jobs; just poll for
+      // completion. Drafts are already on screen and usable immediately.
+      if (pendingImages.length) void pollPendingImages(pendingImages);
       await loadRecords();
     } catch (err) {
       showToast(
@@ -573,6 +708,83 @@ export default function ContentStudioPage() {
     }
   };
 
+  // Feature A — persist edited content/heading. Returns the saved post so the
+  // row can confirm success and reconcile; a monotonically-increasing guard in
+  // the row prevents a stale response from overwriting a newer edit.
+  const handleSaveEdit = useCallback(
+    async (postId: string, content: string, heading: string) => {
+      if (!state.email) return null;
+      const result = await api.updateStudioPostContent({
+        email: state.email,
+        postId,
+        content,
+        heading,
+      });
+      setGeneratedPosts((prev) =>
+        prev.map((p) => (p.id === result.post.id ? result.post : p))
+      );
+      return result.post;
+    },
+    [state.email]
+  );
+
+  // Feature B/C — delete / cancel a post. Scheduled posts are canceled so they
+  // can never auto-publish; published posts are removed locally only.
+  const handleDelete = useCallback(
+    async (postId: string) => {
+      if (!state.email) return;
+      setActionBusyId(postId);
+      try {
+        const result = await api.deleteStudioPost({ email: state.email, postId });
+        setGeneratedPosts((prev) => prev.filter((p) => p.id !== postId));
+        setExpandedId((id) => (id === postId ? null : id));
+        showToast(
+          result.remoteNote ||
+            (result.wasScheduled
+              ? "Scheduled post canceled — it will not publish."
+              : "Post deleted."),
+          "success"
+        );
+      } catch (err) {
+        // On failure the post stays visible and recoverable.
+        showToast(isApiError(err) ? err.error : "Delete failed — the post is unchanged.", "error");
+      } finally {
+        setActionBusyId(null);
+      }
+    },
+    [state.email, showToast]
+  );
+
+  // Feature D — persist the composited title-overlay image (preview == export).
+  const handleApplyOverlay = useCallback(
+    async (postId: string, overlayConfig: OverlayConfig, renderedImage: string) => {
+      if (!state.email) return;
+      const result = await api.applyStudioImageOverlay({
+        email: state.email,
+        postId,
+        overlayConfig,
+        renderedImage,
+      });
+      setGeneratedPosts((prev) => prev.map((p) => (p.id === result.post.id ? result.post : p)));
+      showToast("Title overlay applied.", "success");
+    },
+    [state.email, showToast]
+  );
+
+  const handleRemoveOverlay = useCallback(
+    async (postId: string) => {
+      if (!state.email) return;
+      const result = await api.applyStudioImageOverlay({
+        email: state.email,
+        postId,
+        removeOverlay: true,
+      });
+      setGeneratedPosts((prev) => prev.map((p) => (p.id === result.post.id ? result.post : p)));
+      showToast("Overlay removed — original image restored.", "success");
+    },
+    [state.email, showToast]
+  );
+
   const handleClearArchive = async (websiteOrigin?: string | null) => {
     if (!state.email) return;
     setIsClearingArchive(true);
@@ -633,6 +845,58 @@ export default function ContentStudioPage() {
       showToast(isApiError(err) ? err.error : "Image attach failed", "error");
     } finally {
       setIsAttachingImages(false);
+    }
+  };
+
+  // Batch 5: images are generated by the DURABLE server-side job queue (enqueued
+  // at generate time), so they complete even if this tab closes or the backend
+  // restarts. The client just polls post state until each pending image resolves
+  // (ready/failed). Nothing is lost if polling is interrupted — the job persists.
+  const pollPendingImages = async (postIds: string[]) => {
+    if (!state.email || !postIds.length) return;
+    setBgImageActive(true);
+    try {
+      const pending = new Set(postIds);
+      for (let i = 0; i < 60 && pending.size > 0; i++) {
+        await sleep(3000);
+        const posts = await loadRecords();
+        for (const p of posts) {
+          if (pending.has(p.id) && p.imageStatus !== "pending") pending.delete(p.id);
+        }
+      }
+      const refreshed = await loadRecords();
+      const stillFailed = refreshed.filter(
+        (p) => postIds.includes(p.id) && p.imageStatus === "failed"
+      ).length;
+      const ready = postIds.length - pending.size - stillFailed;
+      if (stillFailed) {
+        showToast(
+          `${ready} image(s) ready · ${stillFailed} failed — press Retry on the post`,
+          ready ? "success" : "error"
+        );
+      } else if (ready) {
+        showToast(`${ready} image(s) ready`, "success");
+      }
+    } finally {
+      setBgImageActive(false);
+    }
+  };
+
+  // Batch 5: re-arm a post's durable image job after a terminal failure.
+  const handleRetryImage = async (postId: string) => {
+    if (!state.email) return;
+    setImageBusyId(postId);
+    try {
+      const result = await api.retryImageJob({ email: state.email, postId });
+      setGeneratedPosts((prev) =>
+        prev.map((p) => (p.id === result.post.id ? result.post : p))
+      );
+      showToast("Retrying image generation…", "success");
+      void pollPendingImages([postId]);
+    } catch (err) {
+      showToast(isApiError(err) ? err.error : "Retry failed", "error");
+    } finally {
+      setImageBusyId(null);
     }
   };
 
@@ -851,7 +1115,7 @@ export default function ContentStudioPage() {
 
           <button
             type="button"
-            onClick={handleAnalyzeWebsite}
+            onClick={() => handleAnalyzeWebsite()}
             disabled={isAnalyzing}
             className="w-full sm:w-auto bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white font-bold py-3.5 px-7 rounded-xl text-sm inline-flex items-center justify-center gap-2 shadow-accent"
           >
@@ -897,17 +1161,65 @@ export default function ContentStudioPage() {
                 </div>
                 <div>
                   <span className="block text-dim">Pages analyzed</span>
-                  <span className="text-ink font-semibold">{intel.pagesAnalyzed}</span>
+                  <span className="text-ink font-semibold">
+                    {analysis.inventory?.analyzedSuccess ?? intel.pagesAnalyzed}
+                    {analysis.inventory ? ` / ${analysis.inventory.eligible}` : ""}
+                  </span>
                 </div>
                 <div>
                   <span className="block text-dim">Services found</span>
                   <span className="text-ink font-semibold">{intel.servicesFound}</span>
                 </div>
                 <div>
-                  <span className="block text-dim">Links found</span>
-                  <span className="text-ink font-semibold">{intel.linksFound}</span>
+                  <span className="block text-dim">Links discovered</span>
+                  <span className="text-ink font-semibold">
+                    {analysis.inventory?.discovered ?? intel.linksFound}
+                  </span>
                 </div>
+                {analysis.inventory && (analysis.inventory.failed > 0 || analysis.inventory.remaining > 0) && (
+                  <>
+                    <div>
+                      <span className="block text-dim">Failed</span>
+                      <span className="text-ink font-semibold">{analysis.inventory.failed}</span>
+                    </div>
+                    <div>
+                      <span className="block text-dim">Remaining</span>
+                      <span className="text-ink font-semibold">{analysis.inventory.remaining}</span>
+                    </div>
+                  </>
+                )}
               </div>
+              {analysis.services && analysis.services.length > 0 && (
+                <div className="text-xs">
+                  <span className="block text-dim mb-1">
+                    Detected services ({analysis.services.length}) — aggregated across pages
+                  </span>
+                  <div className="flex flex-wrap gap-1.5">
+                    {analysis.services.slice(0, 12).map((s) => (
+                      <span
+                        key={s.name}
+                        title={`${s.pageCount} page(s): ${s.pages.slice(0, 3).join(", ")}`}
+                        className="border border-navy-700 rounded-lg px-2 py-0.5 text-ink"
+                      >
+                        {s.name}
+                        <span className="text-dim"> · {s.pageCount}</span>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {analysis.cached && (
+                <p className="text-[11px] text-dim">
+                  Reused a recent cached analysis.{" "}
+                  <button
+                    type="button"
+                    className="text-orange-400 font-bold"
+                    onClick={handleReanalyzeFresh}
+                  >
+                    Re-analyze fresh
+                  </button>
+                </p>
+              )}
               <button
                 type="button"
                 onClick={() => setSeoOpen((v) => !v)}
@@ -955,6 +1267,20 @@ export default function ContentStudioPage() {
                 <span className="text-ink font-bold">
                   {selectedPages.length} of {(analysis.pages || []).length} selected
                 </span>
+                {analysis.inventory?.failed ? (
+                  <span className="text-dim"> · {analysis.inventory.failed} failed</span>
+                ) : null}
+              </p>
+              <p className="text-[11px] mt-0.5 h-4">
+                {selectionSaveState === "saving" && (
+                  <span className="text-dim">Saving selection…</span>
+                )}
+                {selectionSaveState === "saved" && (
+                  <span className="text-emerald-400">✓ Selection saved</span>
+                )}
+                {selectionSaveState === "error" && (
+                  <span className="text-red-400">Could not save selection — retrying on next change</span>
+                )}
               </p>
             </div>
             <button
@@ -969,7 +1295,7 @@ export default function ContentStudioPage() {
           <div className="flex flex-wrap gap-2">
             <button
               type="button"
-              onClick={() => setSelectedPages(analysis.pages.slice(0, 15))}
+              onClick={() => setSelectedPages(analysis.pages.slice(0, MAX_GEN_PAGES))}
               className="text-[11px] font-bold border border-navy-700 px-3 py-1.5 rounded-lg text-muted"
             >
               Select all
@@ -1052,6 +1378,42 @@ export default function ContentStudioPage() {
               );
             })}
           </ul>
+
+          {analysis.services && analysis.services.length > 0 && (
+            <div className="border-t border-navy-800 pt-4 space-y-2">
+              <p className="text-xs font-bold text-ink">
+                Detected services{" "}
+                <span className="text-dim font-semibold">
+                  ({selectedServices.length} of {analysis.services.length} selected)
+                </span>
+              </p>
+              <p className="text-[11px] text-muted">
+                Only selected services are used in generated content. Deselect any false positives.
+              </p>
+              <div className="flex flex-wrap gap-1.5">
+                {analysis.services.map((s) => {
+                  const on = selectedServices.includes(s.name);
+                  return (
+                    <button
+                      key={s.name}
+                      type="button"
+                      onClick={() => toggleService(s.name)}
+                      title={`${s.pageCount} page(s): ${s.pages.slice(0, 3).join(", ")}`}
+                      className={`text-[11px] font-semibold rounded-lg px-2 py-1 border transition ${
+                        on
+                          ? "border-orange-500/60 bg-orange-950/30 text-orange-200"
+                          : "border-navy-700 bg-navy-900/40 text-muted"
+                      }`}
+                    >
+                      {on ? "✓ " : ""}
+                      {s.name}
+                      <span className="text-dim"> · {s.pageCount}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           <button
             type="button"
@@ -1312,6 +1674,12 @@ export default function ContentStudioPage() {
                   )}
                   Add missing images ({postsMissingImages})
                 </button>
+                {bgImageActive && (
+                  <span className="inline-flex items-center gap-1.5 text-xs font-bold text-dim px-3 py-2">
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    Generating images in the background…
+                  </span>
+                )}
               </div>
             )}
           </div>
@@ -1349,6 +1717,11 @@ export default function ContentStudioPage() {
                       onGenerateImage={(id) => handlePostImage(id, "generate")}
                       onClearImage={(id) => handlePostImage(id, "clear")}
                       onDownloadImage={(url, name) => downloadImage(url, name)}
+                      onRetryImage={handleRetryImage}
+                      onSaveEdit={handleSaveEdit}
+                      onDelete={handleDelete}
+                      onApplyOverlay={handleApplyOverlay}
+                      onRemoveOverlay={handleRemoveOverlay}
                     />
                   ))}
                 </div>
@@ -1542,6 +1915,216 @@ export default function ContentStudioPage() {
   );
 }
 
+/**
+ * Feature D — live title-overlay editor. The <canvas> preview is produced by
+ * the exact same code path as the exported JPEG, so what the user sees is what
+ * gets published. Compositing always uses the ORIGINAL source image
+ * (imageSourceUrl) so overlays stay non-destructive and re-editable.
+ */
+function TitleOverlayEditor({
+  post,
+  onApplyOverlay,
+  onRemoveOverlay,
+}: {
+  post: StudioPostRecord;
+  onApplyOverlay: (id: string, config: OverlayConfig, renderedImage: string) => Promise<void>;
+  onRemoveOverlay: (id: string) => Promise<void>;
+}) {
+  const sourceUrl = post.imageSourceUrl || post.image || "";
+  const hasOverlay = !!post.overlay;
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const imgRef = useRef<HTMLImageElement | null>(null);
+  const [imgReady, setImgReady] = useState(false);
+  const [open, setOpen] = useState(false);
+  const [applying, setApplying] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const [cfg, setCfg] = useState<OverlayDraftConfig>({
+    enabled: true,
+    title: post.overlay?.title || post.heading || "",
+    anchorPct: post.overlay?.anchorPct ?? OVERLAY_DEFAULTS.anchorPct,
+    fontSizePct: post.overlay?.fontSizePct ?? OVERLAY_DEFAULTS.fontSizePct,
+    color: post.overlay?.color ?? OVERLAY_DEFAULTS.color,
+    panel: post.overlay?.panel ?? OVERLAY_DEFAULTS.panel,
+    panelOpacity: post.overlay?.panelOpacity ?? OVERLAY_DEFAULTS.panelOpacity,
+  });
+
+  // Load the source image once (CORS-enabled so the canvas export is untainted).
+  useEffect(() => {
+    if (!open || !sourceUrl) return;
+    const img = new window.Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => {
+      imgRef.current = img;
+      setImgReady(true);
+    };
+    img.onerror = () => {
+      setError("Could not load the source image for overlay rendering.");
+      setImgReady(false);
+    };
+    img.src = sourceUrl;
+    return () => {
+      img.onload = null;
+      img.onerror = null;
+    };
+  }, [open, sourceUrl]);
+
+  // Redraw the preview whenever the config changes.
+  useEffect(() => {
+    if (!open || !imgReady || !imgRef.current || !canvasRef.current) return;
+    const img = imgRef.current;
+    const iw = img.naturalWidth || 1080;
+    const ih = img.naturalHeight || 1080;
+    const previewW = 300;
+    const previewH = Math.round(previewW * (ih / iw));
+    drawTitleOverlay(canvasRef.current, img, previewW, previewH, cfg.title || "", cfg);
+  }, [open, imgReady, cfg]);
+
+  const apply = async () => {
+    if (applying || !imgRef.current) return;
+    setApplying(true);
+    setError(null);
+    try {
+      const dataUrl = exportOverlayDataURL(imgRef.current, cfg.title || "", cfg);
+      if (!dataUrl) {
+        setError("This image can't be composited in the browser (cross-origin). Try regenerating it.");
+        return;
+      }
+      await onApplyOverlay(post.id, cfg as OverlayConfig, dataUrl);
+    } catch {
+      setError("Overlay failed — your original image is unchanged.");
+    } finally {
+      setApplying(false);
+    }
+  };
+
+  if (!sourceUrl) return null;
+
+  return (
+    <div className="rounded-xl border border-line bg-navy-800/40 p-3">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[11px] font-extrabold uppercase tracking-wide text-dim">
+          Title overlay
+        </span>
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          className="inline-flex items-center gap-1.5 text-[11px] font-bold text-accent border border-accent-border bg-accent-soft rounded-lg px-2.5 py-1.5"
+        >
+          <Type className="w-3.5 h-3.5" />
+          {open ? "Close" : hasOverlay ? "Edit overlay" : "Add title to image"}
+        </button>
+      </div>
+
+      {open && (
+        <div className="mt-3 flex flex-col md:flex-row gap-4">
+          <div className="shrink-0">
+            <canvas
+              ref={canvasRef}
+              className="rounded-lg border border-line max-w-[300px] w-[300px] h-auto bg-navy-900"
+            />
+            {!imgReady && !error && (
+              <p className="text-[10px] text-dim mt-1">Loading preview…</p>
+            )}
+          </div>
+
+          <div className="flex-1 flex flex-col gap-2.5 min-w-0">
+            <label className="flex flex-col gap-1">
+              <span className="text-[10px] font-bold text-dim">Title text</span>
+              <input
+                type="text"
+                value={cfg.title || ""}
+                onChange={(e) => setCfg((c) => ({ ...c, title: e.target.value }))}
+                className="w-full text-[12px] border border-line bg-white rounded-lg px-2.5 py-1.5 text-ink"
+                placeholder="Short headline (not the full caption)"
+              />
+            </label>
+
+            <label className="flex flex-col gap-1">
+              <span className="text-[10px] font-bold text-dim">
+                Vertical position ({Math.round((cfg.anchorPct ?? 0.59) * 100)}% from top)
+              </span>
+              <input
+                type="range"
+                min={35}
+                max={85}
+                value={Math.round((cfg.anchorPct ?? 0.59) * 100)}
+                onChange={(e) =>
+                  setCfg((c) => ({ ...c, anchorPct: Number(e.target.value) / 100 }))
+                }
+              />
+            </label>
+
+            <div className="flex items-center gap-3 flex-wrap">
+              <label className="flex flex-col gap-1 flex-1 min-w-[120px]">
+                <span className="text-[10px] font-bold text-dim">
+                  Font size ({Math.round((cfg.fontSizePct ?? 0.062) * 100)}%)
+                </span>
+                <input
+                  type="range"
+                  min={40}
+                  max={100}
+                  value={Math.round((cfg.fontSizePct ?? 0.062) * 1000)}
+                  onChange={(e) =>
+                    setCfg((c) => ({ ...c, fontSizePct: Number(e.target.value) / 1000 }))
+                  }
+                />
+              </label>
+              <label className="flex items-center gap-1.5">
+                <span className="text-[10px] font-bold text-dim">Color</span>
+                <input
+                  type="color"
+                  value={cfg.color || "#ffffff"}
+                  onChange={(e) => setCfg((c) => ({ ...c, color: e.target.value }))}
+                  className="w-7 h-7 rounded border border-line bg-transparent"
+                />
+              </label>
+              <label className="flex items-center gap-1.5">
+                <input
+                  type="checkbox"
+                  checked={cfg.panel ?? true}
+                  onChange={(e) => setCfg((c) => ({ ...c, panel: e.target.checked }))}
+                />
+                <span className="text-[10px] font-bold text-dim">Contrast panel</span>
+              </label>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2 mt-1">
+              <button
+                type="button"
+                disabled={applying || !imgReady || !(cfg.title || "").trim()}
+                onClick={apply}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-[10px] bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold disabled:opacity-50"
+              >
+                {applying ? (
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Check className="w-3.5 h-3.5" />
+                )}
+                Apply overlay
+              </button>
+              {hasOverlay && (
+                <button
+                  type="button"
+                  disabled={applying}
+                  onClick={() => onRemoveOverlay(post.id)}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-[10px] border border-line text-muted text-xs font-bold hover:bg-navy-800 disabled:opacity-50"
+                >
+                  <X className="w-3.5 h-3.5" />
+                  Remove overlay
+                </button>
+              )}
+              {error && (
+                <span className="text-[11px] font-bold text-red-500">{error}</span>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function PostListRow({
   post,
   expanded,
@@ -1555,6 +2138,11 @@ function PostListRow({
   onGenerateImage,
   onClearImage,
   onDownloadImage,
+  onRetryImage,
+  onSaveEdit,
+  onDelete,
+  onApplyOverlay,
+  onRemoveOverlay,
 }: {
   post: StudioPostRecord;
   expanded: boolean;
@@ -1568,9 +2156,45 @@ function PostListRow({
   onGenerateImage: (id: string) => void;
   onClearImage: (id: string) => void;
   onDownloadImage: (url: string, filename: string) => void;
+  onRetryImage: (id: string) => void;
+  onSaveEdit: (id: string, content: string, heading: string) => Promise<StudioPostRecord | null>;
+  onDelete: (id: string) => void;
+  onApplyOverlay: (id: string, config: OverlayConfig, renderedImage: string) => Promise<void>;
+  onRemoveOverlay: (id: string) => Promise<void>;
 }) {
   const [scheduleDate, setScheduleDate] = useState("");
   const [showPicker, setShowPicker] = useState(false);
+
+  // Feature A — local edit buffer. Seeded from the post; a monotonic save
+  // counter guards against a stale response overwriting a newer edit.
+  const [editHeading, setEditHeading] = useState(post.heading || "");
+  const [editContent, setEditContent] = useState(post.content || "");
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
+  const saveSeqRef = useRef(0);
+  // Re-seed the buffer only when a different post is shown or the server copy
+  // changes while there are no unsaved local edits.
+  const seededForRef = useRef<string>("");
+  useEffect(() => {
+    const sig = `${post.id}:${post.updatedAt || ""}`;
+    const dirty =
+      editHeading !== (post.heading || "") || editContent !== (post.content || "");
+    if (seededForRef.current !== sig && !dirty) {
+      setEditHeading(post.heading || "");
+      setEditContent(post.content || "");
+      seededForRef.current = sig;
+    } else if (!seededForRef.current) {
+      seededForRef.current = sig;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [post.id, post.updatedAt]);
+
+  const dirty =
+    editHeading !== (post.heading || "") || editContent !== (post.content || "");
+
+  // Feature B — two-step delete confirmation guards against accidental clicks.
+  const [confirmDelete, setConfirmDelete] = useState(false);
+
   const locked = !!(post.publishLocked || (post.status === "published" && post.locked));
   const words =
     post.wordCount || countWords(post.contentHtml || post.content);
@@ -1628,6 +2252,32 @@ function PostListRow({
 
   const ghostBtn =
     "inline-flex items-center gap-1.5 px-3.5 py-2 rounded-[10px] bg-transparent border border-line text-muted text-xs font-bold hover:bg-navy-800 disabled:opacity-50";
+
+  const handleSaveDraft = async () => {
+    if (savingEdit || !dirty) return; // duplicate-click + no-op guard
+    setSavingEdit(true);
+    setEditError(null);
+    const seq = ++saveSeqRef.current;
+    try {
+      await onSaveEdit(post.id, editContent, editHeading);
+      // Ignore a response that is no longer the latest in-flight save.
+      if (seq !== saveSeqRef.current) return;
+    } catch (err) {
+      if (seq === saveSeqRef.current) {
+        setEditError(
+          isApiError(err) ? err.error : "Could not save — your edits are kept, try again."
+        );
+      }
+    } finally {
+      if (seq === saveSeqRef.current) setSavingEdit(false);
+    }
+  };
+
+  const handleDiscard = () => {
+    setEditHeading(post.heading || "");
+    setEditContent(post.content || "");
+    setEditError(null);
+  };
 
   return (
     <div
@@ -1709,6 +2359,24 @@ function PostListRow({
                 e.currentTarget.style.display = "none";
               }}
             />
+          ) : post.imageStatus === "pending" ? (
+            <div className="flex flex-col items-center gap-1 text-dim px-1 text-center">
+              <RefreshCw className="w-4 h-4 animate-spin" />
+              <span className="font-mono text-[9px] leading-tight">Generating image…</span>
+            </div>
+          ) : post.imageStatus === "failed" ? (
+            <div className="flex flex-col items-center gap-1 px-1 text-center">
+              <span className="font-mono text-[9px] leading-tight text-red-500">Image failed</span>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => onRetryImage(post.id)}
+                className="inline-flex items-center gap-1 text-[9px] font-bold text-accent border border-accent-border rounded px-1.5 py-0.5 disabled:opacity-50"
+              >
+                {imageBusy ? <RefreshCw className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
+                Retry
+              </button>
+            </div>
           ) : (
             <span className="font-mono text-[10px] text-dim">
               {sizeLabel.split(" · ")[0]}
@@ -1716,6 +2384,39 @@ function PostListRow({
           )}
         </div>
       </div>
+
+      {/* CTA — shows the REAL link capability, never a fake clickable phrase */}
+      {post.ctaInfo && post.ctaInfo.linkCapability !== "none" && (
+        <div className="flex flex-wrap items-center gap-2 text-[11px]">
+          <span className="font-bold text-muted">CTA:</span>
+          <span className="px-2 py-0.5 rounded-md bg-navy-800 border border-line text-ink font-semibold">
+            {post.ctaInfo.ctaText}
+            {post.ctaInfo.ctaType && post.ctaInfo.linkCapability === "native_button"
+              ? ` · ${post.ctaInfo.ctaType}`
+              : ""}
+          </span>
+          {post.ctaInfo.linkCapability === "native_button" ? (
+            post.ctaInfo.validationStatus === "valid" ? (
+              <span className="inline-flex items-center gap-1 text-[#16a34a] font-semibold">
+                <LinkIcon className="w-3 h-3" /> Native button
+                {post.ctaInfo.destinationUrl ? ` → ${hostOf(post.ctaInfo.destinationUrl)}` : ""}
+              </span>
+            ) : (
+              <span className="text-amber-600 font-semibold">No valid destination — button disabled</span>
+            )
+          ) : post.ctaInfo.linkCapability === "profile_link" ? (
+            <span className="text-dim font-semibold">Not clickable in caption — use profile link</span>
+          ) : post.ctaInfo.linkCapability === "body_link" ? (
+            post.ctaInfo.validationStatus === "valid" ? (
+              <span className="inline-flex items-center gap-1 text-[#16a34a] font-semibold">
+                <LinkIcon className="w-3 h-3" /> Clickable link → {hostOf(post.ctaInfo.destinationUrl)}
+              </span>
+            ) : (
+              <span className="text-amber-600 font-semibold">No valid link destination</span>
+            )
+          ) : null}
+        </div>
+      )}
 
       {/* Actions */}
       <div className="flex flex-wrap items-center gap-2.5">
@@ -1829,11 +2530,131 @@ function PostListRow({
             </button>
           </>
         )}
+
+        {/* Feature B/C — delete / cancel (two-step confirm, scheduled-aware) */}
+        <div className="ml-auto flex items-center gap-2">
+          {confirmDelete ? (
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] font-bold text-muted">
+                {post.status === "scheduled"
+                  ? "Cancel future publishing & delete?"
+                  : post.status === "published"
+                    ? "Remove from library? (won't delete the live post)"
+                    : "Delete this post?"}
+              </span>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => {
+                  setConfirmDelete(false);
+                  onDelete(post.id);
+                }}
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-[10px] bg-red-600 hover:bg-red-700 text-white text-xs font-bold disabled:opacity-50"
+              >
+                {actionBusy ? (
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Trash2 className="w-3.5 h-3.5" />
+                )}
+                {post.status === "scheduled" ? "Cancel & delete" : "Delete"}
+              </button>
+              <button
+                type="button"
+                onClick={() => setConfirmDelete(false)}
+                className={ghostBtn}
+              >
+                Keep
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => setConfirmDelete(true)}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-[10px] bg-transparent border border-line text-red-500 text-xs font-bold hover:bg-red-50 disabled:opacity-50"
+              title={
+                post.status === "scheduled"
+                  ? "Cancel scheduling and delete this post"
+                  : "Delete this post"
+              }
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              Delete
+            </button>
+          )}
+        </div>
       </div>
 
-      {/* Expanded tools: image, keywords, validation */}
+      {/* Expanded tools: content editor, image + overlay, keywords, validation */}
       {expanded && !locked && (
         <div className="border-t border-line pt-4 flex flex-col gap-3">
+          {/* Feature A — edit the post content before submitting/publishing */}
+          <div className="flex flex-col gap-2">
+            {isGMB && (
+              <label className="flex flex-col gap-1">
+                <span className="text-[10px] font-extrabold uppercase tracking-wide text-dim">
+                  Headline
+                </span>
+                <input
+                  type="text"
+                  value={editHeading}
+                  onChange={(e) => setEditHeading(e.target.value)}
+                  className="w-full text-[13px] border border-line bg-white rounded-lg px-3 py-2 text-ink"
+                  placeholder="Post headline"
+                />
+              </label>
+            )}
+            <label className="flex flex-col gap-1">
+              <span className="text-[10px] font-extrabold uppercase tracking-wide text-dim">
+                {isGMB ? "Post body" : "Caption / body"}
+              </span>
+              <textarea
+                value={editContent}
+                onChange={(e) => setEditContent(e.target.value)}
+                rows={6}
+                className="w-full text-[13px] leading-[1.6] border border-line bg-white rounded-lg px-3 py-2 text-ink resize-y font-sans"
+                placeholder="Write the post content…"
+              />
+            </label>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                disabled={savingEdit || !dirty}
+                onClick={handleSaveDraft}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-[10px] bg-accent text-white text-xs font-bold disabled:opacity-50"
+              >
+                {savingEdit ? (
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Check className="w-3.5 h-3.5" />
+                )}
+                {savingEdit ? "Saving…" : dirty ? "Save draft" : "Saved"}
+              </button>
+              {dirty && (
+                <button type="button" onClick={handleDiscard} className={ghostBtn}>
+                  Discard changes
+                </button>
+              )}
+              <span className="text-[10px] text-dim font-semibold">
+                {isGMB
+                  ? `${editContent.length} chars`
+                  : `${countWords(editContent)} words`}
+              </span>
+              {editError && (
+                <span className="text-[11px] font-bold text-red-500">{editError}</span>
+              )}
+            </div>
+          </div>
+
+          {/* Feature D — title overlay editor with a live preview (preview == export) */}
+          {post.image && (
+            <TitleOverlayEditor
+              post={post}
+              onApplyOverlay={onApplyOverlay}
+              onRemoveOverlay={onRemoveOverlay}
+            />
+          )}
+
           <div className="flex flex-wrap gap-2">
             <button
               type="button"

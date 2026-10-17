@@ -39,7 +39,13 @@ import {
   attachImagesToStudioPosts,
   TONE_PRESETS,
   updateStudioPostContent,
+  deleteStudioPost,
+  applyStudioImageOverlay,
   getGmbRulesCatalog,
+  getStudioSelection,
+  saveStudioSelection,
+  listUserJobs,
+  retryImageJob,
 } from "../services/autoPosterService.js";
 import {
   syncSheetOnly,
@@ -382,6 +388,7 @@ router.post("/auto-poster/generate", async (req, res) => {
       platforms,
       websiteUrl,
       gmbCategory,
+      deferImages,
     } = req.body;
     if (!email) return res.status(400).json({ error: "email is required" });
     const gate = assertSessionMatchesEmail(req, email);
@@ -399,6 +406,9 @@ router.post("/auto-poster/generate", async (req, res) => {
       platforms,
       websiteUrl,
       gmbCategory,
+      // Default to deferred (non-blocking) image generation unless the client
+      // explicitly opts into the legacy inline path.
+      deferImages: deferImages !== false,
     });
     if (!result.ok) return res.status(result.status || 400).json(result);
     res.json(result);
@@ -431,7 +441,7 @@ router.post("/auto-poster/validate", async (req, res) => {
 
 router.post("/auto-poster/analyze-website", async (req, res) => {
   try {
-    const { email, workspaceId, websiteUrl, location, maxPages } = req.body;
+    const { email, workspaceId, websiteUrl, location, maxPages, forceRefresh } = req.body;
     if (!email) return res.status(400).json({ error: "email is required" });
     if (!websiteUrl || !String(websiteUrl).trim()) {
       return res.status(400).json({ error: "websiteUrl is required" });
@@ -444,11 +454,53 @@ router.post("/auto-poster/analyze-website", async (req, res) => {
       websiteUrl,
       location,
       maxPages,
+      forceRefresh: forceRefresh === true || forceRefresh === "true",
     });
     if (!result.ok) return res.status(result.status || 400).json(result);
     res.json(result);
   } catch (err) {
     console.error("[auto-poster/analyze-website]", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/** Persistent Sitemap / Pages Selection — load the saved inventory + choices */
+router.get("/auto-poster/selection", async (req, res) => {
+  try {
+    const email = req.query.email;
+    if (!email) return res.status(400).json({ error: "email is required" });
+    const gate = assertSessionMatchesEmail(req, email);
+    if (!gate.ok) return res.status(gate.status).json({ error: gate.error });
+    const result = await getStudioSelection({
+      email,
+      workspaceId: req.query.workspaceId || undefined,
+      websiteUrl: req.query.websiteUrl,
+    });
+    if (!result.ok) return res.status(result.status || 400).json(result);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/** Persist the user's page/service selection (validated server-side) */
+router.post("/auto-poster/selection", async (req, res) => {
+  try {
+    const { email, workspaceId, websiteUrl, selectedUrls, selectedServices } = req.body || {};
+    if (!email) return res.status(400).json({ error: "email is required" });
+    const gate = assertSessionMatchesEmail(req, email);
+    if (!gate.ok) return res.status(gate.status).json({ error: gate.error });
+    const result = await saveStudioSelection({
+      email,
+      workspaceId,
+      websiteUrl,
+      selectedUrls,
+      selectedServices,
+    });
+    if (!result.ok) return res.status(result.status || 400).json(result);
+    res.json(result);
+  } catch (err) {
+    console.error("[auto-poster/selection]", err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -587,6 +639,50 @@ router.post("/auto-poster/unschedule", async (req, res) => {
   }
 });
 
+/** Feature B — delete / cancel a post (status-aware, race-safe, scoped by owner) */
+router.post("/auto-poster/delete", async (req, res) => {
+  try {
+    const { email, postId } = req.body;
+    if (!email || !postId) {
+      return res.status(400).json({ error: "email and postId are required" });
+    }
+    const gate = assertSessionMatchesEmail(req, email);
+    if (!gate.ok) return res.status(gate.status).json({ error: gate.error });
+    const result = await deleteStudioPost({ email, postId });
+    if (!result.ok) return res.status(result.status || 400).json(result);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * Feature D — apply / remove a professional title overlay on a post image.
+ * The browser sends the composited image as a JPEG data URL (preview == export),
+ * kept comfortably under the global 2 MB body limit.
+ */
+router.post("/auto-poster/post-image/overlay", async (req, res) => {
+  try {
+    const { email, postId, overlayConfig, renderedImage, removeOverlay } = req.body;
+    if (!email || !postId) {
+      return res.status(400).json({ error: "email and postId are required" });
+    }
+    const gate = assertSessionMatchesEmail(req, email);
+    if (!gate.ok) return res.status(gate.status).json({ error: gate.error });
+    const result = await applyStudioImageOverlay({
+      email,
+      postId,
+      overlayConfig,
+      renderedImage,
+      removeOverlay: removeOverlay === true || removeOverlay === "true",
+    });
+    if (!result.ok) return res.status(result.status || 400).json(result);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.post("/auto-poster/rewrite", async (req, res) => {
   try {
     const { email, postId, tone, includeImages, imageSource, gmbCategory } = req.body;
@@ -651,6 +747,38 @@ router.post("/auto-poster/attach-images", async (req, res) => {
     res.json(result);
   } catch (err) {
     console.error("[auto-poster/attach-images]", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/** Batch 5 — durable job status for the signed-in user (scoped, no secrets) */
+router.get("/auto-poster/jobs", async (req, res) => {
+  try {
+    const { email, status, workspaceId } = req.query;
+    if (!email) return res.status(400).json({ error: "email is required" });
+    const gate = assertSessionMatchesEmail(req, email);
+    if (!gate.ok) return res.status(gate.status).json({ error: gate.error });
+    const result = await listUserJobs({ email, status, workspaceId });
+    if (!result.ok) return res.status(result.status || 400).json(result);
+    res.json(result);
+  } catch (err) {
+    console.error("[auto-poster/jobs]", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/** Batch 5 — re-arm a post's durable image job (retry control, scoped) */
+router.post("/auto-poster/jobs/retry-image", async (req, res) => {
+  try {
+    const { email, postId } = req.body;
+    if (!email || !postId) return res.status(400).json({ error: "email and postId are required" });
+    const gate = assertSessionMatchesEmail(req, email);
+    if (!gate.ok) return res.status(gate.status).json({ error: gate.error });
+    const result = await retryImageJob({ email, postId });
+    if (!result.ok) return res.status(result.status || 400).json(result);
+    res.json(result);
+  } catch (err) {
+    console.error("[auto-poster/jobs/retry-image]", err);
     res.status(500).json({ error: err.message });
   }
 });

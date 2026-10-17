@@ -7,7 +7,17 @@
  * - Publish lock, schedule, rewrite
  */
 import crypto from "crypto";
-import { callOpenRouter, generateImage, sanitizeEnglishPost } from "../openrouter.js";
+import {
+  callOpenRouter,
+  generateImage,
+  sanitizeEnglishPost,
+  persistImageUrl,
+} from "../openrouter.js";
+import {
+  computeOverlayLayout,
+  buildOverlaySvg,
+  normalizeOverlayConfig,
+} from "./imageOverlay.js";
 import { resolveActiveWorkspace } from "./workspaceService.js";
 import { publishContent } from "./publishService.js";
 import {
@@ -15,7 +25,23 @@ import {
   discoverSitemapUrls,
   urlPriority,
 } from "./siteAnalyzer.js";
+import {
+  safeFetchText,
+  mapWithConcurrency,
+  assertSafeUrl,
+  cacheGet,
+  cacheSet,
+  cacheStats,
+} from "./crawlUtils.js";
+import {
+  persistInventory,
+  getSelection,
+  saveSelection,
+  getSelectedForGeneration,
+} from "./pageSelectionService.js";
 import { selectBestStudioProviders } from "./studioProviderRouter.js";
+import { enqueueJob, registerJobHandler } from "./jobQueue.js";
+import { buildCta, buildGbpCallToAction } from "./ctaEngine.js";
 import {
   resolveFreeImage,
   freeImageRateLimitPause,
@@ -43,6 +69,22 @@ import {
   uiCatalog as gmbUiCatalog,
 } from "../content/gmbContentRules.js";
 import { validateGmbPost, validateSocialPost } from "../content/gmbValidator.js";
+import {
+  varyOpening,
+  replaceCliches,
+  stripRoboticTransitions,
+  reduceKeywordStuffing,
+  scoreNaturalness,
+} from "../content/naturalWriting.js";
+import { scrubForeignIdentity } from "../content/identityIsolation.js";
+import { getBrandVoice, buildVoicePromptBlock } from "./brandVoice.js";
+import { findRecentSimilar, findMostSimilar } from "./similarityService.js";
+import { createTimer, aggregateSummaries } from "./metrics.js";
+import {
+  countText as policyCountText,
+  validateHashtags as policyValidateHashtags,
+  policyFreshness,
+} from "../content/platformPolicy.js";
 
 async function stampPostActivity(userId, platform) {
   const data =
@@ -53,9 +95,52 @@ async function stampPostActivity(userId, platform) {
 }
 
 const FETCH_TIMEOUT_MS = Number(process.env.SITE_FETCH_TIMEOUT_MS || 10000);
-const MAX_URLS = 15;
-const USER_AGENT =
-  "Mozilla/5.0 (compatible; AvonixSocialBot/1.0; +https://social.avonixai.com)";
+// Fan-out cap for POST GENERATION (platforms × pages ⇒ credits). Kept modest
+// but configurable; this is NOT the analysis cap.
+const MAX_URLS = Number(process.env.STUDIO_MAX_GENERATE_PAGES || 15);
+// Pages the ANALYSIS stage will crawl. This is the number that used to be
+// wrongly pinned to 15; a 143-page site must be fully analysable.
+const MAX_ANALYZE_URLS = Number(process.env.STUDIO_MAX_ANALYZE_PAGES || 150);
+// Bounded concurrency for the per-page crawl/analyze stage.
+const ANALYZE_CONCURRENCY = Number(process.env.STUDIO_ANALYZE_CONCURRENCY || 8);
+// TTL for a cached whole-site analysis (ms).
+const ANALYSIS_CACHE_TTL_MS = Number(process.env.STUDIO_ANALYSIS_CACHE_TTL_MS || 15 * 60 * 1000);
+
+// ── Batch 4: duplicate-generation guard ──────────────────────────────────
+// A single generation can take many seconds (AI text per page × platforms).
+// A double-click / retry / impatient refresh must NOT spawn a second parallel
+// run that creates duplicate drafts. We hold a short-lived in-flight lock
+// keyed by the exact request shape; a concurrent duplicate is rejected with
+// 409 instead of racing. (Durable cross-process jobs are Batch 5.)
+const GENERATE_INFLIGHT = new Map(); // key -> startedAt (ms)
+const GENERATE_INFLIGHT_TTL_MS = Number(process.env.STUDIO_GENERATE_LOCK_TTL_MS || 2 * 60 * 1000);
+
+export function buildGenerateKey({ userId, wid, genOrigin, platforms, urls, prePages }) {
+  const pageSig = Array.isArray(prePages) && prePages.length
+    ? prePages.map((p) => p.url).sort().join(",")
+    : Array.isArray(urls)
+      ? [...urls].sort().join(",")
+      : "";
+  return [
+    userId,
+    wid || "",
+    genOrigin || "",
+    [...(platforms || [])].sort().join("+"),
+    pageSig,
+  ].join("::");
+}
+
+export function acquireGenerateLock(key) {
+  const now = Date.now();
+  const existing = GENERATE_INFLIGHT.get(key);
+  if (existing && now - existing < GENERATE_INFLIGHT_TTL_MS) return false;
+  GENERATE_INFLIGHT.set(key, now);
+  return true;
+}
+
+export function releaseGenerateLock(key) {
+  GENERATE_INFLIGHT.delete(key);
+}
 
 export const TONE_PRESETS = [
   "Professional",
@@ -290,22 +375,19 @@ export function websiteOriginFromUrl(input) {
   }
 }
 
+/**
+ * SSRF-safe HTML fetch. Returns the response body, or null with the failure
+ * reason exposed via the second element for accurate stats.
+ */
 async function fetchText(url) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
-  try {
-    const res = await fetch(url, {
-      signal: controller.signal,
-      headers: { "User-Agent": USER_AGENT, Accept: "text/html,*/*" },
-      redirect: "follow",
-    });
-    if (!res.ok) return null;
-    return await res.text();
-  } catch {
-    return null;
-  } finally {
-    clearTimeout(timer);
-  }
+  const res = await safeFetchText(url, { timeoutMs: FETCH_TIMEOUT_MS, accept: "text/html,*/*" });
+  return res.ok ? res.text : null;
+}
+
+/** Like fetchText but returns { html, reason } so callers can record failures. */
+async function fetchHtmlDetailed(url) {
+  const res = await safeFetchText(url, { timeoutMs: FETCH_TIMEOUT_MS, accept: "text/html,*/*" });
+  return res.ok ? { html: res.text, reason: null } : { html: null, reason: res.reason };
 }
 
 function tagText(html, tag) {
@@ -742,6 +824,102 @@ function stripTags(text) {
     .trim();
 }
 
+/**
+ * P1 — split a finalized social caption into its editorial BODY and its
+ * trailing TAIL (CTA line + URL + hashtag line). Humanization must only touch
+ * the body so the CTA/URL/hashtags the platform depends on are never mangled.
+ */
+const CTA_OPENER_RE =
+  /^(discover more|see how|explore options|explore how|want the details|ready to|compare how|compare options|see the full|ready to talk|save this|link in|get the details|read the full)/i;
+
+function splitBodyTail(content) {
+  const paras = String(content || "").split(/\n{2,}/);
+  let tailStart = paras.length;
+  for (let i = 0; i < paras.length; i++) {
+    const p = paras[i].trim();
+    if (/https?:\/\//i.test(p) || /^#/.test(p) || CTA_OPENER_RE.test(p)) {
+      tailStart = i;
+      break;
+    }
+  }
+  return {
+    body: paras.slice(0, tailStart).join("\n\n"),
+    tail: paras.slice(tailStart).join("\n\n"),
+  };
+}
+
+/**
+ * P1 — natural-writing + identity-isolation polish for a non-GMB caption.
+ * Removes foreign-identity leakage, strips the owner's personal name, and
+ * humanizes the body (vary generic openings, drop clichés + robotic
+ * transitions, reduce keyword stuffing) WITHOUT changing the CTA/URL/hashtags
+ * and WITHOUT dropping below the platform's minimum word floor.
+ */
+function polishSocialCopy(
+  content,
+  { platform, keywords = {}, origin = null, foreignNames = [], ownerName = "", seed = "", minWords = 0 } = {}
+) {
+  let text = scrubForeignIdentity(String(content || ""), { ownOrigin: origin, foreignNames });
+  if (ownerName) text = stripOwnerNameFromContent(text, ownerName);
+
+  const { body, tail } = splitBodyTail(text);
+  const secondaryKeywords =
+    keywords.secondaryKeywords || keywords.general || (keywords.secondary ? [keywords.secondary] : []);
+
+  // Length-SAFE transforms first (these roughly preserve word count): vary a
+  // generic opening, drop clichés + robotic transitions. These always apply so
+  // a templated opening is never left in place.
+  let safeBody = replaceCliches(body);
+  safeBody = stripRoboticTransitions(safeBody);
+  safeBody = varyOpening(safeBody, { topic: keywords.primary || "", seed });
+
+  // Aggressive transform (may shorten): reduce keyword stuffing. Only keep it if
+  // it does not push the body below the platform's SEO word floor.
+  let reducedBody = safeBody;
+  for (const ph of [keywords.primary, ...secondaryKeywords].filter(Boolean)) {
+    reducedBody = reduceKeywordStuffing(reducedBody, ph);
+  }
+  const chosenBody =
+    minWords && countWords(reducedBody) < minWords && countWords(safeBody) >= minWords
+      ? safeBody
+      : reducedBody;
+
+  return (tail ? `${chosenBody}\n\n${tail}` : chosenBody).trim();
+}
+
+/**
+ * P1 — apply the social polish to a generation result and refresh its derived
+ * fields + naturalness score. No-op for GMB (handled in its own pipeline) and
+ * for falsy results.
+ */
+function finalizeNonGmbResult(res, ctx) {
+  if (!res || ctx.platform === "GMB" || res.error) return res;
+  const cfg = PLATFORM_CONFIG[ctx.platform] || PLATFORM_CONFIG.Facebook;
+  let content = polishSocialCopy(res.content, {
+    platform: ctx.platform,
+    keywords: ctx.keywords,
+    origin: ctx.origin,
+    foreignNames: ctx.foreignNames,
+    ownerName: ctx.ownerName,
+    seed: ctx.seed,
+    minWords: cfg.minWords,
+  });
+  if (ctx.platform === "X" && cfg.maxChars && countChars(content) > cfg.maxChars) {
+    const sliced = content.slice(0, cfg.maxChars);
+    const cut = sliced.lastIndexOf(" ");
+    content = (cut > 0 ? sliced.slice(0, cut) : sliced).trim();
+  }
+  const naturalness = scoreNaturalness(content, { keywords: ctx.keywords });
+  return {
+    ...res,
+    content,
+    contentHtml: plainToPreviewHtml(content),
+    wordCount: countWords(content),
+    charCount: countChars(content),
+    validation: { ...(res.validation || {}), naturalness },
+  };
+}
+
 export function countWords(text) {
   const plain = stripTags(text);
   if (!plain) return 0;
@@ -779,9 +957,53 @@ function packKeywordPack(keywords, meta = {}) {
   });
 }
 
-async function resolveBusinessContext(userId, workspaceId, workspace) {
+/**
+ * Normalize a human name for comparison (lowercase, collapse whitespace).
+ */
+function normalizeName(s) {
+  return String(s || "").trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+/**
+ * Remove the authenticated account owner's personal name from generated copy.
+ * The owner is the app user, NOT the business's verified provider — their name
+ * must never appear in marketing content unless the website independently
+ * verifies it (which we do not assume here). Defense-in-depth against the model
+ * echoing a name that leaked in through context.
+ */
+export function stripOwnerNameFromContent(text, ownerName) {
+  const owner = String(ownerName || "").trim();
+  if (!text || owner.length < 3) return text;
+  let out = String(text);
+  const variants = new Set([owner]);
+  const parts = owner.split(/\s+/).filter(Boolean);
+  if (parts.length >= 2) variants.add(parts.join(" "));
+  // Also strip distinctive individual name tokens (length >= 5) so a lone
+  // first/last name of the OWNER cannot slip through (e.g. "Mostafij's clinic").
+  // Short, common tokens (<5) are left alone to avoid over-stripping.
+  for (const part of parts) {
+    if (part.length >= 5) variants.add(part);
+  }
+  // Longest-first so full-name variants are removed before partials.
+  const ordered = [...variants].sort((a, b) => b.length - a.length);
+  for (const v of ordered) {
+    if (v.length < 3) continue;
+    const esc = v.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    // Remove possessive and plain occurrences, tidy leftover punctuation/space.
+    out = out.replace(new RegExp(`\\b${esc}'?s?\\b[,:;\\-]?\\s*`, "gi"), "");
+  }
+  return out.replace(/\s{2,}/g, " ").replace(/\s+([.,!?])/g, "$1").trim();
+}
+
+async function resolveBusinessContext(userId, workspaceId, workspace, ownerName = "") {
+  const owner = normalizeName(ownerName);
+  // The business name must come from a VERIFIED source (an explicit workspace
+  // business name or GBP), never the account owner's personal name.
+  const workspaceName = String(workspace?.name || "").trim();
+  const workspaceNameIsOwner = owner && normalizeName(workspaceName) === owner;
   const business = {
-    name: workspace?.name || "",
+    name: workspaceNameIsOwner ? "" : workspaceName,
+    nameVerified: false,
     address: workspace?.address || "",
     city: workspace?.location || "",
     phone: "",
@@ -804,7 +1026,12 @@ async function resolveBusinessContext(userId, workspaceId, workspace) {
       } catch {
         meta = {};
       }
-      business.name = meta.locationName || gbp.accountName || business.name;
+      const verifiedName = meta.locationName || meta.locationTitle || gbp.accountName || "";
+      // A GBP-verified name is authoritative — but still never the owner's name.
+      if (verifiedName && normalizeName(verifiedName) !== owner) {
+        business.name = verifiedName;
+        business.nameVerified = true;
+      }
       business.address = meta.address || meta.formattedAddress || business.address;
       business.phone = meta.phone || meta.primaryPhone || business.phone;
       business.hours = meta.hours || meta.regularHours || business.hours;
@@ -813,6 +1040,122 @@ async function resolveBusinessContext(userId, workspaceId, workspace) {
     /* optional */
   }
   return business;
+}
+
+/**
+ * P1 — names of OTHER businesses the same user manages (sibling workspaces +
+ * other connected GBP locations), so identity isolation can scrub a foreign
+ * business name that might leak into this website's copy. The CURRENT business
+ * name / workspace is always excluded.
+ */
+async function resolveForeignBusinessNames(userId, currentWorkspaceId, currentBusinessName = "") {
+  if (!userId) return [];
+  const current = normalizeName(currentBusinessName);
+  const names = new Set();
+  try {
+    const workspaces = await prisma.clientWorkspace.findMany({
+      where: { userId, ...(currentWorkspaceId ? { id: { not: currentWorkspaceId } } : {}) },
+      select: { name: true },
+    });
+    for (const w of workspaces) {
+      const n = String(w.name || "").trim();
+      if (n.length >= 3 && normalizeName(n) !== current) names.add(n);
+    }
+    const accounts = await prisma.connectedAccount.findMany({
+      where: {
+        userId,
+        provider: "google_business",
+        ...(currentWorkspaceId ? { workspaceId: { not: currentWorkspaceId } } : {}),
+      },
+      select: { accountName: true, metadata: true },
+    });
+    for (const a of accounts) {
+      let meta = {};
+      try {
+        meta = a.metadata ? JSON.parse(a.metadata) : {};
+      } catch {
+        meta = {};
+      }
+      const n = String(meta.locationTitle || meta.locationName || a.accountName || "").trim();
+      if (n.length >= 3 && normalizeName(n) !== current) names.add(n);
+    }
+  } catch {
+    /* non-fatal — isolation still covers URLs/domains + owner name */
+  }
+  return [...names];
+}
+
+/**
+ * P1 — generate one post, then compare it against RECENT posts for the same
+ * website + platform and revise ONLY when meaningful duplication is detected.
+ * Similarity + optional revision + per-stage timing are recorded on the result.
+ */
+async function generatePostWithDedup({ platform, keywords, location, url, tone, options, dedup = {} }) {
+  const timer = createTimer(`gen:${platform}`);
+  let postData = await generatePostContentWithAi(platform, keywords, location, url, tone, options);
+  timer.mark("ai_text");
+  if (postData?.error) {
+    postData.__timing = timer.end();
+    return postData;
+  }
+
+  let sim = { duplicate: false, maxScore: 0, mostSimilar: null, comparedCount: 0 };
+  if (dedup.userId && postData.content) {
+    try {
+      sim = await findRecentSimilar({
+        userId: dedup.userId,
+        workspaceId: dedup.workspaceId,
+        websiteOrigin: dedup.websiteOrigin,
+        platform,
+        content: postData.content,
+      });
+    } catch (err) {
+      console.error("[generatePostWithDedup similarity]", err.message);
+    }
+  }
+  timer.mark("similarity");
+
+  let revised = false;
+  if (
+    sim.duplicate &&
+    platform !== "GMB" &&
+    options.writingModel &&
+    process.env.OPENROUTER_API_KEY
+  ) {
+    try {
+      const retry = await generatePostContentWithAi(platform, keywords, location, url, tone, {
+        ...options,
+        avoidSample: sim.mostSimilar?.content,
+      });
+      if (retry && !retry.error) {
+        const after = findMostSimilar(
+          retry.content,
+          sim.mostSimilar ? [sim.mostSimilar] : []
+        );
+        if (after.maxScore < sim.maxScore) {
+          postData = retry;
+          revised = true;
+          sim.maxScore = after.maxScore;
+        }
+      }
+    } catch (err) {
+      console.error("[generatePostWithDedup revise]", err.message);
+    }
+    timer.mark("dedup_revise");
+  }
+
+  postData.validation = {
+    ...(postData.validation || {}),
+    similarity: {
+      maxScore: Math.round(sim.maxScore * 1000) / 1000,
+      duplicate: sim.duplicate,
+      revised,
+      mostSimilarId: sim.mostSimilar?.id || null,
+      comparedCount: sim.comparedCount || 0,
+    },
+  };
+  postData.__timing = timer.end();
+  return postData;
 }
 
 function buildGmbTemplatePost({
@@ -824,16 +1167,23 @@ function buildGmbTemplatePost({
   sourceTitle,
   sourcePage,
   selectedPages,
+  allowedServices,
 }) {
   const cat = getGmbCategory(categoryId);
   const place = normalizeLocation(location) || "your area";
   const primary = polishKeyword(keywords.primary, place);
-  const services = extractVerifiedServices({
+  let services = extractVerifiedServices({
     keywords,
     sourcePage: sourcePage || { title: sourceTitle, url, keywords },
     selectedPages: selectedPages || [],
     business,
   });
+  // Honour an explicit user service selection when one was persisted: only
+  // services the user kept selected may surface in generated content.
+  if (allowedServices && allowedServices.size) {
+    const filtered = services.filter((s) => allowedServices.has(String(s).toLowerCase()));
+    if (filtered.length) services = filtered;
+  }
   const cta = resolveGmbCta(categoryId, business);
   const name = String(business.name || "").trim();
   const address = String(business.address || "").trim();
@@ -1171,6 +1521,7 @@ ${offering} backed by ${proof} — a practical look for anyone exploring ${prima
       sourceTitle: options.sourceTitle || "",
       sourcePage: options.sourcePage,
       selectedPages: options.selectedPages,
+      allowedServices: options.allowedServices,
     });
     heading = gmb.heading;
     plain = gmb.content;
@@ -1269,20 +1620,47 @@ export async function generatePostContentWithAi(
 ) {
   const template = generatePostContent(platform, keywords, location, url, tone, options);
   const model = options.writingModel;
+  const ownerName = options.ownerName || "";
+  const scrub = (obj) => {
+    if (ownerName && obj && typeof obj === "object") {
+      if (obj.content) obj.content = stripOwnerNameFromContent(obj.content, ownerName);
+      if (obj.heading) obj.heading = stripOwnerNameFromContent(obj.heading, ownerName);
+    }
+    return obj;
+  };
+
+  // P1 — context for natural-writing + identity-isolation polish (non-GMB).
+  const nonGmbCtx = {
+    platform,
+    keywords: {
+      primary: keywords.primary,
+      secondaryKeywords:
+        keywords.secondaryKeywords ||
+        keywords.general ||
+        (keywords.secondary ? [keywords.secondary] : []),
+    },
+    origin: options.websiteOrigin || options.origin || websiteOriginFromUrl(url),
+    foreignNames: options.foreignNames || [],
+    ownerName,
+    seed: `${url}|${platform}`,
+  };
+  const voiceBlock = buildVoicePromptBlock(options.voice, platform);
 
   if (platform === "GMB") {
-    return generateGmbWithMasterRules({
-      keywords,
-      location,
-      url,
-      options,
-      template,
-      model,
-    });
+    return scrub(
+      await generateGmbWithMasterRules({
+        keywords,
+        location,
+        url,
+        options,
+        template,
+        model,
+      })
+    );
   }
 
   if (!model || !process.env.OPENROUTER_API_KEY) {
-    return { ...template, writingProvider: "template" };
+    return finalizeNonGmbResult({ ...template, writingProvider: "template" }, nonGmbCtx);
   }
 
   const cfg = PLATFORM_CONFIG[platform];
@@ -1306,6 +1684,12 @@ export async function generatePostContentWithAi(
           role: "system",
           content: `You write SEO-led social posts for ${platform}. Return ONLY JSON: {heading:string, content:string}. English only, no emojis, no markdown, no HTML, no inline hyperlinks. Word count between ${cfg.minWords} and ${cfg.maxWords}. Tone: ${tone}.
 Platform voice & style (write distinctly for ${platform}; do NOT reuse the same wording or structure you would use on another platform): ${PLATFORM_STYLE[platform] || ""}
+${voiceBlock ? `${voiceBlock}\n` : ""}Write like a real person for this specific business:
+- Do NOT open with a generic template line (avoid "Here is a clear update", "In today's world", "Looking for...", "Are you looking for").
+- Avoid generic marketing clichés (e.g. "take your business to the next level", "cutting-edge", "world-class", "one-stop shop", "seamless", "unlock the power", "elevate your", "game-changer").
+- Avoid robotic transitions ("Furthermore", "Moreover", "In conclusion", "First and foremost").
+- Use the primary keyword naturally — never stuff or repeat it.
+- Only state facts supported by this website; never mention another business, brand, or external domain.
 Rules:
 - Never wrap keywords in links or HTML.
 - Do NOT put a URL in the middle of a sentence.
@@ -1324,7 +1708,11 @@ Writing intent: ${options.writingIntent || "Awareness"}
 Master intent: ${options.masterIntent || "n/a"}
 Allow links (bottom CTA only): ${cfg.allowLinks}
 Allow hashtags: ${cfg.allowHashtags}
-
+${
+  options.avoidSample
+    ? `\nAVOID DUPLICATION — a recent ${platform} post for this website reads:\n"""${String(options.avoidSample).slice(0, 600)}"""\nWrite something clearly different in angle, opening, and structure.\n`
+    : ""
+}
 Write one complete post body that naturally uses the primary keyword and at least two secondary keywords. Follow the master intent.`,
         },
       ],
@@ -1332,12 +1720,12 @@ Write one complete post body that naturally uses the primary keyword and at leas
 
     const raw = data?.choices?.[0]?.message?.content || "";
     const m = raw.match(/\{[\s\S]*\}/);
-    if (!m) return { ...template, writingProvider: "template-fallback" };
+    if (!m) return finalizeNonGmbResult({ ...template, writingProvider: "template-fallback" }, nonGmbCtx);
     const parsed = JSON.parse(m[0]);
     let content = sanitizeEnglishPost(String(parsed.content || "").trim());
     let heading = sanitizeEnglishPost(String(parsed.heading || template.heading).trim());
     if (!content || countWords(content) < Math.min(40, cfg.minWords)) {
-      return { ...template, writingProvider: "template-fallback" };
+      return finalizeNonGmbResult({ ...template, writingProvider: "template-fallback" }, nonGmbCtx);
     }
 
     const padCtx = {
@@ -1378,22 +1766,29 @@ Write one complete post body that naturally uses the primary keyword and at leas
       maxWords: cfg.maxWords,
     });
 
-    return {
-      heading: heading || template.heading,
-      content,
-      contentHtml: plainToPreviewHtml(content),
-      wordCount: countWords(content),
-      charCount: countChars(content),
-      minWords: cfg.minWords,
-      maxWords: cfg.maxWords,
-      writingIntent: options.writingIntent || template.writingIntent,
-      masterIntent: options.masterIntent || template.masterIntent,
-      writingProvider: model,
-      validation: socialValidation,
-    };
+    if (ownerName) {
+      content = stripOwnerNameFromContent(content, ownerName);
+      heading = stripOwnerNameFromContent(heading, ownerName);
+    }
+    return finalizeNonGmbResult(
+      {
+        heading: heading || template.heading,
+        content,
+        contentHtml: plainToPreviewHtml(content),
+        wordCount: countWords(content),
+        charCount: countChars(content),
+        minWords: cfg.minWords,
+        maxWords: cfg.maxWords,
+        writingIntent: options.writingIntent || template.writingIntent,
+        masterIntent: options.masterIntent || template.masterIntent,
+        writingProvider: model,
+        validation: socialValidation,
+      },
+      nonGmbCtx
+    );
   } catch (err) {
     console.error("[generatePostContentWithAi]", err.message);
-    return { ...template, writingProvider: "template-fallback" };
+    return finalizeNonGmbResult({ ...template, writingProvider: "template-fallback" }, nonGmbCtx);
   }
 }
 
@@ -1449,6 +1844,10 @@ async function generateGmbWithMasterRules({
     keywords,
   };
 
+  const gmbOrigin =
+    options.websiteOrigin || websiteOriginFromUrl(url) || websiteOriginFromUrl(sourcePage?.url);
+  const gmbForeignNames = options.foreignNames || [];
+
   const applyValidation = (heading, content, provider) => {
     const validation = validateGmbPost({
       content,
@@ -1459,6 +1858,8 @@ async function generateGmbWithMasterRules({
       business,
       sourceTitle: options.sourceTitle || sourcePage?.title || "",
     });
+    // P1 — informational naturalness score (does not change GMB ready/hard-fail).
+    validation.naturalness = scoreNaturalness(content, { keywords });
     return {
       heading,
       content,
@@ -1489,6 +1890,12 @@ async function generateGmbWithMasterRules({
     const cta = resolveGmbCta(categoryId, { ...business, offerSummary: verifiedOffer.summary });
     const ctaLine = gmbCtaInstruction(cta);
     let next = stripUnverifiedNap(content, business);
+    // P1 — identity isolation (no foreign site/business leakage) + light
+    // natural-writing cleanup. Front-load/length rules are preserved because
+    // padGmbToTarget re-fits the body below; openings are NOT varied for GMB
+    // (the first 150 chars must keep service+city+intent / question hooks).
+    next = scrubForeignIdentity(next, { ownOrigin: gmbOrigin, foreignNames: gmbForeignNames });
+    next = stripRoboticTransitions(replaceCliches(next));
     if (categoryId === GMB_CATEGORY_IDS.FAQ_EDUCATIONAL) {
       next = ensureFaqQuestionHook(next, {
         heading,
@@ -1526,7 +1933,7 @@ async function generateGmbWithMasterRules({
         { role: "system", content: buildGmbSystemPrompt(categoryId) },
         {
           role: "user",
-          content: buildGmbUserPrompt({
+          content: `${buildGmbUserPrompt({
             categoryId,
             business,
             location,
@@ -1534,7 +1941,11 @@ async function generateGmbWithMasterRules({
             sourcePage,
             selectedPages,
             verifiedOffer,
-          }),
+          })}${
+            buildVoicePromptBlock(options.voice, "GMB")
+              ? `\n\n${buildVoicePromptBlock(options.voice, "GMB")}`
+              : ""
+          }`,
         },
       ],
     });
@@ -1740,7 +2151,7 @@ async function scanOneUrl(rawUrl, location) {
   const url = normalizeUrl(rawUrl);
   if (!url) return null;
 
-  const html = await fetchText(url);
+  const { html, reason: failReason } = await fetchHtmlDetailed(url);
   if (!html) {
     // Fallback keywords from URL slug when page is unreachable
     const slug = url
@@ -1764,6 +2175,7 @@ async function scanOneUrl(rawUrl, location) {
     return {
       url,
       reachable: false,
+      failReason: failReason || "fetch-failed",
       title: slug,
       keywords: packed,
       writingIntent: packed.writingIntent,
@@ -1786,7 +2198,12 @@ async function scanOneUrl(rawUrl, location) {
   return {
     url,
     reachable: true,
+    failReason: null,
     title: page.title,
+    // Keep the extracted page body/description so service aggregation can mine
+    // evidence across every page (not just the homepage).
+    description: page.description,
+    bodyText: page.bodyText,
     keywords: packed,
     writingIntent: packed.writingIntent,
     masterIntent: packed.masterIntent,
@@ -1845,7 +2262,8 @@ export async function analyzeWebsiteForStudio({
   workspaceId,
   websiteUrl,
   location,
-  maxPages = MAX_URLS,
+  maxPages = null,
+  forceRefresh = false,
 }) {
   const auth = await resolveUser(email);
   if (!auth.ok) return auth;
@@ -1867,35 +2285,66 @@ export async function analyzeWebsiteForStudio({
     String(location || "").trim() || workspace?.location || ""
   );
 
+  const startedAt = Date.now();
   const discovered = await discoverSitemapUrls(origin);
   const homepage = `${origin}/`;
-  const prioritized = [
-    homepage,
-    ...discovered
-      .filter((u) => {
-        try {
-          return normalizeUrl(u) !== normalizeUrl(homepage);
-        } catch {
-          return true;
-        }
-      })
-      .sort((a, b) => urlPriority(b) - urlPriority(a)),
-  ];
 
-  // Dedupe by normalized URL
+  // ── Build an accurate URL inventory ───────────────────────────────────
+  // discovered → eligible (unique, in-scope, SSRF-safe) vs excluded.
+  const rawCandidates = [homepage, ...discovered];
   const seen = new Set();
-  const uniqueUrls = [];
-  for (const u of prioritized) {
-    const n = normalizeUrl(u) || u;
-    if (seen.has(n)) continue;
+  const eligibleUrls = [];
+  const excluded = []; // { url, reason }
+  let duplicateCount = 0;
+
+  for (const raw of rawCandidates) {
+    const n = normalizeUrl(raw) || raw;
+    if (!n) {
+      excluded.push({ url: String(raw), reason: "invalid-url" });
+      continue;
+    }
+    if (seen.has(n)) {
+      duplicateCount++;
+      continue;
+    }
     seen.add(n);
-    uniqueUrls.push(n);
+    // In-scope: same origin only.
+    let sameOrigin = false;
+    try {
+      sameOrigin = new URL(n).origin === new URL(origin).origin;
+    } catch {
+      sameOrigin = false;
+    }
+    if (!sameOrigin) {
+      excluded.push({ url: n, reason: "out-of-scope" });
+      continue;
+    }
+    const safe = await assertSafeUrl(n);
+    if (!safe.ok) {
+      excluded.push({ url: n, reason: safe.reason });
+      continue;
+    }
+    eligibleUrls.push(n);
   }
 
-  const pageLimit = Math.min(Math.max(Number(maxPages) || MAX_URLS, 1), MAX_URLS);
-  const selectedUrls = uniqueUrls.slice(0, pageLimit);
+  // Prioritise so the most useful pages are first when a safety cap applies.
+  eligibleUrls.sort((a, b) => {
+    if (a === homepage) return -1;
+    if (b === homepage) return 1;
+    return urlPriority(b) - urlPriority(a);
+  });
 
-  if (!selectedUrls.length) {
+  // Analysis cap: large but configurable. A requested maxPages can lower it,
+  // but never silently pins the whole site to 15.
+  const requested = Number(maxPages);
+  const analyzeCap = Math.min(
+    MAX_ANALYZE_URLS,
+    requested && requested > 0 ? Math.max(requested, 1) : MAX_ANALYZE_URLS
+  );
+  const queuedUrls = eligibleUrls.slice(0, analyzeCap);
+  const remainingCount = Math.max(eligibleUrls.length - queuedUrls.length, 0);
+
+  if (!queuedUrls.length) {
     return {
       ok: false,
       status: 400,
@@ -1903,11 +2352,50 @@ export async function analyzeWebsiteForStudio({
     };
   }
 
+  // ── Cache: reuse a recent whole-site analysis for the same scope ───────
+  const cacheKey = `studio-analyze:${origin}:${loc || ""}:${analyzeCap}`;
+  const cached = cacheGet(cacheKey);
+  if (cached && !forceRefresh) {
+    // Selection lives in the DB independently of the crawl cache, so always
+    // return the *current* persisted selection even on a cache hit.
+    let selection = null;
+    try {
+      selection = await getSelection({ userId: user.id, workspaceId: wid, websiteOrigin: origin });
+    } catch { /* non-fatal */ }
+    return { ...cached, cached: true, selection };
+  }
+
+  // ── Fetch + analyse with bounded concurrency (no fixed 5-page batches) ─
+  const scanned = await mapWithConcurrency(
+    queuedUrls,
+    ANALYZE_CONCURRENCY,
+    (u) => scanOneUrl(u, loc || "Local")
+  );
+
   const analyzed = [];
-  for (let i = 0; i < selectedUrls.length; i += 5) {
-    const batch = selectedUrls.slice(i, i + 5);
-    const results = await Promise.all(batch.map((u) => scanOneUrl(u, loc || "Local")));
-    for (const r of results) if (r) analyzed.push(r);
+  const failed = []; // { url, reason }
+  for (let i = 0; i < scanned.length; i++) {
+    const r = scanned[i];
+    if (!r) {
+      failed.push({ url: queuedUrls[i], reason: "scan-error" });
+      continue;
+    }
+    if (r.reachable === false) {
+      failed.push({ url: r.url, reason: r.failReason || "unreachable" });
+      // A failed page is isolated — it does NOT abort the whole job, but it is
+      // not counted as a successful analysis either.
+      continue;
+    }
+    analyzed.push(r);
+  }
+
+  if (!analyzed.length) {
+    return {
+      ok: false,
+      status: 400,
+      error:
+        "Discovered pages but none could be fetched. The site may be blocking bots or temporarily down.",
+    };
   }
 
   const areaPool = new Set();
@@ -1950,17 +2438,67 @@ export async function analyzeWebsiteForStudio({
   const secondaryKeywords = [
     ...new Set(pages.flatMap((p) => p.keywords.secondary || []).filter(Boolean)),
   ].slice(0, 8);
-  const servicesFound = pages.filter((p) => p.pageType === "Services").length;
-  const linksFound = uniqueUrls.length;
 
-  return {
+  // ── Aggregate SERVICES across every analysed page (not just the homepage).
+  // extractVerifiedServices already filters fabricated / educational labels;
+  // we run it per page and union the results, tracking which pages are
+  // evidence for each detected service so false positives can be reviewed.
+  const serviceEvidence = new Map(); // normalizedName → { name, pages:Set, pageTypes:Set }
+  for (const row of analyzed) {
+    const detected = extractVerifiedServices({
+      keywords: row.keywords,
+      sourcePage: { title: row.title, keywords: row.keywords },
+    });
+    const pageType = inferPageType(row.url, row.title || "");
+    for (const svc of detected) {
+      const key = svc.toLowerCase();
+      if (!serviceEvidence.has(key)) {
+        serviceEvidence.set(key, { name: svc, pages: new Set(), pageTypes: new Set() });
+      }
+      const entry = serviceEvidence.get(key);
+      entry.pages.add(row.url);
+      entry.pageTypes.add(pageType);
+    }
+  }
+  const services = [...serviceEvidence.values()]
+    .map((e) => ({
+      name: e.name,
+      pages: [...e.pages],
+      pageCount: e.pages.size,
+      pageTypes: [...e.pageTypes],
+    }))
+    // Prefer services with the most cross-page evidence.
+    .sort((a, b) => b.pageCount - a.pageCount)
+    .slice(0, 20);
+
+  const servicePageCount = pages.filter((p) => p.pageType === "Services").length;
+
+  // ── Honest inventory — discovered / eligible / queued / success / failed /
+  // excluded / remaining — never conflate a partial run with a complete one.
+  const inventory = {
+    discovered: rawCandidates.length,
+    duplicates: duplicateCount,
+    eligible: eligibleUrls.length,
+    excluded: excluded.length,
+    queued: queuedUrls.length,
+    analyzedSuccess: analyzed.length,
+    failed: failed.length,
+    remaining: remainingCount,
+    complete: failed.length === 0 && remainingCount === 0,
+  };
+
+  const result = {
     ok: true,
     workspaceId: wid,
     websiteUrl: origin,
     location: loc,
     needsLocation: !loc,
-    discoveredCount: uniqueUrls.length,
+    discoveredCount: eligibleUrls.length,
     pageCount: pages.length,
+    inventory,
+    excludedSample: excluded.slice(0, 20),
+    failedSample: failed.slice(0, 20),
+    services,
     areaCoverage: {
       summary: [...areaPool].slice(0, 6).join(" · ") || loc || "Set target location",
       areas: [...areaPool].slice(0, 12),
@@ -1968,15 +2506,81 @@ export async function analyzeWebsiteForStudio({
     masterIntent,
     dominantIntent,
     pages,
+    metrics: {
+      durationMs: Date.now() - startedAt,
+      concurrency: ANALYZE_CONCURRENCY,
+      cache: cacheStats(),
+    },
     intelligence: {
       primaryKeywords,
       secondaryKeywords,
       location: loc,
       pagesAnalyzed: pages.length,
-      servicesFound,
-      linksFound,
+      // servicesFound now reflects distinct detected services, not just the
+      // count of pages that looked like a "Services" page.
+      servicesFound: services.length,
+      servicePageCount,
+      linksFound: eligibleUrls.length,
+      discovered: inventory.discovered,
+      failed: inventory.failed,
+      excluded: inventory.excluded,
+      remaining: inventory.remaining,
     },
   };
+
+  // Persist the inventory + merge/seed selection (survives refresh / re-login).
+  let selection = null;
+  try {
+    selection = await persistInventory({
+      userId: user.id,
+      workspaceId: wid,
+      websiteOrigin: origin,
+      pages,
+      services,
+      failed,
+      excluded,
+    });
+  } catch (err) {
+    console.error("[analyzeWebsiteForStudio persistInventory]", err.message);
+  }
+  result.selection = selection;
+
+  cacheSet(cacheKey, result, ANALYSIS_CACHE_TTL_MS);
+  return result;
+}
+
+/** Resolve (userId, workspaceId, websiteOrigin) for a selection request. */
+async function resolveSelectionScope({ email, workspaceId, websiteUrl }) {
+  const auth = await resolveUser(email);
+  if (!auth.ok) return auth;
+  const { user } = auth;
+  const { activeId, workspace } = await resolveActiveWorkspace(user);
+  const wid = workspaceId || activeId || workspace?.id || null;
+  const origin = websiteOriginFromUrl(websiteUrl) || normalizeDomain(websiteUrl);
+  if (!origin) {
+    return { ok: false, status: 400, error: "A valid websiteUrl is required." };
+  }
+  return { ok: true, userId: user.id, workspaceId: wid, websiteOrigin: origin };
+}
+
+/** GET persisted inventory + selection for one website (survives refresh). */
+export async function getStudioSelection({ email, workspaceId, websiteUrl }) {
+  const scope = await resolveSelectionScope({ email, workspaceId, websiteUrl });
+  if (!scope.ok) return scope;
+  return getSelection(scope);
+}
+
+/** Persist a user's page/service selection with server-side validation. */
+export async function saveStudioSelection({
+  email,
+  workspaceId,
+  websiteUrl,
+  selectedUrls,
+  selectedServices,
+}) {
+  const scope = await resolveSelectionScope({ email, workspaceId, websiteUrl });
+  if (!scope.ok) return scope;
+  return saveSelection({ ...scope, selectedUrls, selectedServices });
 }
 
 /**
@@ -2003,6 +2607,11 @@ export async function generateAutoPosterSuite({
   platforms: platformOverride,
   websiteUrl,
   gmbCategory,
+  // Batch 4: when true (default) and images are requested, text drafts are
+  // returned immediately with imageStatus="pending" and images are generated
+  // out-of-band via /auto-poster/attach-images. deferImages=false keeps the
+  // legacy inline (blocking) behaviour for callers that need images in-band.
+  deferImages = true,
 }) {
   const auth = await resolveUser(email);
   if (!auth.ok) return auth;
@@ -2032,6 +2641,44 @@ export async function generateAutoPosterSuite({
 
   if (wantsGmb && gmbCategory && !isGmbCategoryId(gmbCategory)) {
     return { ok: false, status: 400, error: "Invalid GMB category." };
+  }
+
+  // ── Server-side selection enforcement ────────────────────────────────
+  // Only pages the user actually selected (and that exist in the persisted,
+  // authorised inventory) may enter generation. Stale client state or a
+  // manipulated request cannot smuggle in unselected / unknown pages.
+  const genOrigin =
+    websiteOriginFromUrl(websiteUrl) ||
+    websiteOriginFromUrl(Array.isArray(prePages) && prePages[0]?.url) ||
+    null;
+  let allowedServiceNames = null;
+  if (genOrigin) {
+    try {
+      const sel = await getSelectedForGeneration({
+        userId: user.id,
+        workspaceId: wid,
+        websiteOrigin: genOrigin,
+      });
+      if (sel) {
+        allowedServiceNames = sel.serviceNames;
+        if (Array.isArray(prePages) && prePages.length) {
+          const before = prePages.length;
+          prePages = prePages.filter((p) => sel.urls.has(normalizeUrl(p.url) || p.url));
+          if (!prePages.length) {
+            return {
+              ok: false,
+              status: 400,
+              error:
+                before > 0
+                  ? "None of the submitted pages are in your saved selection. Open the selection step and choose at least one eligible page."
+                  : "Select at least one website page before generating content.",
+            };
+          }
+        }
+      }
+    } catch (err) {
+      console.error("[generateAutoPosterSuite enforce selection]", err.message);
+    }
   }
 
   let analyzed = [];
@@ -2084,7 +2731,9 @@ export async function generateAutoPosterSuite({
     };
   }
 
-  const business = await resolveBusinessContext(user.id, wid, workspace);
+  const business = await resolveBusinessContext(user.id, wid, workspace, user.name);
+  // P1 — other managed businesses' names, so none can leak into this site's copy.
+  const foreignNames = await resolveForeignBusinessNames(user.id, wid, business.name);
   const selectedPagesForGmb = analyzed.map((p) => ({
     url: p.url,
     title: p.title,
@@ -2098,6 +2747,26 @@ export async function generateAutoPosterSuite({
     websiteOriginFromUrl(analyzed[0]?.url) ||
     null;
 
+  // Batch 4: reject a concurrent duplicate run (double-click / retry) so we
+  // never create two sets of drafts for the same request. Released in finally.
+  const genKey = buildGenerateKey({
+    userId: user.id,
+    wid,
+    genOrigin: origin,
+    platforms,
+    urls,
+    prePages,
+  });
+  if (!acquireGenerateLock(genKey)) {
+    return {
+      ok: false,
+      status: 409,
+      error:
+        "A content generation for this website is already running. Please wait for it to finish before generating again.",
+    };
+  }
+
+  try {
   const activeSample = await prisma.studioPost.findFirst({
     where: {
       userId: user.id,
@@ -2143,7 +2812,30 @@ export async function generateAutoPosterSuite({
   const preferredImageModel = providerDecision.image.model || undefined;
   const writingModel = providerDecision.writing.model;
 
+  // P1 — derive (and cache) THIS website's distinct brand voice once, reusing
+  // the already-crawled page intelligence (no extra AI call unless enriched).
+  const suiteTimer = createTimer("generateSuite");
+  const genTimings = [];
+  const brandVoice = await getBrandVoice({
+    userId: user.id,
+    workspaceId: wid,
+    websiteOrigin: origin,
+    pages: analyzed,
+    keywords: analyzed[0]?.keywords || {},
+    location: loc,
+    business,
+    model: writingModel,
+    enrich: !!process.env.OPENROUTER_API_KEY,
+  });
+  suiteTimer.mark("brand_voice");
+
+  // Batch 4: when images are requested we default to deferring them so the
+  // (fast) text drafts return immediately; images are filled out-of-band.
+  const deferImageGen = !!includeImages && deferImages;
+  const inlineImageGen = !!includeImages && !deferImages;
+
   const posts = [];
+  const imagesPending = []; // postIds awaiting out-of-band image generation
   const skippedLocked = [];
   const expectedTotal = analyzed.length * platforms.filter((p) => !(p === "GMB" && gmbSkipped)).length;
 
@@ -2164,18 +2856,22 @@ export async function generateAutoPosterSuite({
         continue;
       }
 
-      const postData = await generatePostContentWithAi(
+      const postData = await generatePostWithDedup({
         platform,
-        sourceKeywords,
-        loc,
-        sourceUrl,
-        platform === "GMB" ? gmbCategoryId : selectedTone,
-        {
+        keywords: sourceKeywords,
+        location: loc,
+        url: sourceUrl,
+        tone: platform === "GMB" ? gmbCategoryId : selectedTone,
+        options: {
           writingIntent: sourceItem.writingIntent || item.writingIntent,
           masterIntent: sourceItem.masterIntent || item.masterIntent || siteMasterIntent,
           writingModel,
+          ownerName: user.name,
           gmbCategory: platform === "GMB" ? gmbCategoryId : undefined,
           business,
+          voice: brandVoice,
+          websiteOrigin: origin,
+          foreignNames,
           sourceTitle: sourceItem.title || item.title,
           sourcePage: {
             url: sourceUrl,
@@ -2183,9 +2879,12 @@ export async function generateAutoPosterSuite({
             keywords: sourceKeywords,
           },
           selectedPages: selectedPagesForGmb,
+          allowedServices: allowedServiceNames,
           verifiedOffer,
-        }
-      );
+        },
+        dedup: { userId: user.id, workspaceId: wid, websiteOrigin: origin },
+      });
+      if (postData.__timing) { genTimings.push(postData.__timing); delete postData.__timing; }
 
       if (platform === "GMB" && postData?.error === "NO_VERIFIED_OFFER") {
         gmbSkipped = {
@@ -2196,7 +2895,8 @@ export async function generateAutoPosterSuite({
       }
 
       let imageUrl = null;
-      if (includeImages) {
+      let imageStatus = null;
+      if (inlineImageGen) {
         imageUrl = await resolveImageUrl({
           keyword: sourceKeywords.primary,
           location: loc,
@@ -2205,9 +2905,12 @@ export async function generateAutoPosterSuite({
           imageSource: resolvedImageSource,
           preferredModel: preferredImageModel,
         });
+        imageStatus = imageUrl ? "ready" : "failed";
         if (resolvedImageSource === "free") {
           await freeImageRateLimitPause();
         }
+      } else if (deferImageGen) {
+        imageStatus = "pending";
       }
 
       const secondaryPack =
@@ -2239,12 +2942,14 @@ export async function generateAutoPosterSuite({
           content: postData.content,
           contentHtml: postData.contentHtml,
           imageUrl,
+          imageStatus,
           status: "draft",
           locked: false,
           archived: false,
         },
       });
 
+      if (imageStatus === "pending") imagesPending.push(row.id);
       posts.push(serializePost(row));
     }
   }
@@ -2258,18 +2963,22 @@ export async function generateAutoPosterSuite({
     if (lockedSet.has(fp)) {
       skippedLocked.push({ url: sourceUrl, platform: "GMB", reason: "Already published & locked" });
     } else {
-      const postData = await generatePostContentWithAi(
-        "GMB",
-        sourceKeywords,
-        loc,
-        sourceUrl,
-        gmbCategoryId,
-        {
+      const postData = await generatePostWithDedup({
+        platform: "GMB",
+        keywords: sourceKeywords,
+        location: loc,
+        url: sourceUrl,
+        tone: gmbCategoryId,
+        options: {
           writingIntent: sourceItem.writingIntent,
           masterIntent: sourceItem.masterIntent || siteMasterIntent,
           writingModel,
+          ownerName: user.name,
           gmbCategory: gmbCategoryId,
           business,
+          voice: brandVoice,
+          websiteOrigin: origin,
+          foreignNames,
           sourceTitle: sourceItem.title,
           sourcePage: {
             url: sourceUrl,
@@ -2277,9 +2986,12 @@ export async function generateAutoPosterSuite({
             keywords: sourceKeywords,
           },
           selectedPages: selectedPagesForGmb,
+          allowedServices: allowedServiceNames,
           verifiedOffer,
-        }
-      );
+        },
+        dedup: { userId: user.id, workspaceId: wid, websiteOrigin: origin },
+      });
+      if (postData.__timing) { genTimings.push(postData.__timing); delete postData.__timing; }
       if (postData?.error === "NO_VERIFIED_OFFER") {
         gmbSkipped = {
           reason:
@@ -2287,7 +2999,8 @@ export async function generateAutoPosterSuite({
         };
       } else {
         let imageUrl = null;
-        if (includeImages) {
+        let imageStatus = null;
+        if (inlineImageGen) {
           imageUrl = await resolveImageUrl({
             keyword: sourceKeywords.primary,
             location: loc,
@@ -2296,6 +3009,9 @@ export async function generateAutoPosterSuite({
             imageSource: resolvedImageSource,
             preferredModel: preferredImageModel,
           });
+          imageStatus = imageUrl ? "ready" : "failed";
+        } else if (deferImageGen) {
+          imageStatus = "pending";
         }
         const secondaryPack =
           sourceKeywords.secondaryKeywords ||
@@ -2330,12 +3046,33 @@ export async function generateAutoPosterSuite({
             content: postData.content,
             contentHtml: postData.contentHtml,
             imageUrl,
+            imageStatus,
             status: "draft",
             locked: false,
             archived: false,
           },
         });
+        if (imageStatus === "pending") imagesPending.push(row.id);
         posts.push(serializePost(row));
+      }
+    }
+  }
+
+  // Batch 5: commit a durable image job per pending post BEFORE responding.
+  // The in-process worker generates them out-of-band and survives restarts;
+  // the client only needs to poll post state. Enqueue is idempotent per post.
+  if (deferImageGen && imagesPending.length) {
+    for (const pid of imagesPending) {
+      try {
+        await enqueueImageJob({
+          postId: pid,
+          userId: user.id,
+          workspaceId: wid,
+          websiteOrigin: origin,
+          imageSource: resolvedImageSource,
+        });
+      } catch (err) {
+        console.error("[generate enqueue image]", pid, err.message);
       }
     }
   }
@@ -2359,10 +3096,33 @@ export async function generateAutoPosterSuite({
     skippedLocked,
     includeImages: !!includeImages,
     imageSource: includeImages ? resolvedImageSource : null,
+    // Batch 4: text drafts are ready now; these postIds still need images.
+    // The client should call /auto-poster/attach-images with these ids and
+    // render a per-card image placeholder until each one resolves.
+    imagesDeferred: deferImageGen,
+    imagesPending,
     providerDecision,
     tones: TONE_PRESETS,
     ruleset: GMB_RULESET_VERSION,
+    // P1 — the distinct voice profile used for this website (debug/observability).
+    brandVoice: {
+      voiceId: brandVoice.voiceId,
+      industry: brandVoice.industry,
+      audience: brandVoice.audience,
+      tones: brandVoice.tones,
+      formality: brandVoice.formality,
+      source: brandVoice.source,
+      cached: brandVoice.cached,
+    },
+    // P2 — ACTUAL measured generation latency by stage (not estimates).
+    metrics: {
+      ...suiteTimer.end(),
+      perPost: aggregateSummaries(genTimings),
+    },
   };
+  } finally {
+    releaseGenerateLock(genKey);
+  }
 }
 
 function liveGmbValidation(row, packed) {
@@ -2370,7 +3130,7 @@ function liveGmbValidation(row, packed) {
   const gmbCategory =
     meta.gmbCategory ||
     (row.platform === "GMB" && isGmbCategoryId(row.tone) ? row.tone : null);
-  return validateGmbPost({
+  const validation = validateGmbPost({
     content: row.content,
     heading: row.heading,
     categoryId: gmbCategory || GMB_CATEGORY_IDS.INTENT_PROXIMITY,
@@ -2382,6 +3142,63 @@ function liveGmbValidation(row, packed) {
     },
     sourceTitle: meta.sourceTitle || "",
   });
+  // P1 — informational naturalness score, consistent with the social path.
+  validation.naturalness = scoreNaturalness(row.content, {
+    keywords: { primary: row.primaryKeyword, secondary: row.secondaryKeyword, general: packed.keywords },
+  });
+  return validation;
+}
+
+/** Parse the stored title-overlay JSON config; never throws on legacy/bad data. */
+function parseOverlayConfig(raw) {
+  if (!raw) return null;
+  try {
+    const obj = JSON.parse(raw);
+    return obj && typeof obj === "object" ? obj : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * P2 — policy snapshot for a post: accurate (platform-aware) character count,
+ * placement/method-aware hashtag validation, and policy freshness. Replaces the
+ * previous hardcoded hashtag/length assumptions at the serialization boundary.
+ */
+export function buildPostPolicy(platform, content) {
+  const count = policyCountText(platform, content);
+  const hashtags = policyValidateHashtags({
+    platform,
+    text: content,
+    placement: platform === "Instagram" ? "caption" : platform === "Pinterest" ? "description" : "body",
+    publishingMethod: platform === "GMB" ? "api" : "api",
+  });
+  const fresh = policyFreshness(platform);
+  return {
+    charCount: count.count,
+    charLimit: count.limit,
+    charRemaining: count.remaining,
+    overLimit: count.overLimit,
+    countMethod: count.method,
+    hashtags: {
+      supported: hashtags.supported,
+      count: hashtags.count,
+      max: hashtags.max ?? null,
+      recommended: hashtags.recommended ?? null,
+      overLimit: hashtags.overLimit,
+      issues: hashtags.issues,
+      advisories: hashtags.advisories,
+    },
+    freshness: fresh
+      ? {
+          policyVersion: fresh.policyVersion,
+          documentedAt: fresh.documentedAt,
+          stale: fresh.stale,
+          verificationMethod: fresh.verificationMethod,
+          source: fresh.source,
+        }
+      : null,
+  };
 }
 
 export function serializePost(row) {
@@ -2418,6 +3235,23 @@ export function serializePost(row) {
     wordCount: countWords(row.content || row.contentHtml || ""),
     charCount: countChars(row.content || ""),
     image: row.imageUrl,
+    imageSourceUrl: row.imageSourceUrl || null,
+    overlay: parseOverlayConfig(row.overlayConfig),
+    imageStatus: row.imageStatus || (row.imageUrl ? "ready" : null),
+    imagePending: row.imageStatus === "pending",
+    // Structured, validated CTA — tells the UI the REAL link capability so a
+    // plain-text phrase is never shown as a clickable button (P0 CTA fix).
+    // Exposed under `ctaInfo` so the legacy string `cta` (label text) is kept.
+    ctaInfo: buildCta({
+      platform: row.platform,
+      gmbLabel: row.platform === "GMB" ? resolveGmbCta(gmbCategory, {}) : undefined,
+      destinationUrl: row.sourceUrl,
+      businessOrigin: row.websiteOrigin || websiteOriginFromUrl(row.sourceUrl),
+    }),
+    // P2 — policy-aware character count + hashtag validation from the versioned
+    // registry (NOT hardcoded assumptions). For GMB, hashtags are honestly
+    // reported as an unsupported/advisory platform feature, not a "5" rule.
+    policy: buildPostPolicy(row.platform, row.content || ""),
     status: row.status,
     locked: row.locked,
     scheduledDate: row.scheduledAt ? row.scheduledAt.toISOString() : null,
@@ -2683,6 +3517,7 @@ export async function publishStudioPost({ email, postId, alsoLive = true }) {
         contentByProvider: { [provider]: post.content },
         imageUrl: post.imageUrl || undefined,
         workspaceId: post.workspaceId || undefined,
+        cta: provider === "google_business" ? { google_business: buildPostCta(post) } : undefined,
       });
     } catch (err) {
       live = { ok: false, status: 502, error: err.message || "Live publish failed" };
@@ -2771,6 +3606,91 @@ export async function unscheduleStudioPost({ email, postId }) {
 }
 
 /**
+ * Delete / cancel a post with status-aware, race-safe semantics.
+ *
+ * - draft / failed / canceled: hard-delete the local record.
+ * - scheduled: atomically CANCEL future publication first (guarded on the
+ *   scheduled state), which races safely against the publishing worker — exactly
+ *   one of {cancel, claim} can win. Only after the row is proven out of the
+ *   scheduled state is it removed. If the worker already claimed it ("publishing")
+ *   or it already published, we report the real state instead of pretending we
+ *   stopped it.
+ * - published: delete only the LOCAL library record. The external post is NOT
+ *   removed — that requires explicit, provider-supported remote deletion.
+ *
+ * Every branch is scoped to the authenticated user's id (no IDOR / cross-tenant).
+ */
+export async function deleteStudioPost({ email, postId }) {
+  const auth = await resolveUser(email);
+  if (!auth.ok) return auth;
+
+  const post = await prisma.studioPost.findFirst({
+    where: { id: postId, userId: auth.user.id },
+  });
+  if (!post) return { ok: false, status: 404, error: "Post not found" };
+
+  if (post.status === "scheduled") {
+    const canceled = await prisma.studioPost.updateMany({
+      where: { id: post.id, userId: auth.user.id, status: "scheduled" },
+      data: { status: "canceled", scheduledAt: null, canceledAt: new Date() },
+    });
+    if (canceled.count === 1) {
+      await prisma.studioPost.deleteMany({
+        where: { id: post.id, userId: auth.user.id, status: "canceled" },
+      });
+      return { ok: true, deleted: true, postId: post.id, wasScheduled: true };
+    }
+    // Lost the race — report the actual state honestly.
+    const fresh = await prisma.studioPost.findUnique({ where: { id: post.id } });
+    if (fresh?.status === "publishing") {
+      return {
+        ok: false,
+        status: 409,
+        error:
+          "This post is being published right now and can no longer be canceled. Refresh to see its final state.",
+      };
+    }
+    if (fresh?.status === "published") {
+      return {
+        ok: false,
+        status: 409,
+        error:
+          "This scheduled post has already been published to the platform and can't be canceled. You can delete the published record from Archive.",
+      };
+    }
+    return { ok: false, status: 409, error: "Post state changed — refresh and try again." };
+  }
+
+  if (post.status === "publishing") {
+    return {
+      ok: false,
+      status: 409,
+      error: "This post is publishing right now. Try again once it finishes.",
+    };
+  }
+
+  const wasPublished = post.status === "published";
+  // Guard on `status: { not: "publishing" }` so we never delete a row that a
+  // worker is actively publishing (defense in depth; publishing is handled above).
+  const removed = await prisma.studioPost.deleteMany({
+    where: { id: post.id, userId: auth.user.id, status: { not: "publishing" } },
+  });
+  if (removed.count !== 1) {
+    return { ok: false, status: 409, error: "Post state changed — refresh and try again." };
+  }
+
+  return {
+    ok: true,
+    deleted: true,
+    postId: post.id,
+    wasPublished,
+    remoteNote: wasPublished
+      ? "Removed from your Avonix library only — the post already published on the external platform was not deleted."
+      : undefined,
+  };
+}
+
+/**
  * Part 4 — Regenerate unlocks a published post for reuse.
  * New fingerprint so the same page/platform/keyword can be published again
  * without colliding with the previous locked publish.
@@ -2824,7 +3744,9 @@ export async function rewriteStudioPost({
   const workspace = post.workspaceId
     ? await prisma.clientWorkspace.findUnique({ where: { id: post.workspaceId } })
     : null;
-  const business = await resolveBusinessContext(auth.user.id, post.workspaceId, workspace);
+  const business = await resolveBusinessContext(auth.user.id, post.workspaceId, workspace, auth.user.name);
+  const foreignNames = await resolveForeignBusinessNames(auth.user.id, post.workspaceId, business.name);
+  const rewriteOrigin = post.websiteOrigin || websiteOriginFromUrl(post.sourceUrl);
   const verifiedOffer = detectVerifiedOffer([
     {
       url: post.sourceUrl,
@@ -2843,6 +3765,19 @@ export async function rewriteStudioPost({
     forceImageSource: imageSource === "auto" ? undefined : imageSource,
   });
 
+  // P1 — reuse this website's cached distinct brand voice for the rewrite.
+  const brandVoice = await getBrandVoice({
+    userId: auth.user.id,
+    workspaceId: post.workspaceId,
+    websiteOrigin: rewriteOrigin,
+    pages: [{ url: post.sourceUrl, title: packed.meta?.sourceTitle, keywords }],
+    keywords,
+    location: post.location,
+    business,
+    model: providerDecision.writing.model,
+    enrich: !!process.env.OPENROUTER_API_KEY,
+  });
+
   const rewritten = await generatePostContentWithAi(
     post.platform,
     keywords,
@@ -2853,8 +3788,12 @@ export async function rewriteStudioPost({
       writingIntent,
       masterIntent,
       writingModel: providerDecision.writing.model,
+      ownerName: auth.user.name,
       gmbCategory: post.platform === "GMB" ? selectedTone : undefined,
       business,
+      voice: brandVoice,
+      websiteOrigin: rewriteOrigin,
+      foreignNames,
       sourceTitle: packed.meta?.sourceTitle,
       sourcePage: {
         url: post.sourceUrl,
@@ -2879,6 +3818,7 @@ export async function rewriteStudioPost({
   );
 
   let imageUrl = post.imageUrl;
+  let imageStatus = post.imageStatus || (post.imageUrl ? "ready" : null);
   if (includeImages) {
     const resolvedSource =
       imageSource === "auto" ? providerDecision.image.source : imageSource;
@@ -2890,6 +3830,7 @@ export async function rewriteStudioPost({
       imageSource: resolvedSource,
       preferredModel: providerDecision.image.model || undefined,
     });
+    imageStatus = imageUrl ? "ready" : "failed";
   }
 
   const updated = await prisma.studioPost.update({
@@ -2908,6 +3849,7 @@ export async function rewriteStudioPost({
         ruleset: rewritten.ruleset || packed.meta?.ruleset || null,
       }),
       imageUrl,
+      imageStatus,
       status: "draft",
       locked: false,
       scheduledAt: null,
@@ -2986,6 +3928,115 @@ export async function updateStudioPostContent({ email, postId, content, heading 
   return { ok: true, post: serializePost(updated), validation };
 }
 
+/**
+ * Feature D — apply (or remove) a professional title overlay on a post image.
+ *
+ * Non-destructive: the first time an overlay is applied the original image URL
+ * is captured in `imageSourceUrl`, so the user can re-adjust or remove the
+ * overlay later without losing the source. The browser composites the pixels on
+ * a <canvas> and sends the result as a data URL (`renderedImage`) — the preview
+ * is therefore identical to the exported/published asset. A server-side SVG
+ * fallback is used only when no browser raster is provided.
+ */
+export async function applyStudioImageOverlay({
+  email,
+  postId,
+  overlayConfig,
+  renderedImage,
+  removeOverlay = false,
+}) {
+  const auth = await resolveUser(email);
+  if (!auth.ok) return auth;
+
+  const post = await prisma.studioPost.findFirst({
+    where: { id: postId, userId: auth.user.id },
+  });
+  if (!post) return { ok: false, status: 404, error: "Post not found" };
+  if (post.locked && post.status === "published") {
+    return {
+      ok: false,
+      status: 409,
+      error: "Published posts are locked. Regenerate first to edit the image.",
+    };
+  }
+
+  // The original source is captured once so overlays stay non-destructive.
+  const sourceUrl = post.imageSourceUrl || post.imageUrl || null;
+
+  if (removeOverlay) {
+    if (!sourceUrl) {
+      return { ok: false, status: 400, error: "No original image to restore." };
+    }
+    const restored = await prisma.studioPost.update({
+      where: { id: post.id },
+      data: { imageUrl: sourceUrl, overlayConfig: null },
+    });
+    return { ok: true, post: serializePost(restored) };
+  }
+
+  if (!sourceUrl) {
+    return {
+      ok: false,
+      status: 400,
+      error: "This post has no image to overlay. Attach an image first.",
+    };
+  }
+
+  let finalUrl = null;
+  if (renderedImage && /^data:image\//.test(String(renderedImage))) {
+    // Browser canvas export — persist the composited raster (preview == export).
+    try {
+      finalUrl = await persistImageUrl(renderedImage);
+    } catch (err) {
+      console.error("[autoPoster overlay persist]", err.message);
+      finalUrl = null;
+    }
+  } else {
+    // Server-side fallback: embed the source in a self-contained SVG overlay.
+    try {
+      const cfg = normalizeOverlayConfig(overlayConfig || {});
+      const dims = PLATFORM_CONFIG[post.platform]?.image || { width: 1080, height: 1080 };
+      const layout = computeOverlayLayout({
+        imageWidth: dims.width,
+        imageHeight: dims.height,
+        title: (overlayConfig && overlayConfig.title) || post.heading,
+        config: cfg,
+      });
+      const svg = buildOverlaySvg({ layout, imageHref: sourceUrl, config: cfg });
+      finalUrl = await persistImageUrl(
+        `data:image/svg+xml;base64,${Buffer.from(svg).toString("base64")}`
+      );
+    } catch (err) {
+      console.error("[autoPoster overlay svg]", err.message);
+      finalUrl = null;
+    }
+  }
+
+  if (!finalUrl) {
+    // Rendering failed — leave the draft and the original image untouched.
+    return {
+      ok: false,
+      status: 502,
+      error: "Overlay render failed. Your original image is unchanged.",
+    };
+  }
+
+  const updated = await prisma.studioPost.update({
+    where: { id: post.id },
+    data: {
+      imageSourceUrl: sourceUrl, // preserve original (idempotent once set)
+      imageUrl: finalUrl,
+      overlayConfig: JSON.stringify({
+        ...(overlayConfig || {}),
+        appliedAt: new Date().toISOString(),
+      }),
+      imageStatus: "ready",
+    },
+  });
+
+  return { ok: true, post: serializePost(updated) };
+}
+
 export function getGmbRulesCatalog() {
   return gmbUiCatalog();
 }
@@ -3019,7 +4070,7 @@ export async function setStudioPostImage({
   if (action === "clear") {
     const updated = await prisma.studioPost.update({
       where: { id: post.id },
-      data: { imageUrl: null },
+      data: { imageUrl: null, imageStatus: null },
     });
     return { ok: true, post: serializePost(updated), imageSource: null };
   }
@@ -3046,6 +4097,11 @@ export async function setStudioPostImage({
   });
   const url = typeof result === "string" ? result : result?.url;
   if (!url) {
+    // Durable failure state so the UI can offer a per-post retry after refresh.
+    await prisma.studioPost.update({
+      where: { id: post.id },
+      data: { imageStatus: "failed" },
+    });
     return {
       ok: false,
       status: 502,
@@ -3055,7 +4111,7 @@ export async function setStudioPostImage({
 
   const updated = await prisma.studioPost.update({
     where: { id: post.id },
-    data: { imageUrl: url },
+    data: { imageUrl: url, imageStatus: "ready" },
   });
 
   return {
@@ -3128,12 +4184,17 @@ export async function attachImagesToStudioPosts({
       });
       const url = typeof result === "string" ? result : result?.url;
       if (!url) {
+        const u = await prisma.studioPost.update({
+          where: { id: post.id },
+          data: { imageStatus: "failed" },
+        });
+        posts.push(serializePost(u));
         failed += 1;
         continue;
       }
       const updated = await prisma.studioPost.update({
         where: { id: post.id },
-        data: { imageUrl: url },
+        data: { imageUrl: url, imageStatus: "ready" },
       });
       posts.push(serializePost(updated));
       attached += 1;
@@ -3143,6 +4204,13 @@ export async function attachImagesToStudioPosts({
       }
     } catch (err) {
       console.error("[attachImages]", post.id, err.message);
+      try {
+        const u = await prisma.studioPost.update({
+          where: { id: post.id },
+          data: { imageStatus: "failed" },
+        });
+        posts.push(serializePost(u));
+      } catch { /* ignore */ }
       failed += 1;
     }
   }
@@ -3157,10 +4225,177 @@ export async function attachImagesToStudioPosts({
   };
 }
 
+/* ── Batch 5: durable image generation job ──────────────────────────────────
+ * Handler for the "image.generate" job type. Idempotent: it never creates a
+ * second image for a post that already has one, and it keeps the post's
+ * imageStatus in sync with the job lifecycle (pending while retrying, failed
+ * only once the job is terminally out of attempts). Throwing re-queues with
+ * backoff. Scoped by userId so a job can only touch its owner's post. */
+export async function runImageGenerationJob(payload, job) {
+  const { postId, userId = null, imageSource = "auto" } = payload || {};
+  if (!postId) throw new Error("image.generate: missing postId");
+
+  const post = await prisma.studioPost.findFirst({
+    where: { id: postId, ...(userId ? { userId } : {}) },
+  });
+  // Post gone (deleted) → nothing to do; treat as success so it leaves the queue.
+  if (!post) return { skipped: "post-not-found" };
+  // Idempotency: already has an image → do not regenerate (retry / overlap-safe).
+  if (post.imageUrl && post.imageStatus === "ready") return { skipped: "already-has-image" };
+  // Never touch a locked, published post.
+  if (post.locked && post.status === "published") return { skipped: "locked-published" };
+
+  try {
+    const decision = await selectBestStudioProviders({
+      websiteUrl: post.websiteOrigin || post.sourceUrl,
+      location: post.location,
+      masterIntent: post.heading,
+      dominantIntent: "Awareness",
+      pageSample: [{ url: post.sourceUrl, keywords: { primary: post.primaryKeyword } }],
+      includeImages: true,
+      forceImageSource: imageSource === "auto" ? undefined : imageSource,
+    });
+    const resolvedSource = imageSource === "auto" ? decision.image.source : imageSource;
+
+    const result = await generateStudioImage({
+      keyword: post.primaryKeyword,
+      location: post.location,
+      platform: post.platform,
+      heading: post.heading,
+      imageSource: resolvedSource,
+      preferredModel: decision.image.model || undefined,
+    });
+    const url = typeof result === "string" ? result : result?.url;
+    if (!url) throw new Error(result?.error || "image provider returned no url");
+
+    await prisma.studioPost.update({
+      where: { id: post.id },
+      data: { imageUrl: url, imageStatus: "ready" },
+    });
+    return { ok: true, source: resolvedSource };
+  } catch (err) {
+    // Keep the card "pending" while the job still has retries left; mark
+    // "failed" only when this was the final attempt (job.attempts is the count
+    // already made, incremented at claim time).
+    const willRetry = !!job && job.attempts < job.maxAttempts;
+    await prisma.studioPost
+      .update({ where: { id: post.id }, data: { imageStatus: willRetry ? "pending" : "failed" } })
+      .catch(() => {});
+    throw err;
+  }
+}
+
+/** Register auto-poster job handlers with the durable queue (called at boot). */
+export function registerAutoPosterJobs() {
+  registerJobHandler("image.generate", runImageGenerationJob);
+}
+
+/** List this user's background jobs (scoped) with safe, non-sensitive fields. */
+export async function listUserJobs({ email, status, workspaceId }) {
+  const auth = await resolveUser(email);
+  if (!auth.ok) return auth;
+  const where = { userId: auth.user.id };
+  if (status) where.status = status;
+  if (workspaceId) where.workspaceId = workspaceId;
+  const rows = await prisma.backgroundJob.findMany({
+    where,
+    orderBy: { updatedAt: "desc" },
+    take: 100,
+  });
+  return {
+    ok: true,
+    jobs: rows.map((j) => ({
+      id: j.id,
+      type: j.type,
+      status: j.status,
+      resourceId: j.resourceId,
+      attempts: j.attempts,
+      maxAttempts: j.maxAttempts,
+      lastError: j.lastError || null,
+      runAfter: j.runAfter ? j.runAfter.toISOString() : null,
+      startedAt: j.startedAt ? j.startedAt.toISOString() : null,
+      finishedAt: j.finishedAt ? j.finishedAt.toISOString() : null,
+      createdAt: j.createdAt.toISOString(),
+      updatedAt: j.updatedAt ? j.updatedAt.toISOString() : null,
+    })),
+  };
+}
+
+/** Retry image generation for one post by re-arming its durable job (scoped). */
+export async function retryImageJob({ email, postId }) {
+  const auth = await resolveUser(email);
+  if (!auth.ok) return auth;
+  const post = await prisma.studioPost.findFirst({
+    where: { id: postId, userId: auth.user.id },
+  });
+  if (!post) return { ok: false, status: 404, error: "Post not found" };
+  if (post.locked && post.status === "published") {
+    return { ok: false, status: 409, error: "Post is locked. Rewrite first to change the image." };
+  }
+  await prisma.studioPost.update({ where: { id: post.id }, data: { imageStatus: "pending" } });
+  await enqueueImageJob({
+    postId: post.id,
+    userId: auth.user.id,
+    workspaceId: post.workspaceId || null,
+    websiteOrigin: post.websiteOrigin || null,
+    imageSource: "auto",
+  });
+  return { ok: true, post: serializePost({ ...post, imageStatus: "pending" }) };
+}
+
+/** Build the structured, validated CTA for a stored post (for publishing). */
+export function buildPostCta(post) {
+  const packed = unpackKeywordPack(post.generalKeywords);
+  const gmbCategory =
+    packed.meta?.gmbCategory ||
+    (post.platform === "GMB" && isGmbCategoryId(post.tone) ? post.tone : null);
+  return buildCta({
+    platform: post.platform,
+    gmbLabel: post.platform === "GMB" ? resolveGmbCta(gmbCategory, {}) : undefined,
+    destinationUrl: post.sourceUrl,
+    businessOrigin: post.websiteOrigin || websiteOriginFromUrl(post.sourceUrl),
+  });
+}
+
+/** Enqueue a durable image-generation job for one post (idempotent per post). */
+export async function enqueueImageJob({ postId, userId, workspaceId, websiteOrigin, imageSource }) {
+  return enqueueJob({
+    type: "image.generate",
+    dedupeKey: `image:${postId}`,
+    payload: { postId, userId, imageSource: imageSource || "auto" },
+    userId: userId || null,
+    workspaceId: workspaceId || null,
+    websiteOrigin: websiteOrigin || null,
+    resourceId: postId,
+  });
+}
+
 /**
  * Due scheduled posts → publish + lock (called by scheduler)
  */
+/**
+ * How long a post may sit in the transient "publishing" state before a crash
+ * is assumed and it is returned to the scheduled queue. Must comfortably exceed
+ * a real publish round-trip (image upload + provider API).
+ */
+const STALE_PUBLISHING_MS =
+  Number(process.env.AUTOPOSTER_STALE_PUBLISHING_MS) || 5 * 60 * 1000;
+
 export async function processDueScheduledPosts() {
+  // Crash recovery: a post stuck mid-publish (worker died between claim and the
+  // terminal write) is returned to the queue after a safety lease so it is not
+  // orphaned. updatedAt is bumped by the claim, so only genuinely stale rows
+  // revert — a post actively publishing right now is left alone.
+  await prisma.studioPost
+    .updateMany({
+      where: {
+        status: "publishing",
+        updatedAt: { lt: new Date(Date.now() - STALE_PUBLISHING_MS) },
+      },
+      data: { status: "scheduled" },
+    })
+    .catch(() => {});
+
   const due = await prisma.studioPost.findMany({
     where: {
       status: "scheduled",
@@ -3169,10 +4404,39 @@ export async function processDueScheduledPosts() {
       archived: false,
     },
     take: 50,
+    select: { id: true },
   });
 
   let n = 0;
-  for (const post of due) {
+  for (const { id } of due) {
+    // Atomic claim — only one worker can flip scheduled → publishing. A post
+    // that was canceled, deleted, or rescheduled in the meantime no longer
+    // matches this guard, so it can NEVER be claimed and therefore never
+    // published. This also prevents two concurrent workers double-publishing.
+    const claim = await prisma.studioPost.updateMany({
+      where: {
+        id,
+        status: "scheduled",
+        scheduledAt: { lte: new Date() },
+        locked: false,
+        archived: false,
+      },
+      data: { status: "publishing" },
+    });
+    if (claim.count !== 1) continue; // lost the race (canceled / deleted / claimed)
+
+    // Re-read the freshly-claimed row — never trust the stale batch copy.
+    const post = await prisma.studioPost.findUnique({ where: { id } });
+    if (!post) continue; // deleted after claim (atomic guard makes this unlikely)
+
+    // On any non-terminal failure, return the post to the queue so the existing
+    // retry-on-next-tick behavior is preserved exactly. Guarded on "publishing"
+    // so a concurrent cancel is never clobbered.
+    const revertToScheduled = () =>
+      prisma.studioPost
+        .updateMany({ where: { id, status: "publishing" }, data: { status: "scheduled" } })
+        .catch(() => {});
+
     const dup = await prisma.studioPost.findFirst({
       where: {
         userId: post.userId,
@@ -3183,18 +4447,23 @@ export async function processDueScheduledPosts() {
       },
     });
     if (dup) {
-      await prisma.studioPost.update({
-        where: { id: post.id },
-        data: { status: "draft", scheduledAt: null },
-      });
+      await prisma.studioPost
+        .updateMany({ where: { id, status: "publishing" }, data: { status: "draft", scheduledAt: null } })
+        .catch(() => {});
       continue;
     }
 
     const user = await prisma.user.findUnique({ where: { id: post.userId } });
-    if (!user?.email) continue;
+    if (!user?.email) {
+      await revertToScheduled();
+      continue;
+    }
 
     const provider = PLATFORM_CONFIG[post.platform]?.key;
-    if (!provider) continue;
+    if (!provider) {
+      await revertToScheduled();
+      continue;
+    }
 
     let live;
     try {
@@ -3206,9 +4475,11 @@ export async function processDueScheduledPosts() {
         contentByProvider: { [provider]: post.content },
         imageUrl: post.imageUrl || undefined,
         workspaceId: post.workspaceId || undefined,
+        cta: provider === "google_business" ? { google_business: buildPostCta(post) } : undefined,
       });
     } catch (err) {
       console.error(`[autoPoster] scheduled live publish failed ${post.id}`, err.message);
+      await revertToScheduled();
       continue;
     }
 
@@ -3217,18 +4488,23 @@ export async function processDueScheduledPosts() {
         `[autoPoster] scheduled live publish blocked ${post.id}:`,
         live?.error || live?.message
       );
+      await revertToScheduled();
       continue;
     }
 
-    await prisma.studioPost.update({
-      where: { id: post.id },
-      data: {
-        status: "published",
-        locked: true,
-        publishedAt: new Date(),
-        scheduledAt: null,
-      },
-    });
+    // Terminal success — guarded on "publishing" (no-throw updateMany) so the
+    // row that we atomically own is the one we mark published.
+    await prisma.studioPost
+      .updateMany({
+        where: { id, status: "publishing" },
+        data: {
+          status: "published",
+          locked: true,
+          publishedAt: new Date(),
+          scheduledAt: null,
+        },
+      })
+      .catch(() => {});
 
     await stampPostActivity(user.id, post.platform).catch(() => {});
     n += 1;

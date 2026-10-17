@@ -4,11 +4,17 @@ export function publicEligibleMeta(meta) {
   if (!meta || typeof meta !== "object") return null;
   return {
     type: meta.type || null,
+    // Whether this item is a real, publishable business location.
+    publishable: meta.publishable === true,
     address: meta.address || null,
     phone: meta.phone || null,
     hours: meta.hours || null,
     locationName: meta.locationName || null,
+    locationId: meta.locationId || meta.locationName || null,
+    locationTitle: meta.locationTitle || null,
+    storeCode: meta.storeCode || null,
     googleAccount: meta.googleAccount || null,
+    googleAccountName: meta.googleAccountName || null,
     note: meta.note || null,
   };
 }

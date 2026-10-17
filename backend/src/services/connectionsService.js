@@ -7,6 +7,7 @@ import prisma from "../db.js";
 import { isFullyVerified } from "./verifyService.js";
 import { resolveActiveWorkspace } from "./workspaceService.js";
 import { sanitizeEligibleForClient } from "./oauthPicker.js";
+import { buildGbpEligible, isPublishableGbpItem } from "./gbpDiscovery.js";
 
 const PROVIDERS = ["facebook", "instagram", "google_business", "linkedin", "x", "pinterest"];
 const STATE_SECRET = () =>
@@ -608,90 +609,14 @@ async function handleGoogleCallback({ code, user, workspaceId }) {
     ? new Date(Date.now() + tokenData.expires_in * 1000)
     : null;
 
-  // Business Profile API — accounts
-  const accountsRes = await fetch(
-    "https://mybusinessaccountmanagement.googleapis.com/v1/accounts",
-    { headers: { Authorization: `Bearer ${accessToken}` } }
-  );
-  const accountsData = await accountsRes.json();
-  const accounts = accountsData.accounts || [];
+  // Paginated, error-aware account + location discovery. Never silently
+  // auto-assigns a location — the user picks on the selection screen.
+  const { eligible, warnings } = await buildGbpEligible(accessToken, {
+    refreshToken,
+    tokenExpiresAt: expiresAt,
+  });
 
-  if (!accounts.length) {
-    return {
-      eligible: [
-        {
-          accountId: "google-user",
-          accountName: "Google Business (no locations yet)",
-          accountUrl: "https://business.google.com/",
-          accessToken,
-          refreshToken,
-          tokenExpiresAt: expiresAt,
-          metadata: { note: "No GBP accounts returned — enable Business Profile API" },
-        },
-      ],
-      accessToken,
-      refreshToken,
-      tokenExpiresAt: expiresAt,
-    };
-  }
-
-  const eligible = [];
-  for (const acc of accounts.slice(0, 8)) {
-    const accountName = acc.name || acc.accountName || "Google Business";
-    let locations = [];
-    try {
-      const locRes = await fetch(
-        `https://mybusinessbusinessinformation.googleapis.com/v1/${accountName}/locations?readMask=name,title,storefrontAddress,phoneNumbers,websiteUri,regularHours`,
-        { headers: { Authorization: `Bearer ${accessToken}` } }
-      );
-      if (locRes.ok) {
-        const locData = await locRes.json();
-        locations = Array.isArray(locData.locations) ? locData.locations : [];
-      }
-    } catch {
-      locations = [];
-    }
-
-    if (locations.length) {
-      for (const loc of locations.slice(0, 20)) {
-        const addr = loc.storefrontAddress
-          ? [loc.storefrontAddress.addressLines?.[0], loc.storefrontAddress.locality, loc.storefrontAddress.administrativeArea]
-              .filter(Boolean)
-              .join(", ")
-          : "";
-        const phone =
-          loc.phoneNumbers?.primaryPhone || loc.phoneNumbers?.primary || "";
-        eligible.push({
-          accountId: loc.name || `${accountName}/${loc.title}`,
-          accountName: loc.title || loc.name || "GBP location",
-          accountUrl: loc.websiteUri || "https://business.google.com/",
-          accessToken,
-          refreshToken,
-          tokenExpiresAt: expiresAt,
-          metadata: {
-            googleAccount: acc.name,
-            locationName: loc.name,
-            address: addr,
-            phone,
-            hours: loc.regularHours ? JSON.stringify(loc.regularHours) : null,
-            type: "location",
-          },
-        });
-      }
-    } else {
-      eligible.push({
-        accountId: acc.name || accountName,
-        accountName: acc.accountName || accountName,
-        accountUrl: "https://business.google.com/",
-        accessToken,
-        refreshToken,
-        tokenExpiresAt: expiresAt,
-        metadata: { googleAccount: acc.name, type: acc.type },
-      });
-    }
-  }
-
-  return { eligible, accessToken, refreshToken, tokenExpiresAt: expiresAt };
+  return { eligible, warnings, accessToken, refreshToken, tokenExpiresAt: expiresAt };
 }
 
 async function handleLinkedInCallback({ code, user, workspaceId }) {
@@ -999,7 +924,7 @@ async function savePendingSelection({ userId, workspaceId, provider, bundle }) {
     accessToken: bundle.accessToken || null,
     refreshToken: bundle.refreshToken || null,
     tokenExpiresAt: bundle.tokenExpiresAt || null,
-    metadata: JSON.stringify({ eligible }),
+    metadata: JSON.stringify({ eligible, warnings: bundle.warnings || [] }),
     workspaceId,
   };
 
@@ -1049,9 +974,11 @@ export async function listPendingSelection({ email, provider, workspaceId }) {
   }
 
   let eligible = [];
+  let warnings = [];
   try {
     const meta = pending.metadata ? JSON.parse(pending.metadata) : {};
     eligible = Array.isArray(meta.eligible) ? meta.eligible : [];
+    warnings = Array.isArray(meta.warnings) ? meta.warnings : [];
   } catch {
     eligible = [];
   }
@@ -1070,6 +997,7 @@ export async function listPendingSelection({ email, provider, workspaceId }) {
     ok: true,
     pending: true,
     provider,
+    warnings,
     items: sanitizeEligibleForClient(
       eligible,
       connected.map((c) => c.accountId)
@@ -1138,6 +1066,17 @@ export async function connectSelectedAccounts({ email, provider, accountIds, wor
     const item = byId.get(id);
     if (!item) {
       return { ok: false, status: 400, error: `Account ${id} was not in the provider-returned list.` };
+    }
+    // GBP: only real, publishable locations may be connected. Account-only /
+    // stub items (no selected location) are rejected server-side so they can
+    // never later resolve to the wrong business at publish time.
+    if (provider === "google_business" && !isPublishableGbpItem(item)) {
+      return {
+        ok: false,
+        status: 400,
+        error:
+          "Select a specific Google Business location. Accounts without a chosen location cannot be connected for publishing.",
+      };
     }
     saved.push(
       await upsertOAuthAccount(gate.user.id, wid, provider, {

@@ -10,6 +10,9 @@ import { startPriceRefreshInterval } from "./src/modelPrices.js";
 import { getCreditConfig } from "./src/credits.js";
 import { syncConfigToEnv } from "./src/services/configService.js";
 import { startReminderScheduler } from "./src/services/reminderService.js";
+import { startJobWorker, drainForShutdown } from "./src/services/jobQueue.js";
+import { registerAutoPosterJobs } from "./src/services/autoPosterService.js";
+import prisma from "./src/db.js";
 
 // Always load backend/.env (PM2 may start with a different cwd / stale env)
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -43,6 +46,12 @@ async function bootstrap() {
   startPriceRefreshInterval();
   startReminderScheduler();
 
+  // Batch 5: durable background job worker (image generation, etc.). Handlers
+  // must be registered before the worker starts polling. recoverStuckJobs runs
+  // inside startJobWorker so interrupted jobs resume after a restart.
+  registerAutoPosterJobs();
+  const jobWorker = startJobWorker();
+
   const host = process.env.HOST || "0.0.0.0";
   const server = app.listen(PORT, host, () => {
     const config = getCreditConfig();
@@ -57,6 +66,28 @@ async function bootstrap() {
     console.error("[avonix-api] listen failed:", err.message);
     process.exit(1);
   });
+
+  // Graceful shutdown: stop accepting new HTTP + new jobs, let in-flight jobs
+  // drain, then disconnect. Unfinished queued jobs resume on the next boot.
+  let shuttingDown = false;
+  const shutdown = async (signal) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    console.log(`[avonix-api] ${signal} received — draining…`);
+    jobWorker.stop();
+    server.close(() => console.log("[avonix-api] HTTP server closed"));
+    try {
+      await drainForShutdown({ timeoutMs: 15000 });
+    } catch (err) {
+      console.error("[avonix-api] drain error:", err.message);
+    }
+    try {
+      await prisma.$disconnect();
+    } catch { /* ignore */ }
+    process.exit(0);
+  };
+  process.on("SIGTERM", () => shutdown("SIGTERM"));
+  process.on("SIGINT", () => shutdown("SIGINT"));
 }
 
 bootstrap().catch((err) => {
