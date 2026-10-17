@@ -990,9 +990,18 @@ export function stripOwnerNameFromContent(text, ownerName) {
     if (v.length < 3) continue;
     const esc = v.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     // Remove possessive and plain occurrences, tidy leftover punctuation/space.
-    out = out.replace(new RegExp(`\\b${esc}'?s?\\b[,:;\\-]?\\s*`, "gi"), "");
+    // Consume trailing spaces/tabs only (NOT newlines) so a removal never
+    // collapses a paragraph break into the next line.
+    out = out.replace(new RegExp(`\\b${esc}'?s?\\b[,:;\\-]?[ \\t]*`, "gi"), "");
   }
-  return out.replace(/\s{2,}/g, " ").replace(/\s+([.,!?])/g, "$1").trim();
+  // Collapse only horizontal whitespace runs — preserve newlines / paragraph
+  // structure (GMB NAP + hashtag lines, social CTA/hashtag blocks) which later
+  // steps (splitBodyTail, hashtag parsing) depend on.
+  return out
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/[ \t]+([.,!?])/g, "$1")
+    .replace(/[ \t]+\n/g, "\n")
+    .trim();
 }
 
 async function resolveBusinessContext(userId, workspaceId, workspace, ownerName = "") {
