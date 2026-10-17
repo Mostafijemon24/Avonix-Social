@@ -10,16 +10,23 @@
  * - AVONIX-SOCIAL-REDESIGN-SPEC.md §6–10
  */
 
-export const GMB_RULESET_VERSION = "gmb-master-v1";
+export const GMB_RULESET_VERSION = "gmb-master-v2";
 
+/**
+ * GBP length model (master-prompt v2): concise + complete, NOT a forced long
+ * SEO wall. `max` is Google's real localPost summary limit (1,500 chars). There
+ * is NO mandatory minimum padding target — short, useful posts are valid. The
+ * soft `targetMin/targetMax` are advisory only (never padded to, never a
+ * hard-fail). `hashtagMin/Max = 0`: GBP posts default to ZERO hashtags.
+ */
 export const GMB_CHAR = Object.freeze({
-  min: 1000,
-  max: 1100,
-  targetMin: 1020,
-  targetMax: 1050,
+  min: 80, // minimal complete post (guards against empty output, NOT a padding target)
+  max: 1500, // Google localPost summary hard limit
+  targetMin: 250, // advisory lower comfort bound (not enforced)
+  targetMax: 900, // advisory upper comfort bound (not enforced)
   frontLoad: 150,
-  hashtagMin: 4,
-  hashtagMax: 5,
+  hashtagMin: 0, // GBP: default no hashtags
+  hashtagMax: 0,
 });
 
 export const GMB_CATEGORY_IDS = Object.freeze({
@@ -71,8 +78,7 @@ export const GMB_CATEGORIES = Object.freeze({
       { key: "proximity", label: "Proximity & Availability" },
       { key: "services", label: "Core Services" },
       { key: "why", label: "Why Choose Us" },
-      { key: "napCta", label: "NAP + Conversion CTA" },
-      { key: "hashtags", label: "Local hashtags (4–5)" },
+      { key: "napCta", label: "NAP (optional)" },
     ],
     servicesCount: { min: 1, max: 7 },
     objective:
@@ -82,10 +88,8 @@ export const GMB_CATEGORIES = Object.freeze({
 GOAL
 Capture high-intent mobile, Google Maps, voice, and AI-driven local searches. Increase calls and map visits. Strengthen local relevance.
 
-MANDATORY LENGTH
-Keep the complete post between 1,000 and 1,100 characters including spaces.
-Target approximately 1,020–1,050 characters.
-Never silently truncate. Never produce robotic SEO copy.
+LENGTH
+Write concise, complete, professional copy appropriate to the topic. Do NOT pad to a length target. Hard limit: at most 1,500 characters including spaces. There is no minimum. Never produce robotic SEO copy.
 
 MANDATORY FRONT-LOADING
 Within the first 150 characters, naturally include:
@@ -99,7 +103,7 @@ MANDATORY STRUCTURE (do not omit, merge away, or rearrange)
 2. Proximity & Availability — city, street or neighborhood, service area, hours, convenience (only if factually true: walk-ins, 24/7, same-day, fast response, no appointment, book today).
 3. Core Services — list ONLY verified actual services from the selected source, website analysis, or workspace data. One real service is enough. Never invent extra services, never turn keywords into "Tip 2/3/4", and never pad with educational tips labeled as services.
 4. Why Choose Us — verified differentiators only. NEVER invent #1, best, or top-rated unless factually supported in the source data.
-5. NAP + Conversion CTA — Business Name, Exact Address, Phone, Hours (only when provided). Then a direct CTA instruction matching the recommended button. Then 4–5 relevant local hashtags.
+5. NAP (optional) — Business Name, Exact Address, Phone, Hours ONLY when provided; otherwise omit. Do NOT write a CTA instruction in the body (the native button is attached separately). Do NOT add hashtags.
 
 COMMUNICATE NATURALLY
 What the business does, where it is located, who it serves, availability when verified, key services, why customers should choose it, and what to do next.
@@ -134,8 +138,7 @@ If a fact is unavailable, omit it. Do not fabricate.`,
       { key: "value", label: "Value Proposition" },
       { key: "redeem", label: "How to Redeem" },
       { key: "local", label: "Local Connection" },
-      { key: "napCta", label: "NAP + CTA" },
-      { key: "hashtags", label: "Local promotional hashtags (4–5)" },
+      { key: "napCta", label: "NAP (optional)" },
     ],
     requiresVerifiedOffer: true,
     objective:
@@ -145,8 +148,8 @@ If a fact is unavailable, omit it. Do not fabricate.`,
 GOAL
 Create urgency around a VERIFIED offer, promotion, or event. Encourage calls, visits, bookings, registrations, or redemptions. Never invent the offer.
 
-MANDATORY LENGTH
-1,000–1,100 characters including spaces. Target 1,020–1,050. Never silently truncate.
+LENGTH
+Write concise, complete, professional copy appropriate to the topic. Do NOT pad to a length target. Hard limit: at most 1,500 characters including spaces. There is no minimum.
 
 MANDATORY FRONT-LOADING
 Put the main offer, event, discount, or benefit within the first 150 characters.
@@ -156,7 +159,7 @@ MANDATORY STRUCTURE (do not omit)
 2. Value Proposition — what the customer receives, who qualifies, why it is valuable, relevant dates/availability, limitations.
 3. How to Redeem — simple instructions (call, mention this Google post, register, visit, book).
 4. Local Connection — city, neighborhood/street, service area, event location.
-5. NAP + CTA — Business Name, Exact Address, Phone, Hours/Event Time (only when provided). Recommended GBP button. Then 4–5 relevant local promotional hashtags.
+5. NAP (optional) — Business Name, Exact Address, Phone, Hours/Event Time ONLY when provided; otherwise omit. Do NOT write a CTA instruction in the body. Do NOT add hashtags.
 
 CRITICAL FACTUALITY
 NEVER invent discounts, expiration dates, scarcity, availability, quantities, eligibility, promotions, or events.
@@ -196,8 +199,7 @@ Possible legitimate subjects only when present in source data: discount, seasona
       { key: "proof", label: "Proof & Differentiation" },
       { key: "benefit", label: "Customer Benefit" },
       { key: "local", label: "Local Reassurance" },
-      { key: "napCta", label: "NAP + CTA" },
-      { key: "hashtags", label: "Local/industry hashtags (4–5)" },
+      { key: "napCta", label: "NAP (optional)" },
     ],
     objective:
       "Build instant credibility for map searchers using only verified proof.",
@@ -206,8 +208,8 @@ Possible legitimate subjects only when present in source data: discount, seasona
 GOAL
 Build immediate credibility with people who found the business on Google Search or Maps. Use ONLY verified credibility signals.
 
-MANDATORY LENGTH
-1,000–1,100 characters including spaces. Target 1,020–1,050. Never silently truncate.
+LENGTH
+Write concise, complete, professional copy appropriate to the topic. Do NOT pad to a length target. Hard limit: at most 1,500 characters including spaces. There is no minimum.
 
 MANDATORY FRONT-LOADING
 Place the primary trust/authority message within the first 150 characters.
@@ -217,7 +219,7 @@ MANDATORY STRUCTURE (do not omit)
 2. Proof & Differentiation — 2–4 verified trust signals only.
 3. Customer Benefit — how capabilities help (faster service, convenience, accurate evaluation, higher quality, easier process, better access, reduced delays, personalized service). Avoid unsupported guarantees.
 4. Local Reassurance — connect expertise to the city and surrounding communities.
-5. NAP + CTA — Business Name, Exact Address, Phone, Hours (only when provided). Recommended GBP button. Then 4–5 relevant local and industry hashtags.
+5. NAP (optional) — Business Name, Exact Address, Phone, Hours ONLY when provided; otherwise omit. Do NOT write a CTA instruction in the body. Do NOT add hashtags.
 
 VERIFIED SIGNALS ONLY (use only if present in source data)
 Years of experience, professional credentials, specialized training, advanced technology, certifications, experienced team, on-site capabilities, customer service process, verified review themes, unique business advantages.
@@ -249,8 +251,7 @@ Professional, authoritative, reassuring, local, evidence-based, conversion-focus
       { key: "answer", label: "Direct Answer" },
       { key: "tips", label: "Actionable Tips" },
       { key: "local", label: "Local Connection" },
-      { key: "napCta", label: "NAP + CTA" },
-      { key: "hashtags", label: "Local educational hashtags (4–5)" },
+      { key: "napCta", label: "NAP (optional)" },
     ],
     tipsCount: { min: 2, max: 4 },
     objective:
@@ -260,8 +261,8 @@ Professional, authoritative, reassuring, local, evidence-based, conversion-focus
 GOAL
 Directly answer one common customer question. Capture long-tail, conversational, voice, and AI-driven search intent. Demonstrate local expertise. Encourage contact when professional help is needed.
 
-MANDATORY LENGTH
-1,000–1,100 characters including spaces. Target 1,020–1,050. Never silently truncate.
+LENGTH
+Write concise, complete, professional copy appropriate to the topic. Do NOT pad to a length target. Hard limit: at most 1,500 characters including spaces. There is no minimum.
 
 MANDATORY FRONT-LOADING
 The first 150 characters MUST contain a natural question that ends with a question mark, based on the selected source (for example "Need help with…?", "Wondering how to…?", "How do you…?"). Do not use a generic unrelated question.
@@ -272,7 +273,7 @@ MANDATORY STRUCTURE (do not omit)
 2. Direct Answer — concise expert answer. The first 2–3 sentences should stand alone as a useful answer.
 3. Actionable Tips — 2–4 concise bullet points, warning signs, steps, or considerations.
 4. Local Connection — tie the answer back to this local business and city.
-5. NAP + CTA — Business Name, Exact Address, Phone, Hours (only when provided). Then a direct CTA. Then 4–5 relevant local educational hashtags.
+5. NAP (optional) — Business Name, Exact Address, Phone, Hours ONLY when provided; otherwise omit. Do NOT write a CTA instruction in the body. Do NOT add hashtags.
 
 Solve ONE specific customer problem. Do not cover many unrelated topics.
 Do not make unsupported medical, legal, financial, technical, or safety claims.
@@ -640,6 +641,26 @@ export function stripUnverifiedNap(text, business = {}) {
     .trim();
 }
 
+/**
+ * GBP default (master-prompt v2): ZERO hashtags. Remove any trailing hashtag
+ * block and stray inline hashtags the model may have added. Keeps the body
+ * professional and avoids malformed keyword-concatenated tags
+ * (e.g. "#HoustonHoustonDentalSEO"). Hashtags are never auto-generated for GBP.
+ */
+export function stripGmbHashtags(text) {
+  let body = String(text || "");
+  // Drop a trailing hashtag-only line/paragraph.
+  body = body.replace(/(?:\n+\s*#[A-Za-z0-9_]+(?:\s+#[A-Za-z0-9_]+)*\s*)+$/g, "");
+  // Drop any remaining standalone hashtag tokens anywhere in the body.
+  body = body.replace(/(^|\s)#[A-Za-z0-9_]+/g, "$1");
+  return body
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+/** @deprecated gmb-master-v1 forced-hashtag path. Retained for compatibility; not used by the v2 pipeline. */
 export function ensureGmbHashtags(text, { location, primary, categoryId } = {}) {
   const raw = String(text || "").trim();
   const tail = raw.match(/(\n+(?:#[A-Za-z0-9_]+(?:\s+#[A-Za-z0-9_]+)+)\s*)$/);
@@ -757,26 +778,34 @@ ${facts}
 SELECTED CONTENT SOURCES (only these pages may influence the post):
 ${pageLines || "- (none)"}
 
+RECOMMENDED NATIVE BUTTON (handled by the publishing layer, NOT written in the body): ${cta}
+
 Return ONLY JSON:
-{"heading":"string","content":"string","cta":"${cta}"}
-content must be the full post body including NAP (when available), CTA instruction, and 4-5 hashtags.
-Do not include markdown, HTML, or emojis except the optional NAP markers if they help mobile readability.
-Character count of content MUST be ${GMB_CHAR.min}-${GMB_CHAR.max} (target ${GMB_CHAR.targetMin}-${GMB_CHAR.targetMax}).`;
+{"heading":"string","content":"string"}
+content is the post body only. Write concise, complete, professional copy — long enough to be useful, no longer than it needs to be. Do NOT pad to a character target.
+Do NOT write any call-to-action instruction such as 'Click "Learn More"', 'Visit this page', or 'Click the link' — the CTA is a separate native button.
+Do NOT add hashtags (Google Business Profile posts do not use hashtags).
+Include NAP only when the exact values are provided above; otherwise omit it entirely.
+Do not include markdown, HTML, or emojis.
+Hard limit: content must be at most ${GMB_CHAR.max} characters including spaces. There is no minimum padding requirement.`;
 }
 
 export function buildGmbSystemPrompt(categoryId) {
   const cat = getGmbCategory(categoryId);
   return `${cat.systemPrompt}
 
-OUTPUT RULES
+OUTPUT RULES (master-prompt v2)
 - English only.
 - No markdown headings.
-- No inline hyperlinks in the body (the source URL is stored separately).
-- Include 4–5 relevant hashtags on the last line.
+- No inline hyperlinks in the body (the source URL is stored separately and attached as a native button).
+- Do NOT add hashtags. Google Business Profile posts default to zero hashtags.
+- Do NOT write a call-to-action instruction in the body (no 'Click "Learn More"', 'Visit this page', 'Click the link'). The CTA is a separate native button.
 - The heading/hook is mandatory and category-specific (${cat.hookName}).
-- Stay within ${GMB_CHAR.min}–${GMB_CHAR.max} characters including spaces.
+- Prefer concise, complete copy. Do NOT pad to a length target. Hard limit: at most ${GMB_CHAR.max} characters including spaces. There is no minimum padding requirement.
+- Do not repeat a sentence or restate the same conclusion twice.
+- Do not insert generic self-promotion ("our agency", "we are proud to", "your trusted partner") unless the verified brand voice supports it.
 - NAP HARD RULE: if Exact address, Phone, or Hours are marked OMIT, do not write any street address, phone number, opening-hours claim, or phrases such as "Phone not provided". City from verified location may be used. Never use placeholders such as 123 Main St or (123) 456-7890.
-- Never invent NAP, ratings, credentials, offers, services, or statistics to hit the character target.
+- Never invent NAP, ratings, credentials, offers, services, or statistics.
 - Keywords are wording hints only. They are not extra services. Never write "Tip 2", "Tip 3", or "related 4" as services.`
 }
 
@@ -807,12 +836,14 @@ export function buildGmbRefinePrompt({
       targeted.push(
         `Rewrite the OPENING so a source-supported question ending with "?" appears within the first 150 characters. Base the question on "${sourceTitle || "the selected page topic"}". Keep the rest of the post. Do not use a generic unrelated question.`
       );
-    } else if (/Need 4|hashtag/i.test(issue)) {
-      targeted.push("Adjust hashtags only: keep 4–5 relevant tags for service, industry, location, and topic. No stuffing.");
-    } else if (/below the/i.test(issue) || /too short/i.test(issue)) {
-      targeted.push("Expand using verified source facts only. Do not invent NAP, services, credentials, or offers.");
-    } else if (/above the/i.test(issue)) {
-      targeted.push("Compress without removing required factual elements, CTA, or hashtags.");
+    } else if (/hashtag/i.test(issue)) {
+      targeted.push("Remove ALL hashtags — Google Business Profile posts do not use hashtags.");
+    } else if (/button-instruction|CTA instruction|read the details|Click/i.test(issue)) {
+      targeted.push('Remove any CTA instruction text (e.g. \'Click "Learn More" to read the details on this page\'). The CTA is a separate native button.');
+    } else if (/repeated sentence|duplicate/i.test(issue)) {
+      targeted.push("Remove duplicate sentences and any repeated conclusion. Say each point once.");
+    } else if (/above the|over the|hard limit/i.test(issue)) {
+      targeted.push("Compress to under the character limit without removing required factual elements. Do not pad.");
     } else if (/unverified|fabricated placeholder|not in verified/i.test(issue)) {
       targeted.push("Remove the unverified claim entirely. Do not replace it with another invented credential, phone, address, or statistic.");
     } else if (/Phone not provided|not provided/i.test(issue)) {
@@ -836,9 +867,10 @@ TARGETED REFINEMENT
 ${targeted.map((t, i) => `${i + 1}. ${t}`).join("\n")}
 
 HARD RULES
-- Length ${GMB_CHAR.min}–${GMB_CHAR.max} characters including spaces (target ${GMB_CHAR.targetMin}–${GMB_CHAR.targetMax}).
-- Do not silently truncate.
+- Concise and complete; at most ${GMB_CHAR.max} characters including spaces. Do NOT pad to a length target.
 - Do not invent facts, services, NAP, credentials, or offers.
+- Do NOT add hashtags. Do NOT write a CTA instruction in the body (the CTA is a native button).
+- Do not repeat a sentence or restate the same conclusion.
 - Keep the same category, tone, hook type (${cat.hookName}), and source relationship.
 - Front-load requirement: ${cat.frontLoad.description}
 - Never write "Phone not provided", "N/A", or similar placeholders.

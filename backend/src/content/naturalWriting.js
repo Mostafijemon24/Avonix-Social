@@ -36,6 +36,10 @@ export const GENERIC_OPENERS = Object.freeze([
   "when it comes to",
   "are you looking for",
   "looking for",
+  "searching for effective",
+  "searching for the best",
+  "searching for",
+  "in need of",
   "do you want to",
   "let's face it",
   "picture this",
@@ -216,6 +220,9 @@ export function scoreNaturalness(text, { keywords = {}, maxOccurrences = 4 } = {
   const genericOpening = detectGenericOpening(text);
   const cliches = detectCliches(text);
   const robotic = detectRoboticTransitions(text);
+  const templateInstructions = detectTemplateInstructions(text);
+  const genericSelfRef = detectGenericSelfRef(text);
+  const duplicateSentences = detectDuplicateSentences(text);
 
   const phrases = [keywords.primary, keywords.secondary]
     .concat(keywords.secondaryKeywords || keywords.general || [])
@@ -252,6 +259,28 @@ export function scoreNaturalness(text, { keywords = {}, maxOccurrences = 4 } = {
         .join(", ")}). Use the keyword naturally, not repeatedly.`
     );
   }
+  if (templateInstructions.length) {
+    score -= Math.min(30, templateInstructions.length * 20);
+    issues.push(
+      `Contains robotic button-instruction text (${templateInstructions
+        .map((s) => `"${s}"`)
+        .join(", ")}). The CTA is a native button/link — never write "Click X to read the details" in the body.`
+    );
+  }
+  if (duplicateSentences.length) {
+    score -= Math.min(30, duplicateSentences.length * 15);
+    issues.push(
+      `Contains repeated sentences (${duplicateSentences.length}). Remove duplicate sentences and repeated conclusions.`
+    );
+  }
+  if (genericSelfRef.length) {
+    score -= Math.min(15, genericSelfRef.length * 8);
+    issues.push(
+      `Contains generic self-referential phrasing (${genericSelfRef.join(
+        ", "
+      )}). Do not auto-insert "our agency"/"we specialize in"/superlatives unless the verified brand voice supports it.`
+    );
+  }
 
   return {
     score: Math.max(0, score),
@@ -261,6 +290,9 @@ export function scoreNaturalness(text, { keywords = {}, maxOccurrences = 4 } = {
     cliches,
     roboticTransitions: robotic,
     stuffing,
+    templateInstructions,
+    duplicateSentences,
+    genericSelfRef,
   };
 }
 
@@ -355,4 +387,118 @@ export function humanizeDraft(text, opts = {}) {
   }
   if (doVary) out = varyOpening(out, { topic: primary, seed });
   return tidy(out);
+}
+
+/**
+ * Robotic "button instruction" sentences that must NEVER appear in a post body.
+ * The real CTA is a native button (GBP) or a bottom link (feed) attached by the
+ * publishing layer — a quoted "Click X to read the details on this page" line is
+ * exactly the template tell the master prompt forbids. Removed on every platform.
+ */
+export const TEMPLATE_INSTRUCTION_RES = Object.freeze([
+  /\bclick\s+(?:here\s+)?["“'»]?\s*(?:learn more|visit website|book(?:\s+now)?|call(?:\s+now)?|sign\s*up|order(?:\s+online)?|shop|contact us|get directions)\s*["”'«]?\b[^.!?\n]*[.!?]?/gi,
+  /\bclick\s+["“'»]?\s*(?:learn more|here)\s*["”'«]?\b[^.!?\n]*\bto\s+(?:read|see|view|find)\b[^.!?\n]*[.!?]?/gi,
+  /\b(?:click|tap|press|hit)\s+the\s+(?:link|button)\b[^.!?\n]*[.!?]?/gi,
+  /\b(?:visit|check\s+out)\s+(?:this|the)\s+page\s+to\s+(?:learn|read|see|discover)\b[^.!?\n]*[.!?]?/gi,
+  /\blink\s+in\s+(?:bio|profile)\b[^.!?\n]*[.!?]?/gi,
+]);
+
+/** Matches found in `text`, for scoring / AI-refine feedback. */
+export function detectTemplateInstructions(text) {
+  const hay = String(text || "");
+  const hits = new Set();
+  for (const re of TEMPLATE_INSTRUCTION_RES) {
+    const m = hay.match(new RegExp(re.source, re.flags));
+    if (m) m.forEach((x) => hits.add(x.trim()));
+  }
+  return [...hits];
+}
+
+/** Remove robotic button-instruction sentences from a body (safe on all platforms). */
+export function stripTemplateInstructions(text) {
+  let out = String(text || "");
+  for (const re of TEMPLATE_INSTRUCTION_RES) {
+    out = out.replace(new RegExp(re.source, re.flags), " ");
+  }
+  return tidy(out);
+}
+
+/**
+ * Generic self-referential / promotional phrasing the master prompt says must
+ * not be inserted automatically ("our agency", "we are proud to", superlatives).
+ * Detection only — these are advisory because blind removal can break grammar;
+ * they are fed to the AI-refine prompt instead.
+ */
+export const GENERIC_SELFREF_RES = Object.freeze([
+  /\bour agency\b/gi,
+  /\bwe are proud to\b/gi,
+  /\bwe are thrilled to\b/gi,
+  /\bwe specialize in\b/gi,
+  /\byour trusted partner\b/gi,
+  /\bone[- ]stop[- ]shop\b/gi,
+  /\btrusted (?:name|choice|partner) in\b/gi,
+]);
+
+export function detectGenericSelfRef(text) {
+  const hay = String(text || "");
+  const hits = new Set();
+  for (const re of GENERIC_SELFREF_RES) {
+    const m = hay.match(new RegExp(re.source, re.flags));
+    if (m) m.forEach((x) => hits.add(x.toLowerCase().trim()));
+  }
+  return [...hits];
+}
+
+/** Normalize a sentence for duplicate comparison (case/space/punct-insensitive). */
+function normalizeSentence(s) {
+  return String(s || "")
+    .toLowerCase()
+    .replace(/<[^>]+>/g, " ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function splitIntoSentences(para) {
+  return String(para || "")
+    .split(/(?<=[.!?])\s+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+/** Duplicate / near-duplicate sentences present in the text (normalized form). */
+export function detectDuplicateSentences(text, { minChars = 24 } = {}) {
+  const seen = new Set();
+  const dupes = new Set();
+  for (const para of String(text || "").split(/\n{2,}/)) {
+    for (const sen of splitIntoSentences(para)) {
+      const norm = normalizeSentence(sen);
+      if (norm.length < minChars) continue;
+      if (seen.has(norm)) dupes.add(norm);
+      else seen.add(norm);
+    }
+  }
+  return [...dupes];
+}
+
+/**
+ * Remove repeated sentences (keep first occurrence), preserving paragraph breaks.
+ * Only de-dupes substantive sentences (>= minChars normalized) so short natural
+ * repeats (e.g. a one-word line) are left alone.
+ */
+export function dedupeSentences(text, { minChars = 24 } = {}) {
+  const seen = new Set();
+  const outParas = String(text || "")
+    .split(/\n{2,}/)
+    .map((para) => {
+      const kept = splitIntoSentences(para).filter((sen) => {
+        const norm = normalizeSentence(sen);
+        if (norm.length < minChars) return true;
+        if (seen.has(norm)) return false;
+        seen.add(norm);
+        return true;
+      });
+      return kept.join(" ");
+    })
+    .filter((p) => p.trim().length);
+  return tidy(outParas.join("\n\n"));
 }

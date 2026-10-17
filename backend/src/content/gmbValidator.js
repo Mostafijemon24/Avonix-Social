@@ -16,6 +16,10 @@ import {
   isGmbCategoryId,
   digitsOnly,
 } from "./gmbContentRules.js";
+import {
+  detectTemplateInstructions,
+  detectDuplicateSentences,
+} from "./naturalWriting.js";
 
 export const VALIDATION_STATUS = Object.freeze({
   READY: "READY",
@@ -235,17 +239,13 @@ export function validateGmbPost({
   const front = firstNChars(body, GMB_CHAR.frontLoad);
   const combinedHead = `${heading || ""}\n${body}`;
 
-  if (charCount < GMB_CHAR.min) {
+  if (charCount > GMB_CHAR.max) {
     issues.push(
-      `Character count is ${charCount} (below the ${GMB_CHAR.min}–${GMB_CHAR.max} required range; target ${GMB_CHAR.targetMin}–${GMB_CHAR.targetMax}).`
+      `Character count is ${charCount} (above the ${GMB_CHAR.max} hard limit). Compress to fit — do not pad.`
     );
-  } else if (charCount > GMB_CHAR.max) {
+  } else if (charCount < GMB_CHAR.min) {
     issues.push(
-      `Character count is ${charCount} (above the ${GMB_CHAR.max} hard limit). Rewrite to fit — do not truncate.`
-    );
-  } else if (charCount < GMB_CHAR.targetMin || charCount > GMB_CHAR.targetMax) {
-    issues.push(
-      `Character count is ${charCount} (inside the hard limit, but outside the ${GMB_CHAR.targetMin}–${GMB_CHAR.targetMax} target). Refine toward the target.`
+      `Post is too short to be useful (${charCount} characters). Write a complete, concise post.`
     );
   }
 
@@ -277,27 +277,33 @@ export function validateGmbPost({
     issues.push("Contains fabricated service names (educational tips labeled as Core Services).");
   }
 
+  // Structure hits are retained for the UI/response as advisory signal. In v2
+  // GBP posts are natural, one-topic, concise — NOT a forced 5-section skeleton
+  // — so individual body sections (Core Services / Why Choose Us / NAP / etc.)
+  // are no longer hard requirements. The lead/front-load is still enforced
+  // below (service+city / question) and factuality remains strict.
   const hits = structureHits(cat.id, body);
-  for (const section of cat.structure) {
-    const ok =
-      section.key === "hashtags"
-        ? hits.hashtags
-        : section.key === "napCta"
-          ? hits.napCta
-          : hits[section.key];
-    if (!ok) {
-      issues.push(`Required section missing or too weak: ${section.label}.`);
-    }
+
+  // GBP default: ZERO hashtags. Any hashtag (especially malformed/concatenated
+  // keyword tags like #HoustonHoustonDentalSEO) is a defect to strip.
+  if (hashtags.length > 0) {
+    issues.push(
+      `Contains ${hashtags.length} hashtag(s) — Google Business Profile posts should have none. Remove them.`
+    );
   }
 
-  if (hashtags.length < GMB_CHAR.hashtagMin) {
-    issues.push(`Need ${GMB_CHAR.hashtagMin}–${GMB_CHAR.hashtagMax} hashtags (found ${hashtags.length}).`);
-  } else if (hashtags.length > GMB_CHAR.hashtagMax) {
-    issues.push(`Too many hashtags (${hashtags.length}); keep ${GMB_CHAR.hashtagMin}–${GMB_CHAR.hashtagMax}.`);
+  // Robotic button-instruction text must never appear in the body.
+  const templateInstructions = detectTemplateInstructions(body);
+  if (templateInstructions.length) {
+    issues.push(
+      `Contains robotic CTA/button-instruction text ("${templateInstructions[0]}"). The CTA is a native button — remove this line.`
+    );
   }
 
-  if (!hits.cta) {
-    issues.push("Missing a direct CTA instruction (Call Now / Book / Sign Up / Learn More).");
+  // Repeated sentences / duplicated conclusions.
+  const dupes = detectDuplicateSentences(body);
+  if (dupes.length) {
+    issues.push(`Contains ${dupes.length} repeated sentence(s). Remove duplicate sentences and repeated conclusions.`);
   }
 
   if (unsupportedSuperatives(body) && !/\bverified\b/i.test(String(business.differentiators || ""))) {
@@ -308,12 +314,13 @@ export function validateGmbPost({
 
   const hardFail = issues.some(
     (i) =>
-      i.includes("below the") ||
       i.includes("above the") ||
+      i.includes("too short") ||
       i.includes("First 150") ||
       i.includes("Required section") ||
-      i.includes("Need 4") ||
-      i.includes("Missing a direct CTA") ||
+      i.includes("posts should have none") ||
+      i.includes("button-instruction") ||
+      i.includes("repeated sentence") ||
       i.includes("NO_VERIFIED") ||
       i.includes("not in verified business data") ||
       i.includes("fabricated placeholder") ||
@@ -323,12 +330,8 @@ export function validateGmbPost({
       i.includes("not relevant to the selected source")
   );
 
-  const targetOnly = issues.length > 0 && issues.every((i) => i.includes("outside the"));
-
   const status =
-    issues.length === 0 || (targetOnly && charCount >= GMB_CHAR.min && charCount <= GMB_CHAR.max)
-      ? VALIDATION_STATUS.READY
-      : VALIDATION_STATUS.NEEDS_REVISION;
+    issues.length === 0 ? VALIDATION_STATUS.READY : VALIDATION_STATUS.NEEDS_REVISION;
 
   return {
     status: hardFail ? VALIDATION_STATUS.NEEDS_REVISION : status,

@@ -61,9 +61,8 @@ import {
   isGmbCategoryId,
   pickRelevantSourcePage,
   resolveGmbCta,
-  gmbCtaInstruction,
   stripUnverifiedNap,
-  ensureGmbHashtags,
+  stripGmbHashtags,
   extractVerifiedServices,
   ensureFaqQuestionHook,
   uiCatalog as gmbUiCatalog,
@@ -75,6 +74,8 @@ import {
   stripRoboticTransitions,
   reduceKeywordStuffing,
   scoreNaturalness,
+  stripTemplateInstructions,
+  dedupeSentences,
 } from "../content/naturalWriting.js";
 import { scrubForeignIdentity } from "../content/identityIsolation.js";
 import { getBrandVoice, buildVoicePromptBlock } from "./brandVoice.js";
@@ -789,14 +790,8 @@ function finalizeSocialCaption(
       platform === "LinkedIn"
         ? hashtagify("BusinessGrowth", primary, "Leadership", place)
         : platform === "Instagram"
-          ? hashtagify(
-              primary,
-              secondary,
-              place,
-              "LocalBusiness",
-              "SmallBusiness",
-              "InstagramMarketing"
-            )
+          ? // Instagram editorial rule: at most 5 relevant hashtags, de-duplicated.
+            hashtagify(primary, secondary, place, "LocalBusiness", "SmallBusiness")
           : hashtagify(place, primary, secondary || "LocalSEO");
     if (tags) out = `${out}\n\n${tags}`.trim();
   }
@@ -805,15 +800,19 @@ function finalizeSocialCaption(
 }
 
 function hashtagify(...parts) {
-  return parts
-    .map((p) =>
-      String(p || "")
-        .replace(/[^\w\s]/g, "")
-        .replace(/\s+/g, "")
-    )
-    .filter(Boolean)
-    .map((t) => `#${t}`)
-    .join(" ");
+  const seen = new Set();
+  const tags = [];
+  for (const p of parts) {
+    const t = String(p || "")
+      .replace(/[^\w\s]/g, "")
+      .replace(/\s+/g, "");
+    if (!t) continue;
+    const key = t.toLowerCase();
+    if (seen.has(key)) continue; // de-duplicate (no #Houston #Houston)
+    seen.add(key);
+    tags.push(`#${t}`);
+  }
+  return tags.slice(0, 5).join(" "); // editorial cap: never more than 5
 }
 
 function stripTags(text) {
@@ -1202,14 +1201,6 @@ function buildGmbTemplatePost({
   const displayName = name || "Our team";
 
   const nap = [name, address, phone, hours].filter(Boolean).join("\n");
-  const ctaLine = gmbCtaInstruction(cta);
-
-  const cityTag = city.replace(/[^\w]/g, "");
-  const svcTag = primary.replace(/[^\w]/g, "");
-  const tags = [`#${cityTag}`, `#${svcTag}`, `#${cityTag}NearMe`, `#Local${svcTag}`, `#${cityTag}Local`]
-    .filter((t) => t.length > 2)
-    .slice(0, 5)
-    .join(" ");
 
   let heading = "";
   let body = "";
@@ -1225,11 +1216,7 @@ We serve local families and businesses around ${city} with clear communication a
 ${serviceBlock ? `\n${serviceBlock}\n` : ""}
 Why choose us: our ${city} team focuses on reliable ${primary}${services[0] ? ` and ${services[0]}` : ""}, with straightforward guidance from the first call. We do not make unverified ranking claims — we let verified work and local availability speak for us.
 
-${nap}
-
-${ctaLine}
-
-${tags}`;
+${nap}`;
   } else if (cat.id === GMB_CATEGORY_IDS.OFFER_PROMOTION_EVENT) {
     heading = `Special ${primary} offer in ${city}`;
     body = `${heading}: see the verified details from our ${sourceTitle || "service"} page${name ? ` and visit ${name}` : ""} to learn what currently applies.
@@ -1244,11 +1231,7 @@ How to redeem:
 
 This opportunity is for customers in and around ${place}.
 
-${nap}
-
-${ctaLine}
-
-${tags}`;
+${nap}`;
   } else if (cat.id === GMB_CATEGORY_IDS.AUTHORITY_TRUST_PROOF) {
     heading = `Why ${city} customers choose ${displayName} for ${primary}`;
     body = `${heading}. Choosing the right local provider matters when you need ${primary} you can trust.
@@ -1259,11 +1242,7 @@ Customer benefit: a clearer process, local access in ${city}, and practical help
 
 Neighbors across ${place} can reach us for ${primary}${services.length ? ` and related needs such as ${services.slice(0, 3).join(", ")}` : ""}.
 
-${nap}
-
-${ctaLine}
-
-${tags}`;
+${nap}`;
   } else {
     heading = `When should you get help with ${primary} in ${city}?`;
     body = `${heading} If you are searching for clear, local guidance, here is a straightforward answer${name ? ` from ${name}` : ""}.
@@ -1278,60 +1257,30 @@ Helpful tips:
 
 Our ${city} team is here if you need professional ${primary} in ${place}.
 
-${nap}
-
-${ctaLine}
-
-${tags}`;
+${nap}`;
   }
 
   body = body.replace(/\n{3,}/g, "\n\n").trim();
-  body = padGmbToTarget(body, {
-    primary,
-    place,
-    name: displayName,
-    services,
-    ctaLine,
-  });
   return { heading, content: body, cta };
 }
 
-function padGmbToTarget(text, { primary, place, name, services, ctaLine }) {
-  let body = String(text || "").trim();
-  const hashMatch = body.match(/(\n\n(?:#[A-Za-z0-9_]+(?:\s+#[A-Za-z0-9_]+)+)\s*)$/);
-  const tags = hashMatch ? hashMatch[1] : "";
-  if (tags) body = body.slice(0, -tags.length).trim();
-
-  const verifiedBits = [
-    place && primary && `${primary} for people in ${place} starts with a clear local next step.`.trim(),
-    ctaLine,
-    name && place && primary && `${name} helps customers looking for ${primary} in ${place}.`,
-  ].filter(Boolean);
-
-  let i = 0;
-  while (body.length + tags.length < GMB_CHAR.targetMin && i < 12 && verifiedBits.length) {
-    const extra = verifiedBits[i % verifiedBits.length];
-    const projected = body.length + 2 + extra.length + tags.length;
-    if (projected > GMB_CHAR.max) break;
-    body = `${body}\n\n${extra}`.trim();
-    i += 1;
-  }
-
-  let combined = `${body}${tags}`.trim();
-  if (combined.length < GMB_CHAR.targetMin && place && primary) {
-    const filler = ` Local ${primary} in ${place}.`;
-    while (combined.length < GMB_CHAR.targetMin) {
-      const room = Math.min(GMB_CHAR.max - combined.length, GMB_CHAR.targetMin - combined.length);
-      if (room < 8) break;
-      const next = filler.slice(0, Math.min(filler.length, room));
-      if (!next) break;
-      combined += next;
-    }
-  }
-  if (combined.length > GMB_CHAR.max) {
-    combined = `${body}${tags}`.trim();
-  }
-  return combined;
+/**
+ * master-prompt v2: GBP posts are concise and are NEVER padded to a target.
+ * This only enforces Google's hard character ceiling (GMB_CHAR.max = 1500),
+ * trimming at a sentence/word boundary so nothing is cut mid-word.
+ */
+function trimGmbToHardMax(text) {
+  const body = String(text || "").trim();
+  if (body.length <= GMB_CHAR.max) return body;
+  const slice = body.slice(0, GMB_CHAR.max);
+  const boundary = Math.max(
+    slice.lastIndexOf(". "),
+    slice.lastIndexOf(".\n"),
+    slice.lastIndexOf("\n"),
+    slice.lastIndexOf(" ")
+  );
+  const cut = boundary > GMB_CHAR.max * 0.6 ? slice.slice(0, boundary + 1) : slice;
+  return cut.trim();
 }
 
 function enforceMaxWords(text, max) {
@@ -1888,23 +1837,20 @@ async function generateGmbWithMasterRules({
   };
 
   const polishGmbCandidate = (heading, content, provider) => {
-    const place = normalizeLocation(location) || "";
-    const primary = polishKeyword(keywords.primary, place);
-    const services = extractVerifiedServices({
-      keywords,
-      sourcePage,
-      selectedPages,
-      business,
-    });
-    const cta = resolveGmbCta(categoryId, { ...business, offerSummary: verifiedOffer.summary });
-    const ctaLine = gmbCtaInstruction(cta);
     let next = stripUnverifiedNap(content, business);
-    // P1 — identity isolation (no foreign site/business leakage) + light
-    // natural-writing cleanup. Front-load/length rules are preserved because
-    // padGmbToTarget re-fits the body below; openings are NOT varied for GMB
-    // (the first 150 chars must keep service+city+intent / question hooks).
+    // master-prompt v2 cleanup (concise, policy-compliant GBP):
+    //  - identity isolation (no foreign site/business leakage)
+    //  - cliché + robotic-transition removal
+    //  - strip robotic CTA/button-instruction text ("Click Learn More to read…")
+    //  - strip ALL hashtags (GBP posts default to zero)
+    //  - remove duplicate sentences / repeated conclusions
+    // Openings are NOT varied for GMB (first 150 chars must keep the
+    // service+city+intent / question hook). There is NO padding to a target.
     next = scrubForeignIdentity(next, { ownOrigin: gmbOrigin, foreignNames: gmbForeignNames });
     next = stripRoboticTransitions(replaceCliches(next));
+    next = stripTemplateInstructions(next);
+    next = stripGmbHashtags(next);
+    next = dedupeSentences(next);
     if (categoryId === GMB_CATEGORY_IDS.FAQ_EDUCATIONAL) {
       next = ensureFaqQuestionHook(next, {
         heading,
@@ -1912,18 +1858,7 @@ async function generateGmbWithMasterRules({
         keywords,
       });
     }
-    next = ensureGmbHashtags(next, {
-      location: place,
-      primary,
-      categoryId,
-    });
-    next = padGmbToTarget(next, {
-      primary,
-      place,
-      name: String(business.name || "").trim(),
-      services,
-      ctaLine,
-    });
+    next = trimGmbToHardMax(next);
     next = stripUnverifiedNap(next, business);
     return applyValidation(heading, next, provider);
   };

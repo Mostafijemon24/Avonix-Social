@@ -9,7 +9,7 @@ import {
   GMB_CATEGORY_LIST,
   GMB_CHAR,
   detectVerifiedOffer,
-  ensureGmbHashtags,
+  stripGmbHashtags,
   extractHashtags,
   extractVerifiedServices,
   ensureFaqQuestionHook,
@@ -24,6 +24,12 @@ import {
   uiCatalog,
 } from "../src/content/gmbContentRules.js";
 import { validateGmbPost } from "../src/content/gmbValidator.js";
+import {
+  stripTemplateInstructions,
+  dedupeSentences,
+  detectDuplicateSentences,
+  detectTemplateInstructions,
+} from "../src/content/naturalWriting.js";
 
 let passed = 0;
 let failed = 0;
@@ -46,8 +52,8 @@ assert(
   new Set(GMB_CATEGORY_LIST.map((c) => c.id)).size === 4,
   "category IDs are unique"
 );
-assert(GMB_CHAR.min === 1000 && GMB_CHAR.max === 1100, "hard character range");
-assert(GMB_CHAR.targetMin === 1020 && GMB_CHAR.targetMax === 1050, "target range");
+assert(GMB_CHAR.max === 1500, "GBP hard character ceiling is Google's 1500 limit (v2)");
+assert(GMB_CHAR.hashtagMin === 0 && GMB_CHAR.hashtagMax === 0, "GBP posts default to zero hashtags (v2)");
 assert(GMB_CHAR.frontLoad === 150, "front-load window is 150");
 
 const catalog = uiCatalog();
@@ -100,7 +106,7 @@ const rec = recommendGmbCategory(pages, "Plano");
 assert(rec.id === GMB_CATEGORY_IDS.INTENT_PROXIMITY, "recommends intent for local service pages");
 
 const cat = getGmbCategory(GMB_CATEGORY_IDS.INTENT_PROXIMITY);
-assert(cat.systemPrompt.includes("1,000") && cat.systemPrompt.includes("first 150"), "master prompt encodes length + front-load");
+assert(cat.systemPrompt.includes("1,500") && cat.systemPrompt.includes("first 150"), "master prompt encodes hard limit + front-load");
 
 const offerCat = validateGmbPost({
   content: "We might have a deal sometime. Call maybe.\n#One",
@@ -176,11 +182,11 @@ const stripped = stripUnverifiedNap(
 assert(!/\(123\)/.test(stripped) && !/123 Main/i.test(stripped), "strip removes unverified phone and street");
 assert(!/24\s*\/\s*7/i.test(stripped), "strip removes unverified hours");
 
-const tagged = ensureGmbHashtags(
-  "Looking for website repair near you in Houston? Click Call Now.",
-  { location: "Houston, TX", primary: "website repair", categoryId: GMB_CATEGORY_IDS.INTENT_PROXIMITY }
+const strippedTags = stripGmbHashtags(
+  "Looking for website repair in Houston.\n\n#Houston #HoustonWebsiteRepair #LocalBusiness #WebsiteRepair"
 );
-assert(extractHashtags(tagged).length >= 4, "ensureGmbHashtags adds at least 4 tags");
+assert(extractHashtags(strippedTags).length === 0, "stripGmbHashtags removes all hashtags (GBP posts have none)");
+assert(/website repair in Houston/i.test(strippedTags), "stripGmbHashtags keeps the body text");
 
 const verifiedPhoneOk = validateGmbPost({
   content: `${"Looking for website repair near you in Houston? Local WordPress and malware help for nearby businesses. ".repeat(8)}\nCore services:\n• Website repair\n• Malware removal\n• WordPress recovery\nWhy choose us: local team focused on verified website repair.\nClick "Call Now" to speak with our team.\n#Houston #WebsiteRepair #HoustonNearMe #LocalBusiness`,
@@ -324,6 +330,61 @@ assert(
     placeholderFail.issues.some((i) => /Phone not provided/i.test(i)),
   "Phone not provided is a hard validation failure"
 );
+
+/* ── master-prompt v2: the Houston Dental SEO defects must not reappear ──── */
+
+// 1. The concatenated keyword hashtag (#HoustonHoustonDentalSEO) is a stripped
+//    defect — GBP output carries NO hashtags at all.
+const dentalStripped = stripGmbHashtags(
+  "Dental practices in Houston need strong local search.\n\n#Houston #HoustonDentalSEO #HoustonHoustonDentalSEO #LocalSEO"
+);
+assert(extractHashtags(dentalStripped).length === 0, "GBP strips every hashtag (incl. #HoustonHoustonDentalSEO)");
+assert(!/HoustonHoustonDentalSEO/.test(dentalStripped), "the malformed concatenated hashtag is gone");
+
+// 2. The robotic "Click Learn More to read the details on this page" line is removed.
+const roboticBody =
+  'Local SEO helps dental practices appear in Google Maps. Click "Learn More" to read the details on this page.';
+assert(detectTemplateInstructions(roboticBody).length > 0, "robotic button-instruction text is detected");
+const cleanedRobotic = stripTemplateInstructions(roboticBody);
+assert(!/read the details on this page/i.test(cleanedRobotic), "robotic CTA instruction is stripped from the body");
+assert(/Local SEO helps/.test(cleanedRobotic), "stripping the CTA keeps the real sentence");
+
+// 3. Duplicate sentences / repeated conclusions are detected and removed.
+const dupeBody =
+  "Dental practices in Houston need local SEO. A focused strategy helps patients find you. Dental practices in Houston need local SEO.";
+assert(detectDuplicateSentences(dupeBody).length === 1, "repeated sentence detected");
+assert(
+  (dedupeSentences(dupeBody).match(/Dental practices in Houston need local SEO/g) || []).length === 1,
+  "duplicate sentence removed (kept once)"
+);
+
+// 4. A concise, clean, hashtag-free GBP post with NO body CTA validates READY.
+const cleanGbp = validateGmbPost({
+  content:
+    "Looking for dental SEO near you in Houston? A clear local search presence helps dental practices connect with patients searching nearby. Local SEO improves how a practice appears in Google Search and Maps through location-specific pages, an optimized Business Profile, and consistent business information. The goal is a clearer online presence so prospective patients find accurate, useful information when they need it.",
+  heading: "Looking for dental SEO near you in Houston?",
+  categoryId: GMB_CATEGORY_IDS.INTENT_PROXIMITY,
+  location: "Houston, TX",
+  keywords: { primary: "dental SEO" },
+  business: {},
+});
+assert(cleanGbp.ready === true, "a concise, hashtag-free, CTA-text-free GBP post is READY");
+assert(cleanGbp.charCount < 1000, "a valid GBP post is no longer forced to 1000+ characters");
+
+// 5. A post that still contains hashtags + robotic CTA + duplicate sentence fails.
+const dirtyGbp = validateGmbPost({
+  content:
+    'Looking for dental SEO near you in Houston? Local SEO helps practices appear in Maps. Local SEO helps practices appear in Maps. Click "Learn More" to read the details on this page.\n\n#Houston #HoustonHoustonDentalSEO',
+  heading: "Looking for dental SEO near you in Houston?",
+  categoryId: GMB_CATEGORY_IDS.INTENT_PROXIMITY,
+  location: "Houston, TX",
+  keywords: { primary: "dental SEO" },
+  business: {},
+});
+assert(dirtyGbp.ready === false, "hashtags + robotic CTA + duplicate sentence → NEEDS_REVISION");
+assert(dirtyGbp.issues.some((i) => /hashtag/i.test(i)), "flags the hashtags");
+assert(dirtyGbp.issues.some((i) => /button-instruction/i.test(i)), "flags the robotic CTA text");
+assert(dirtyGbp.issues.some((i) => /repeated sentence/i.test(i)), "flags the duplicate sentence");
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const suiteSrc = fs.readFileSync(path.join(here, "../src/services/autoPosterService.js"), "utf8");
